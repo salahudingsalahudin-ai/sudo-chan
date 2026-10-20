@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import { NextResponse } from 'next/server';
 
 export const runtime = 'nodejs';
 
@@ -8,6 +9,19 @@ const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 type RateLimitBucket = { startedAt: number; count: number };
 const rateLimitBuckets = new Map<string, RateLimitBucket>();
+
+function response(ok: boolean, message: string, status: number) {
+  return NextResponse.json({ ok, message }, { status });
+}
+
+function logFailure(message: string, code?: string) {
+  try {
+    if (code) console.error(`[waitlist] ${message} (${code})`);
+    else console.error(`[waitlist] ${message}`);
+  } catch {
+    // Logging must not prevent the API from returning its response.
+  }
+}
 
 function isRateLimited(ip: string, now = Date.now()) {
   for (const [key, bucket] of Array.from(rateLimitBuckets.entries())) {
@@ -41,49 +55,46 @@ function getSupabase() {
   });
 }
 
-function json(message: string, status: number) {
-  return Response.json({ message }, { status });
-}
-
 export async function POST(request: Request) {
-  let email: string;
-
   try {
-    const body: unknown = await request.json();
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
+      return response(false, 'Please enter a valid email address.', 400);
+    }
+
     const submittedEmail = typeof body === 'object' && body !== null && 'email' in body
       ? (body as { email?: unknown }).email
       : undefined;
 
     if (typeof submittedEmail !== 'string') {
-      return json('Please enter a valid email address.', 400);
+      return response(false, 'Please enter a valid email address.', 400);
     }
 
-    email = submittedEmail.trim().toLowerCase();
+    const email = submittedEmail.trim().toLowerCase();
     if (email.length > 254 || !EMAIL_PATTERN.test(email)) {
-      return json('Please enter a valid email address.', 400);
+      return response(false, 'Please enter a valid email address.', 400);
     }
-  } catch {
-    return json('Please enter a valid email address.', 400);
-  }
 
-  if (isRateLimited(getClientIp(request))) {
-    return json('Too many attempts. Please try again in a minute.', 429);
-  }
+    if (isRateLimited(getClientIp(request))) {
+      return response(false, 'Too many attempts. Please try again in a minute.', 429);
+    }
 
-  try {
     const { error } = await getSupabase().from('waitlist').insert({ email });
 
     if (error?.code === '23505') {
-      return json("You're already on the list.", 409);
-    }
-    if (error) {
-      console.error('[waitlist] Supabase insert failed.');
-      return json("We couldn't add you right now. Please try again shortly.", 500);
+      return response(false, "You're already on the list.", 409);
     }
 
-    return json("You're on the list. We'll be in touch soon.", 201);
+    if (error) {
+      logFailure('Supabase insert failed.', error.code);
+      return response(false, "We couldn't add you right now. Please try again shortly.", 500);
+    }
+
+    return response(true, "You're on the list. We'll be in touch soon.", 200);
   } catch {
-    console.error('[waitlist] Request failed because Supabase is unavailable or misconfigured.');
-    return json("We couldn't add you right now. Please try again shortly.", 500);
+    logFailure('Unexpected waitlist server error.');
+    return response(false, "We couldn't add you right now. Please try again shortly.", 500);
   }
 }

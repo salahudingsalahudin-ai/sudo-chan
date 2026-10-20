@@ -53,21 +53,40 @@ function StaticBot({trackPointer=true}:{trackPointer?:boolean}){
 
 function Waitlist(){
   const [email,setEmail]=useState('');
-  const [state,setState]=useState<{kind:'idle'|'loading'|'success'|'error';message:string}>({kind:'idle',message:''});
+  const [loading,setLoading]=useState(false);
+  const [notice,setNotice]=useState<{kind:'idle'|'success'|'duplicate'|'invalid'|'error';message:string}>({kind:'idle',message:''});
   const submit=async(e:FormEvent<HTMLFormElement>)=>{
     e.preventDefault();
-    setState({kind:'loading',message:''});
+    if(loading)return;
+    setLoading(true);
+    setNotice({kind:'idle',message:''});
+    const controller=new AbortController();
+    const timeoutId=window.setTimeout(()=>controller.abort(),10_000);
     try{
-      const response=await fetch('/api/waitlist',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email})});
-      const result=await response.json().catch(()=>null) as {message?:unknown}|null;
-      if(!response.ok){setState({kind:'error',message:typeof result?.message==='string'?result.message:"We couldn't add you right now. Please try again shortly."});return}
-      setState({kind:'success',message:typeof result?.message==='string'?result.message:"You're on the list. We'll be in touch soon."});
-    }catch{
-      setState({kind:'error',message:"We couldn't reach the waitlist. Please check your connection and try again."});
+      const response=await fetch('/api/waitlist',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email}),signal:controller.signal});
+      let result:{ok?:unknown;message?:unknown}|null=null;
+      try{result=await response.json()}catch{result=null}
+
+      const message=typeof result?.message==='string'?result.message:'';
+      if(response.status===409){setNotice({kind:'duplicate',message:message||"You're already on the list."});return}
+      if(response.status===400){setNotice({kind:'invalid',message:message||'Please enter a valid email address.'});return}
+      if(!response.ok||result?.ok!==true){setNotice({kind:'error',message:message||"We couldn't add you right now. Please try again shortly."});return}
+
+      setNotice({kind:'success',message:message||"You're on the list. We'll be in touch soon."});
+    }catch(error){
+      if(error instanceof Error&&error.name==='AbortError'){
+        setNotice({kind:'error',message:'This is taking longer than expected. Please try again.'});
+      }else{
+        setNotice({kind:'error',message:"We couldn't reach the server. Please try again."});
+      }
+    }finally{
+      window.clearTimeout(timeoutId);
+      setLoading(false);
     }
   };
-  const helper=state.kind==='idle'?'One thoughtful update when she’s ready. Unsubscribe any time.':state.message;
-  return <form onSubmit={submit} className="waitlist glass-panel"><label htmlFor="waitlist-email">A note when it’s time</label><div className="waitlist-row"><input id="waitlist-email" value={email} onChange={e=>setEmail(e.target.value)} type="email" autoComplete="email" placeholder="you@example.com" required disabled={state.kind==='loading'||state.kind==='success'}/><button type="submit" disabled={state.kind==='loading'||state.kind==='success'}>{state.kind==='loading'?'Adding you…':state.kind==='success'?'You’re on the list ✓':'Get early access ↗'}</button></div><small aria-live="polite" className={`form-message ${state.kind}`}>{helper}</small></form>
+  const helper=notice.kind==='idle'?'One thoughtful update when she’s ready. Unsubscribe any time.':notice.message;
+  const complete=notice.kind==='success';
+  return <form onSubmit={submit} className="waitlist glass-panel"><label htmlFor="waitlist-email">A note when it’s time</label><div className="waitlist-row"><input id="waitlist-email" value={email} onChange={e=>setEmail(e.target.value)} type="email" autoComplete="email" placeholder="you@example.com" required disabled={loading||complete}/><button type="submit" disabled={loading||complete}>{loading?'Adding you…':complete?'You’re on the list ✓':'Get early access ↗'}</button></div><small aria-live="polite" role={notice.kind==='error'||notice.kind==='invalid'?'alert':'status'} className={`form-message ${loading?'loading':notice.kind}`}>{loading?'Sending your signup…':helper}</small></form>
 }
 function PrivacyControls(){const [paused,setPaused]=useState(false);const [blocked,setBlocked]=useState(false);return <div className="privacy-controls"><button type="button" aria-pressed={paused} onClick={()=>setPaused(!paused)}><span className={`toggle ${paused?'':'on'}`}/>{paused?'Companion paused':'Pause companion'}</button><button type="button" aria-pressed={blocked} onClick={()=>setBlocked(!blocked)}><span className={`toggle ${blocked?'on':''}`}/>{blocked?'Apps blocked':'Block apps'}</button><p>{paused?'PAUSED · YOUR SPACE IS YOURS':blocked?'APP BLOCKLIST ACTIVE':'LOCAL FIRST · ON YOUR DEVICE'}</p></div>}
 
