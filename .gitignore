@@ -1,0 +1,17 @@
+# Local environment files may contain private keys.
+.env*
+
+# Next.js build output
+.next/
+out/
+build/
+
+# Dependencies
+node_modules/
+
+# Local tooling and logs
+*.tsbuildinfo
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
