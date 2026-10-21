@@ -11,3 +11,12 @@
 .glass-panel{backdrop-filter:blur(12px)}
 .scroll-progress{will-change:transform}
 .magnetic-target{will-change:translate}
+.scene-stage .sudo-chan-canvas{touch-action:pan-y}
+.scene-stage .sudo-chan-canvas canvas{touch-action:pan-y}
+.bot-speech{position:absolute;z-index:5;top:27%;left:50%;width:max-content;max-width:min(360px,calc(100vw - 40px));transform:translateX(-50%);padding:12px 16px;border:1px solid #38e8ff66;border-radius:16px;background:#071b2ae8;color:#effcff;box-shadow:0 8px 32px #03111d2e;font-size:12px;line-height:1.5;text-align:center;pointer-events:none}
+.bot-speech::after{content:"";position:absolute;left:50%;bottom:-6px;width:10px;height:10px;transform:translateX(-50%) rotate(45deg);border-right:1px solid #38e8ff66;border-bottom:1px solid #38e8ff66;background:#071b2a}
+.static-bot-mouth{position:absolute;left:115px;top:161px;width:20px;height:5px;border-bottom:2px solid #53727b;border-radius:50%;transition:height .18s ease}
+.static-bot-mouth.is-happy{height:12px;border-bottom-width:3px}
+@media(max-width:760px){.bot-speech{top:23%;font-size:11px}}
+.journey-scene{pointer-events:none}
+.journey-scene .scene-copy,.journey-scene .scroll-cue,.journey-scene .site-footer{pointer-events:auto}
