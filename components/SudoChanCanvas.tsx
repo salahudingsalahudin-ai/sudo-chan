@@ -7,6 +7,7 @@ import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import type { KeyboardEvent as ReactKeyboardEvent, MutableRefObject } from 'react';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import type { BotMood } from '@/content';
 import {
   BLINK_CLOSE_DURATION_MS,
   BLINK_OPEN_DURATION_MS,
@@ -21,6 +22,7 @@ import {
 type EyeSide=0|1;
 export type BotInteractions={
   reducedMotion:boolean;
+  mood:BotMood|null;
   sleeping:boolean;
   redness:number;
   sleepingRef:MutableRefObject<boolean>;
@@ -51,7 +53,7 @@ function FallbackBot({progress,pointer,interactions}:SceneProps){
     if(eyes.current){eyes.current.position.x=THREE.MathUtils.damp(eyes.current.position.x,ptr.x*.018,7,dt);eyes.current.position.y=THREE.MathUtils.damp(eyes.current.position.y,-ptr.y*.014,7,dt)}
     if(pupils.current){pupils.current.position.x=THREE.MathUtils.damp(pupils.current.position.x,ptr.x*.065,9,dt);pupils.current.position.y=THREE.MathUtils.damp(pupils.current.position.y,-ptr.y*.045,9,dt)}
     if(halo.current)halo.current.rotation.z=state.clock.elapsedTime*.16+targetX*.3;
-    const happy=performance.now()<interactions.happyUntilRef.current;const mood=p>.63&&p<.77||happy?'happy':p>.28&&p<.48?'curious':p>.48&&p<.62?'worried':'calm';const hex=mood==='happy'?'#62f0ce':mood==='worried'?'#ff9c86':'#38e8ff';moodColor.current.lerp(new THREE.Color(hex),Math.min(1,dt*2.5));if(mouth.current){mouth.current.rotation.z=happy?Math.PI:0;const material=mouth.current.material as THREE.MeshStandardMaterial;material.color.set(happy?HAPPY_MOUTH_COLOR:'#6aefff');material.emissive.set(happy?HAPPY_MOUTH_GLOW:'#000000');material.emissiveIntensity=happy?2.5:0}
+    const happy=performance.now()<interactions.happyUntilRef.current||interactions.mood==='Happy';const mood=interactions.mood?.toLowerCase()??(p>.63&&p<.77||happy?'happy':p>.28&&p<.48?'curious':p>.48&&p<.62?'worried':'calm');const hex=mood==='happy'?'#62f0ce':mood==='worried'?'#ff9c86':mood==='curious'?'#b58cff':'#38e8ff';moodColor.current.lerp(new THREE.Color(hex),Math.min(1,dt*2.5));if(mouth.current){mouth.current.rotation.z=happy?Math.PI:0;const material=mouth.current.material as THREE.MeshStandardMaterial;material.color.set(happy?HAPPY_MOUTH_COLOR:'#6aefff');material.emissive.set(happy?HAPPY_MOUTH_GLOW:'#000000');material.emissiveIntensity=happy?2.5:0}
     if(core.current){const orb=core.current.children[0]?.children[0] as THREE.Mesh|undefined;const mat=orb?.material as THREE.MeshStandardMaterial|undefined;if(mat){mat.color.copy(moodColor.current);mat.emissive.copy(moodColor.current)}}
     if(state.clock.elapsedTime>nextBlink.current){blink.current=1;nextBlink.current=state.clock.elapsedTime+2.3+Math.random()*4.8}
     blink.current=THREE.MathUtils.damp(blink.current,0,EYE_BLINK_DAMPING,dt);const eyeMeshes=[eyeL.current,eyeR.current];for(let side=0;side<2;side++){const sideIndex=side as EyeSide;const amount=interactions.eyeBlinksRef.current[side];if(!interactions.reducedMotion&&!interactions.sleeping&&interactions.eyeBlinkDirectionsRef.current[side]!==0){const closing=interactions.eyeBlinkDirectionsRef.current[side]===1;const duration=interactions.eyeBlinkDurationsRef.current[side];const next=amount+(closing?1:-1)*(dt*1000)/duration;interactions.eyeBlinksRef.current[side]=THREE.MathUtils.clamp(next,0,1);if(next>=1)interactions.eyeBlinkDirectionsRef.current[side]=-1;if(next<=0)interactions.eyeBlinkDirectionsRef.current[side]=0}const eyeScale=interactions.sleeping?0:1-Math.max(blink.current,interactions.eyeBlinksRef.current[side])*.98;const eyeMesh=eyeMeshes[side];if(eyeMesh){eyeMesh.scale.y=eyeScale;const material=eyeMesh.material as THREE.MeshBasicMaterial;material.color.copy(eyeWhite).lerp(eyeRed,interactions.rednessRef.current)}}

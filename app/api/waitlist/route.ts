@@ -55,6 +55,33 @@ function getSupabase() {
   });
 }
 
+export async function GET() {
+  try {
+    const { count, error } = await getSupabase()
+      .from('waitlist')
+      .select('*', { count: 'exact', head: true });
+
+    if (error || count === null) {
+      logFailure('Waitlist count query failed.', error?.code);
+      return NextResponse.json(
+        { count: null },
+        { status: 503, headers: { 'Cache-Control': 'no-store' } },
+      );
+    }
+
+    return NextResponse.json(
+      { count },
+      { headers: { 'Cache-Control': 'no-store' } },
+    );
+  } catch {
+    logFailure('Unexpected waitlist count error.');
+    return NextResponse.json(
+      { count: null },
+      { status: 503, headers: { 'Cache-Control': 'no-store' } },
+    );
+  }
+}
+
 export async function POST(request: Request) {
   try {
     let body: unknown;

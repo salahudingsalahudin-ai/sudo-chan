@@ -1,5 +1,7 @@
 export const SUDO_CHAN = 'Sudo-chan';
 
+export type BotMood = 'Calm' | 'Curious' | 'Worried' | 'Happy';
+
 export const content = {
   brand: SUDO_CHAN,
   intro: { eyebrow: 'A little presence for the hard parts', title: `Meet ${SUDO_CHAN}`, line: 'Tum kaam karo. Main dekh rahi hoon.' },
@@ -18,5 +20,75 @@ export const content = {
     { title: 'Context memory', body: 'Keeps the thread while you work.' },
     { title: 'Privacy guard', body: 'You choose when she can look.' },
   ],
+  roundC: {
+    moods: {
+      title: 'Meet the moods',
+      description: 'Choose a mood and see Sudo-chan change.',
+      options: [
+        { name: 'Calm' as BotMood, description: 'A steady presence, right here.' },
+        { name: 'Curious' as BotMood, description: 'Noticing a new possibility.' },
+        { name: 'Worried' as BotMood, description: 'Something may need a closer look.' },
+        { name: 'Happy' as BotMood, description: 'A little win is worth a smile.' },
+      ],
+    },
+    stuckDetector: {
+      title: 'Try the stuck detector',
+      preview: 'PREVIEW · A LOCAL, INTERACTIVE DEMO',
+      localDemo: 'LOCAL DEMO',
+      description: 'A tiny typo can make a familiar loop feel endless. This example stays in your browser.',
+      start: "I'm stuck",
+      waiting: 'Taking a closer look…',
+      elapsed: 'Time looking',
+      timerUnit: 'seconds',
+      codeLabel: 'draft.ts · example only',
+      codeBefore: 'const greeting = "hello";',
+      typo: 'console.log(greetng);',
+      offerBubble: 'Want me to change `greetng` to `greeting`?',
+      fix: 'Fix the typo',
+      fixed: 'console.log(greeting);',
+      fixedStatus: 'Preview fixed · back to your work',
+      notStarted: 'This local preview has not started.',
+      fixedBubble: 'There we go. Back to your idea.',
+    },
+    quietDay: {
+      number: '08 — A QUIET DAY',
+      title: 'A quiet day with Sudo-chan',
+      description: 'A small, considered rhythm. This is a preview of the idea, not a released desktop app.',
+      moments: [
+        { title: 'Watching quietly', body: 'There when you want a little company.', icon: 'moon' },
+        { title: 'Noticing a snag', body: 'A gentle nudge when the same thing repeats.', icon: 'spark' },
+        { title: 'Helping you through', body: 'One small suggestion, only when invited.', icon: 'arrow' },
+        { title: 'Staying private', body: 'You stay in control of what is shared.', icon: 'lock' },
+      ],
+    },
+    useCases: {
+      number: '09 — FOR YOUR KIND OF WORK',
+      title: 'Made for people who build',
+      description: 'Different kinds of making. The same calm company.',
+      cards: [
+        { title: 'Coders', body: 'A second set of eyes for the error that keeps coming back.', icon: '</>' },
+        { title: 'Designers', body: 'A quiet companion through drafts, details, and fresh starts.', icon: '◌' },
+        { title: 'Students', body: 'A little encouragement when the next step feels far away.', icon: '↗' },
+      ],
+    },
+    faq: {
+      number: '10 — GOOD QUESTIONS',
+      title: 'Questions people ask',
+      description: 'We are still building. Here is what we can say honestly today.',
+      items: [
+        { question: 'What does she see?', answer: 'The product is still in development. The intended experience is to notice useful on-screen patterns, with clear controls over when that can happen. We will share specific details before release.' },
+        { question: 'Is my screen stored?', answer: 'Sudo-chan is not released yet, so there is no live desktop app collecting your screen. Our goal is to keep sensitive processing local and give you control; the final implementation details will be published before launch.' },
+        { question: 'Can I pause her?', answer: 'Pausing is part of the experience we are designing. This page is a preview, not the desktop app.' },
+        { question: 'Which computers will she work on?', answer: 'Supported computers have not been finalized. We will announce platform requirements when they are confirmed.' },
+        { question: 'When is it ready?', answer: 'The desktop app is not released yet, and we do not have a launch date to promise. Join the waitlist for a note when there is real news.' },
+      ],
+    },
+    delights: {
+      words: ['take your time', 'one thing at a time', 'you can pause', 'made with care'],
+      counter: 'People on the waitlist',
+      counterUnavailable: 'The waitlist count is temporarily unavailable.',
+      joinLink: 'Join the waitlist',
+    },
+  },
   footer: 'Made with care, for the hard parts.',
 };
