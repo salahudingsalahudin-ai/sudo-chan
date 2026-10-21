@@ -1,5 +1,6 @@
 # Local environment files may contain private keys.
 .env*
+!.env.example
 
 # Next.js build output
 .next/

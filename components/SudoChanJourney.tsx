@@ -88,29 +88,36 @@ function Waitlist(){
   const complete=notice.kind==='success';
   return <form onSubmit={submit} className="waitlist glass-panel"><label htmlFor="waitlist-email">A note when it’s time</label><div className="waitlist-row"><input id="waitlist-email" value={email} onChange={e=>setEmail(e.target.value)} type="email" autoComplete="email" placeholder="you@example.com" required disabled={loading||complete}/><button type="submit" disabled={loading||complete}>{loading?'Adding you…':complete?'You’re on the list ✓':'Get early access ↗'}</button></div><small aria-live="polite" role={notice.kind==='error'||notice.kind==='invalid'?'alert':'status'} className={`form-message ${loading?'loading':notice.kind}`}>{loading?'Sending your signup…':helper}</small></form>
 }
-function PrivacyControls(){const [paused,setPaused]=useState(false);const [blocked,setBlocked]=useState(false);return <div className="privacy-controls"><button type="button" aria-pressed={paused} onClick={()=>setPaused(!paused)}><span className={`toggle ${paused?'':'on'}`}/>{paused?'Companion paused':'Pause companion'}</button><button type="button" aria-pressed={blocked} onClick={()=>setBlocked(!blocked)}><span className={`toggle ${blocked?'on':''}`}/>{blocked?'Apps blocked':'Block apps'}</button><p>{paused?'PAUSED · YOUR SPACE IS YOURS':blocked?'APP BLOCKLIST ACTIVE':'LOCAL FIRST · ON YOUR DEVICE'}</p></div>}
+function PrivacyControls(){const [paused,setPaused]=useState(false);const [blocked,setBlocked]=useState(false);return <div className="privacy-controls"><button type="button" aria-pressed={paused} onClick={()=>setPaused(!paused)}><span className={`toggle ${paused?'':'on'}`}/>{paused?'Preview: companion paused':'Preview: pause companion'}</button><button type="button" aria-pressed={blocked} onClick={()=>setBlocked(!blocked)}><span className={`toggle ${blocked?'on':''}`}/>{blocked?'Preview: apps blocked':'Preview: block apps'}</button><p>PREVIEW OF THE DESKTOP APP</p></div>}
 
 export default function SudoChanJourney(){
-  const journey=useRef<HTMLDivElement>(null);const progress=useRef(0);const pointer=useRef({x:0,y:0,vx:0,vy:0});const reduced=useReducedMotion();const [sceneIndex,setSceneIndex]=useState(0);const [loaded,setLoaded]=useState(false);const [canWebGL,setCanWebGL]=useState<boolean|null>(null);const [progressValue,setProgressValue]=useState(0);
+  const journey=useRef<HTMLDivElement>(null);const progress=useRef(0);const pointer=useRef({x:0,y:0,vx:0,vy:0});const reduced=useReducedMotion();const [sceneIndex,setSceneIndex]=useState(0);const [loaded,setLoaded]=useState(false);const [canWebGL,setCanWebGL]=useState<boolean|null>(null);const [progressValue,setProgressValue]=useState(0);const currentYear = new Date().getFullYear();
   useEffect(()=>{if(matchMedia('(pointer:coarse)').matches){setCanWebGL(false);return}try{const canvas=document.createElement('canvas');const context=canvas.getContext('webgl2')||canvas.getContext('webgl');if(context){context.getExtension('WEBGL_lose_context')?.loseContext();setCanWebGL(true)}else setCanWebGL(false)}catch{setCanWebGL(false)}},[]);
   useEffect(()=>{gsap.registerPlugin(ScrollTrigger);const lenis=reduced?null:new Lenis({duration:1.1,easing:t=>Math.min(1,1.001-Math.pow(2,-10*t)),smoothWheel:true});let ticker:((time:number)=>void)|null=null;if(lenis){lenis.on('scroll',ScrollTrigger.update);ticker=(time:number)=>lenis.raf(time*1000);gsap.ticker.add(ticker);gsap.ticker.lagSmoothing(0)}const ctx=gsap.context(()=>{const root=journey.current;if(!root)return;ScrollTrigger.create({trigger:root,start:'top top',end:'bottom bottom',onUpdate:self=>{progress.current=reduced?0:self.progress;setProgressValue(Math.round(self.progress*100)/100);const next=Math.min(6,Math.floor(self.progress*7));setSceneIndex(v=>v===next?v:next)}});if(!reduced){gsap.to(root,{backgroundColor:'#04101c',ease:'none',scrollTrigger:{trigger:root,start:'18% top',end:'49% top',scrub:true}});gsap.to(root,{backgroundColor:'#f5f5f7',ease:'none',scrollTrigger:{trigger:root,start:'78% top',end:'96% top',scrub:true}})}},journey);const move=(e:PointerEvent)=>{const x=(e.clientX/innerWidth-.5)*2,y=(e.clientY/innerHeight-.5)*2;pointer.current.vx=x-pointer.current.x;pointer.current.vy=y-pointer.current.y;pointer.current.x=x;pointer.current.y=y};window.addEventListener('pointermove',move,{passive:true});return()=>{ctx.revert();if(ticker)gsap.ticker.remove(ticker);lenis?.destroy();window.removeEventListener('pointermove',move)}},[reduced]);
   return <main id="top" className={`journey ${reduced?'reduced-motion':''} ${!reduced&&sceneIndex>0&&sceneIndex<6?'is-dark-world':''}`} ref={journey}>
+    <a href="#page-content" className="skip-link">Skip to content</a>
+    <div id="page-content" />
     <div className="scene-stage" aria-hidden="true">{reduced?<StaticBot trackPointer={false}/>:canWebGL===false?<StaticBot/>:canWebGL===true?<WebGLBoundary fallback={<StaticBot/>}><SudoChanCanvas progress={progress} pointer={pointer} onReady={()=>setLoaded(true)}/></WebGLBoundary>:null}<div className="stage-hud"/><div className="stage-vignette"/></div>
     <header className="site-nav"><a href="#top" className="wordmark"><span>S</span> {content.brand}</a><span className="nav-note">A QUIET KIND OF COMPANY</span><a className="nav-link" href="#join">Early access <i>↗</i></a></header>
     {!loaded&&<Loader/>}
-    {content.scenes.map((item,i)=><section key={item.id} id={item.id==='join'?'join':item.id} className={`journey-scene scene-${item.id} ${sceneIndex===i?'is-current':''}`} aria-label={item.label}>
-      <div className={`scene-copy ${i%2===0?'align-left':'align-right'}`}>
-        <span className="scene-index"><i/>{item.number}</span><h1>{item.title.split('\n').map((line,j)=><span key={j}>{line}</span>)}</h1><p>{item.body}</p>
-        {i===0&&<span className="intro-quote">“{content.intro.line}”</span>}
-        {i===2&&<div className="feature-callouts">{content.core.map((c,n)=><div key={c.title} className={`callout callout-${n}`}><i>{String(n+1).padStart(2,'0')}</i><b>{c.title}</b><span>{c.body}</span></div>)}</div>}
-        {i===3&&<div className="exploded-labels"><span>01 / SHELL</span><span>02 / VISOR</span><span>03 / CORE</span><span>04 / SENSORS</span></div>}
-        {i===4&&<div className={`demo-status ${progressValue>.69?'resolved':''}`}><span/>{progressValue>.69?'Back in your flow':'Same error · 08:42'}</div>}
-        {i===5&&<PrivacyControls/>}
-        {i===6&&<Waitlist/>}
-      </div>
-      {i===0&&<a className="scroll-cue" href="#inside"><span>SCROLL TO EXPLORE</span><i>↓</i></a>}
-      {i===6&&<footer className="site-footer"><span>© 2025 SUDO-CHAN</span><span>{content.footer}</span><a href="#top">BACK TO TOP ↑</a></footer>}
-    </section>)}
+    {content.scenes.map((item,i)=>{
+      const HeadingTag = i === 0 ? 'h1' : 'h2';
+      return <section key={item.id} id={item.id==='join'?'join':item.id} className={`journey-scene scene-${item.id} ${sceneIndex===i?'is-current':''}`} aria-label={item.label}>
+        <div className={`scene-copy ${i%2===0?'align-left':'align-right'}`}>
+          <span className="scene-index"><i/>{item.number}</span>
+          <HeadingTag>{item.title.split('\n').map((line,j)=><span key={j}>{line}</span>)}</HeadingTag>
+          <p>{item.body}</p>
+          {i===0&&<span className="intro-quote">“{content.intro.line}”</span>}
+          {i===2&&<div className="feature-callouts">{content.core.map((c,n)=><div key={c.title} className={`callout callout-${n}`}><i>{String(n+1).padStart(2,'0')}</i><b>{c.title}</b><span>{c.body}</span></div>)}</div>}
+          {i===3&&<div className="exploded-labels"><span>01 / SHELL</span><span>02 / VISOR</span><span>03 / CORE</span><span>04 / SENSORS</span></div>}
+          {i===4&&<div className={`demo-status ${progressValue>.69?'resolved':''}`}><span/>{progressValue>.69?'Back in your flow':'Same error · 08:42'}</div>}
+          {i===5&&<PrivacyControls/>}
+          {i===6&&<Waitlist/>}
+        </div>
+        {i===0&&<a className="scroll-cue" href="#inside"><span>SCROLL TO EXPLORE</span><i>↓</i></a>}
+        {i===6&&<footer className="site-footer"><span>© {currentYear} SUDO-CHAN</span><span>{content.footer}</span><a href="#top">BACK TO TOP ↑</a></footer>}
+      </section>;
+    })}
     <CursorTrail/><CustomCursor/><div className="scroll-progress" style={{transform:`scaleX(${progressValue})`}}/><div className="scene-counter">{String(sceneIndex+1).padStart(2,'0')} <i>/</i> 07</div>
   </main>
 }
