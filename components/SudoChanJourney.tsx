@@ -33,13 +33,13 @@ const SudoChanCanvas=dynamic(()=>import('./SudoChanCanvas'),{ssr:false});
 const clamp=(n:number,a=0,b=1)=>Math.min(b,Math.max(a,n));
 
 function CustomCursor(){
-  const core=useRef<HTMLSpanElement>(null),lens=useRef<HTMLSpanElement>(null),ring=useRef<HTMLSpanElement>(null);const [click,setClick]=useState(0);
-  useEffect(()=>{if(matchMedia('(pointer:coarse)').matches||matchMedia('(prefers-reduced-motion: reduce)').matches)return;let frame=0,x=-100,y=-100,tx=-100,ty=-100;let activeTarget:HTMLElement|null=null;const clearMagnet=()=>{if(activeTarget){activeTarget.style.removeProperty('--magnet-x');activeTarget.style.removeProperty('--magnet-y');activeTarget.classList.remove('magnetic-target');activeTarget=null}};
-    const tick=()=>{x+=(tx-x)*.19;y+=(ty-y)*.19;for(const node of [core.current,lens.current,ring.current])if(node){node.style.left=`${x}px`;node.style.top=`${y}px`}if(Math.abs(tx-x)>.1||Math.abs(ty-y)>.1)frame=requestAnimationFrame(tick);else frame=0};
-    const move=(e:PointerEvent)=>{tx=e.clientX;ty=e.clientY;if(!frame)frame=requestAnimationFrame(tick);const stage=document.querySelector<HTMLElement>('.scene-stage');stage?.style.setProperty('--cursor-x',`${e.clientX}px`);stage?.style.setProperty('--cursor-y',`${e.clientY}px`);if(e.pointerType!=='mouse')return;const element=e.target instanceof Element?e.target.closest<HTMLElement>('a,button,input'):null;if(element!==activeTarget){clearMagnet();activeTarget=element;if(activeTarget)activeTarget.classList.add('magnetic-target')}if(activeTarget){const rect=activeTarget.getBoundingClientRect();activeTarget.style.setProperty('--magnet-x',`${clamp((e.clientX-rect.left-rect.width/2)*.18,-9,9)}px`);activeTarget.style.setProperty('--magnet-y',`${clamp((e.clientY-rect.top-rect.height/2)*.18,-9,9)}px`)}ring.current?.classList.toggle('is-active',Boolean(element))};
-    const down=(e:PointerEvent)=>{if(e.pointerType==='mouse')setClick(v=>v+1)};
-    window.addEventListener('pointermove',move,{passive:true});window.addEventListener('pointerdown',down);return()=>{if(frame)cancelAnimationFrame(frame);clearMagnet();window.removeEventListener('pointermove',move);window.removeEventListener('pointerdown',down)}
-  },[]);return <><span ref={core} className="cursor-core"/><span ref={lens} key={click} className="cursor-lens"/><span ref={ring} className="cursor-magnet"/></>
+  const core=useRef<HTMLSpanElement>(null),ring=useRef<HTMLSpanElement>(null);
+  useEffect(()=>{if(matchMedia('(pointer:coarse)').matches||matchMedia('(prefers-reduced-motion: reduce)').matches)return;let frame=0,lastFrame=0,x=-100,y=-100,tx=-100,ty=-100,rx=-100,ry=-100;let activeTarget:HTMLElement|null=null;const clearMagnet=()=>{if(activeTarget){activeTarget.style.removeProperty('--magnet-x');activeTarget.style.removeProperty('--magnet-y');activeTarget.classList.remove('magnetic-target');activeTarget=null}};
+    const tick=(now:number)=>{frame=0;const dt=Math.min(40,now-lastFrame||16);lastFrame=now;const follow=1-Math.exp(-dt/42),lag=1-Math.exp(-dt/58);x+=(tx-x)*follow;y+=(ty-y)*follow;rx+=(tx-rx)*lag;ry+=(ty-ry)*lag;if(core.current)core.current.style.transform=`translate3d(${x}px,${y}px,0) translate(-50%,-50%)`;if(ring.current)ring.current.style.transform=`translate3d(${rx}px,${ry}px,0) translate(-50%,-50%)`;if(Math.abs(tx-x)>.08||Math.abs(ty-y)>.08||Math.abs(tx-rx)>.08||Math.abs(ty-ry)>.08)frame=requestAnimationFrame(tick);else{core.current?.classList.remove('is-moving');ring.current?.classList.remove('is-moving')}};
+    const move=(e:PointerEvent)=>{if(e.pointerType!=='mouse')return;tx=e.clientX;ty=e.clientY;core.current?.classList.add('is-moving');ring.current?.classList.add('is-moving');if(!frame)frame=requestAnimationFrame(tick);const element=e.target instanceof Element?e.target.closest<HTMLElement>('a,button,input'):null;if(element!==activeTarget){clearMagnet();activeTarget=element;if(activeTarget)activeTarget.classList.add('magnetic-target')}if(activeTarget){const rect=activeTarget.getBoundingClientRect();activeTarget.style.setProperty('--magnet-x',`${clamp((e.clientX-rect.left-rect.width/2)*.06,-3,3)}px`);activeTarget.style.setProperty('--magnet-y',`${clamp((e.clientY-rect.top-rect.height/2)*.06,-3,3)}px`)}ring.current?.classList.toggle('is-active',Boolean(element))};
+    const down=(e:PointerEvent)=>{if(e.pointerType==='mouse')ring.current?.classList.add('is-pressed')};const up=()=>ring.current?.classList.remove('is-pressed');
+    window.addEventListener('pointermove',move,{passive:true});window.addEventListener('pointerdown',down);window.addEventListener('pointerup',up);return()=>{if(frame)cancelAnimationFrame(frame);clearMagnet();window.removeEventListener('pointermove',move);window.removeEventListener('pointerdown',down);window.removeEventListener('pointerup',up)}
+  },[]);return <><span ref={core} className="cursor-core"/><span ref={ring} className="cursor-magnet"/></>
 }
 
 function CursorTrail(){
@@ -163,6 +163,6 @@ export default function SudoChanJourney(){
         {i===6&&<footer className="site-footer"><span>© {currentYear} SUDO-CHAN</span><span>{content.footer}</span><a href="#top">BACK TO TOP ↑</a></footer>}
       </section>;
     })}
-    <CursorTrail/><CustomCursor/><div className="scroll-progress" ref={progressBar}/><div className="scene-counter">{String(chapter).padStart(2,'0')} <i>/</i> 10</div>
+    <CustomCursor/><div className="scroll-progress" ref={progressBar}/><div className="scene-counter">{String(chapter).padStart(2,'0')} <i>/</i> 10</div>
   </main><RoundCSections onSectionChange={onSectionChange} reducedMotion={Boolean(reduced)}/></>
 }

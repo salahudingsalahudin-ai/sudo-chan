@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { PointerEvent, ReactNode } from 'react';
+import gsap from 'gsap';
+import { ScrollTrigger } from 'gsap/ScrollTrigger';
 import { content } from '@/content';
 import type { BotMood } from '@/content';
 
@@ -9,8 +11,15 @@ const STUCK_AUTO_START_MS = 6_000;
 const STUCK_OFFER_AFTER_SECONDS = 3;
 const COUNT_ENDPOINT = '/api/waitlist';
 const REVEAL_ROOT_MARGIN = '280px 0px';
+const STORY_MOUNT_ROOT_MARGIN = '2400px 0px';
+const STORY_SCROLL_VIEWPORTS = 3.5;
+const STORY_ENTRANCE_DURATION = 1.25;
+const STORY_STEP_DURATION = 0.9;
+const CARD_REVEAL_DURATION = 0.8;
+const CARD_REVEAL_STAGGER = 0.15;
+const SCENE_LOOP_DURATION_MS = 5_600;
 
-export function LazySlot({ children, minHeight = 150 }: { children: ReactNode; minHeight?: number }) {
+export function LazySlot({ children, minHeight = 150, onMount, rootMargin = REVEAL_ROOT_MARGIN }: { children: ReactNode; minHeight?: number; onMount?: () => void; rootMargin?: string }) {
   const slot = useRef<HTMLDivElement>(null);
   const [mounted, setMounted] = useState(false);
 
@@ -20,11 +29,12 @@ export function LazySlot({ children, minHeight = 150 }: { children: ReactNode; m
     const observer = new IntersectionObserver(([entry]) => {
       if (!entry.isIntersecting) return;
       setMounted(true);
+      onMount?.();
       observer.disconnect();
-    }, { rootMargin: REVEAL_ROOT_MARGIN });
+    }, { rootMargin });
     observer.observe(element);
     return () => observer.disconnect();
-  }, []);
+  }, [onMount, rootMargin]);
 
   return <div ref={slot} className="round-c-lazy-slot" style={{ minHeight }}>
     {mounted ? children : <span className="round-c-placeholder" aria-hidden="true" />}
@@ -32,7 +42,7 @@ export function LazySlot({ children, minHeight = 150 }: { children: ReactNode; m
 }
 
 function useReveal(onEnter: () => void) {
-  const ref = useRef<HTMLElement>(null);
+  const ref = useRef<HTMLElement | null>(null);
   const [visible, setVisible] = useState(false);
 
   useEffect(() => {
@@ -172,6 +182,63 @@ function MomentIcon({ name }: { name: string }) {
   </svg>;
 }
 
+type BuilderCard = typeof content.roundC.useCases.cards[number];
+
+function MiniScene({ card, reducedMotion }: { card: BuilderCard; reducedMotion: boolean }) {
+  const [started, setStarted] = useState(false);
+  const [visible, setVisible] = useState(false);
+  const scene = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const element = scene.current;
+    if (!element) return;
+    if (reducedMotion) {
+      setVisible(false);
+      return;
+    }
+    const observer = new IntersectionObserver(([entry]) => {
+      setVisible(entry.isIntersecting);
+      if (entry.isIntersecting) setStarted(true);
+    }, { threshold: 0.15 });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [reducedMotion]);
+
+  const sceneClass = `round-c-mini-scene round-c-mini-${card.title.toLowerCase()}${started && !reducedMotion ? ' is-started' : ''}${visible && !reducedMotion ? ' is-visible' : ''}${reducedMotion ? ' is-static' : ''}`;
+
+  return <div ref={scene} className={sceneClass} role="img" aria-label={card.sceneLabel}>
+    <span className="round-c-preview-label">{card.preview}</span>
+    <div className="round-c-mini-art" aria-hidden="true">
+      {card.title === 'Coders' && <div className="round-c-mini-code">
+        <span className="round-c-mini-line-number">01</span><span className="round-c-mini-code-line">{card.sceneLines?.[0]}</span>
+        <span className="round-c-mini-line-number">02</span><span className="round-c-mini-code-line">{card.sceneLines?.[1]}</span>
+        <span className="round-c-mini-line-number">03</span><span className="round-c-mini-code-line">{card.sceneLines?.[2]}</span>
+        <span className="round-c-mini-line-number">04</span><span className="round-c-mini-code-line"><span className="round-c-code-error">{card.sceneLines?.[3]}</span><i className="round-c-mini-caret"/></span>
+        <span className="round-c-mini-hint">{card.sceneHint}</span>
+      </div>}
+      {card.title === 'Designers' && <div className="round-c-mini-design">
+        <svg viewBox="0 0 190 94" focusable="false">
+          <path className="round-c-design-guide round-c-design-guide-v" d="M95 5v84"/>
+          <path className="round-c-design-guide round-c-design-guide-h" d="M8 47h174"/>
+          <rect className="round-c-design-frame" x="52" y="17" width="86" height="60" rx="5"/>
+          <path className="round-c-design-detail" d="M63 29h27M63 38h53M63 55h19M63 64h39"/>
+        </svg>
+        <div className="round-c-color-dots"><i/><i/><i/></div>
+        <span className="round-c-mini-hint">{card.sceneHint}</span>
+      </div>}
+      {card.title === 'Students' && <div className="round-c-mini-notes">
+        <span className="round-c-note-line round-c-note-heading"/>
+        {card.sceneNotes?.map((note, index) => <span className="round-c-note-row" key={note}>
+          <i className="round-c-note-check"/>
+          <b className={`round-c-note-text round-c-note-text-${index + 1}`}>{note}</b>
+        </span>)}
+        <span className="round-c-note-progress"><i/></span>
+        <span className="round-c-mini-hint">{card.sceneHint}</span>
+      </div>}
+    </div>
+  </div>;
+}
+
 function WaitlistCount() {
   const [count, setCount] = useState<number | null>(null);
   useEffect(() => {
@@ -208,23 +275,218 @@ export default function RoundCSections({
   const day = useReveal(enterDay);
   const useCases = useReveal(enterUseCases);
   const faq = useReveal(enterFaq);
-  const dayTitle = useTitleParallax(reducedMotion);
-  const casesTitle = useTitleParallax(reducedMotion);
+  const dayTitle = useRef<HTMLHeadingElement>(null);
+  const casesTitle = useRef<HTMLHeadingElement>(null);
   const faqTitle = useTitleParallax(reducedMotion);
+  const storySection = useRef<HTMLElement | null>(null);
+  const storyCards = useRef<Array<HTMLElement | null>>([]);
+  const storyProgress = useRef<HTMLSpanElement>(null);
+  const storyCounter = useRef<HTMLSpanElement>(null);
+  const builderGrid = useRef<HTMLDivElement>(null);
+  const builderCards = useRef<Array<HTMLDivElement | null>>([]);
+  const [dayReady, setDayReady] = useState(false);
+  const [buildersReady, setBuildersReady] = useState(false);
+  const markDayReady = useCallback(() => setDayReady(true), []);
+  const markBuildersReady = useCallback(() => setBuildersReady(true), []);
+  const setStoryRef = useCallback((node: HTMLElement | null) => {
+    day.ref.current = node;
+    storySection.current = node;
+  }, [day.ref]);
+
+  useEffect(() => {
+    if (!dayReady) return;
+    gsap.registerPlugin(ScrollTrigger);
+    const root = storySection.current?.parentElement;
+    if (!root) return;
+    let active = true;
+    let media: gsap.MatchMedia | null = null;
+    const refresh = () => { if (active) ScrollTrigger.refresh(); };
+    const context = gsap.context(() => {
+      media = gsap.matchMedia();
+      media.add({
+        desktop: '(min-width: 768px) and (pointer: fine)',
+        reduced: '(prefers-reduced-motion: reduce)',
+      }, conditions => {
+        if (conditions.conditions?.reduced) return;
+
+        const moments = storyCards.current.filter((card): card is HTMLElement => card !== null);
+        const titleTweens = [dayTitle.current]
+          .filter((title): title is HTMLHeadingElement => title !== null);
+
+        titleTweens.forEach(title => gsap.fromTo(title,
+          { opacity: 0.78, scale: 0.985 },
+          {
+            opacity: 1,
+            scale: 1,
+            ease: 'none',
+            scrollTrigger: { trigger: title, start: 'top 88%', end: 'top 48%', scrub: true },
+          },
+        ));
+
+        if (!conditions.conditions?.desktop || !storySection.current) {
+          gsap.fromTo(moments,
+            { opacity: 0, y: 40, scale: 0.94 },
+            {
+              opacity: 1,
+              y: 0,
+              scale: 1,
+              duration: CARD_REVEAL_DURATION,
+              stagger: CARD_REVEAL_STAGGER,
+              ease: 'power3.out',
+              scrollTrigger: { trigger: storySection.current, start: 'top 82%', once: true },
+            },
+          );
+          return;
+        }
+
+        gsap.set(moments, { opacity: 0.28, scale: 0.9, transformOrigin: 'center center' });
+        const storyStart = STORY_ENTRANCE_DURATION;
+        const timeline = gsap.timeline({
+          scrollTrigger: {
+            trigger: storySection.current,
+            start: 'top top',
+            end: () => `+=${window.innerHeight * STORY_SCROLL_VIEWPORTS}`,
+            pin: true,
+            pinSpacing: true,
+            scrub: 0.65,
+            anticipatePin: 1,
+            invalidateOnRefresh: true,
+            onUpdate: self => {
+              const elapsed = self.progress * (STORY_ENTRANCE_DURATION + STORY_STEP_DURATION * moments.length) - storyStart;
+              const current = Math.max(0, Math.min(moments.length - 1, Math.floor(Math.max(0, elapsed) / STORY_STEP_DURATION)));
+              if (storyCounter.current) storyCounter.current.textContent = `${String(current + 1).padStart(2, '0')} / ${String(moments.length).padStart(2, '0')}`;
+              moments.forEach((moment, index) => {
+                moment.classList.toggle('is-active', index === current);
+                if (index === current) moment.setAttribute('aria-current', 'step');
+                else moment.removeAttribute('aria-current');
+              });
+            },
+          },
+        });
+
+        timeline.fromTo(moments,
+          { opacity: 0, y: 40, scale: 0.94 },
+          { opacity: 1, y: 0, scale: 1, duration: 0.8, stagger: CARD_REVEAL_STAGGER, ease: 'power3.out' },
+          0,
+        );
+
+        moments.forEach((moment, index) => {
+          const at = storyStart + index * STORY_STEP_DURATION;
+          const svg = moment.querySelector('svg');
+          const segments = svg?.querySelectorAll('path, rect');
+          timeline.to(moment, { opacity: 1, scale: 1, duration: 0.5, ease: 'power3.out' }, at);
+          timeline.to(moment, { opacity: 0.3, scale: 0.9, duration: 0.45, ease: 'power3.out' }, at + 0.45);
+          if (segments?.length) timeline.fromTo(segments,
+            { opacity: 0.2, scale: 0.35, transformOrigin: 'center center' },
+            { opacity: 1, scale: 1, duration: 0.42, stagger: 0.07, ease: 'power3.out' },
+            at,
+          );
+        });
+        if (storyProgress.current) timeline.to(storyProgress.current, { scaleX: 1, duration: STORY_STEP_DURATION * moments.length, ease: 'none' }, storyStart);
+
+        return () => {
+          timeline.scrollTrigger?.kill();
+          timeline.kill();
+        };
+      });
+
+      window.addEventListener('load', refresh, { once: true });
+      document.fonts?.ready.then(refresh);
+      if (Array.from(document.images).every(image => image.complete)) refresh();
+    }, root);
+    return () => {
+      active = false;
+      window.removeEventListener('load', refresh);
+      media?.revert();
+      context.revert();
+    };
+  }, [dayTitle, dayReady, reducedMotion]);
+
+  useEffect(() => {
+    if (!buildersReady) return;
+    gsap.registerPlugin(ScrollTrigger);
+    const root = useCases.ref.current?.parentElement;
+    if (!root) return;
+    let active = true;
+    let media: gsap.MatchMedia | null = null;
+    const refresh = () => { if (active) ScrollTrigger.refresh(); };
+    const context = gsap.context(() => {
+      media = gsap.matchMedia();
+      media.add({
+        desktop: '(min-width: 768px) and (pointer: fine)',
+        reduced: '(prefers-reduced-motion: reduce)',
+      }, conditions => {
+        if (conditions.conditions?.reduced) return;
+        const cards = builderCards.current.filter((card): card is HTMLDivElement => card !== null);
+        const title = casesTitle.current;
+        if (title) gsap.fromTo(title,
+          { opacity: 0.78, scale: 0.985 },
+          {
+            opacity: 1,
+            scale: 1,
+            ease: 'none',
+            scrollTrigger: { trigger: title, start: 'top 88%', end: 'top 48%', scrub: true },
+          },
+        );
+
+        if (!cards.length || !builderGrid.current) return;
+        gsap.fromTo(cards,
+          {
+            opacity: 0,
+            x: index => conditions.conditions?.desktop ? [-36, 0, 36][index] ?? 0 : 0,
+            y: index => conditions.conditions?.desktop ? [0, 30, 0][index] ?? 0 : 30,
+            scale: 0.94,
+            rotationX: 3,
+          },
+          {
+            opacity: 1,
+            x: 0,
+            y: 0,
+            scale: 1,
+            rotationX: 0,
+            duration: CARD_REVEAL_DURATION,
+            stagger: CARD_REVEAL_STAGGER,
+            ease: 'power3.out',
+            scrollTrigger: { trigger: builderGrid.current, start: 'top 82%', once: true },
+            onStart: () => cards.forEach(card => card.classList.add('is-entering')),
+            onComplete: () => cards.forEach(card => card.classList.remove('is-entering')),
+          },
+        );
+      });
+
+      window.addEventListener('load', refresh, { once: true });
+      document.fonts?.ready.then(refresh);
+      if (Array.from(document.images).every(image => image.complete)) refresh();
+    }, root);
+    return () => {
+      active = false;
+      window.removeEventListener('load', refresh);
+      media?.revert();
+      context.revert();
+    };
+  }, [buildersReady, casesTitle, reducedMotion, useCases.ref]);
 
   return <div className={`round-c-sections${reducedMotion ? ' round-c-reduced-motion' : ''}`}>
     <section
-      ref={day.ref}
+      ref={setStoryRef}
+      data-story-section
       className={`round-c-section round-c-day${day.visible ? ' is-visible' : ''}`}
       aria-labelledby="round-c-day-title"
     >
       <div className="round-c-section-inner">
         <span className="round-c-eyebrow">{content.roundC.quietDay.number}</span>
-        <h2 id="round-c-day-title" ref={dayTitle.title} onPointerMove={dayTitle.move} onPointerLeave={dayTitle.reset}>{content.roundC.quietDay.title}</h2>
+        <h2 id="round-c-day-title" ref={dayTitle}>{content.roundC.quietDay.title}</h2>
         <p className="round-c-section-intro">{content.roundC.quietDay.description}</p>
-        <LazySlot minHeight={240}>
+        <div className="round-c-story-progress" aria-label={content.roundC.quietDay.progressLabel}>
+          <span ref={storyProgress}/>
+        </div>
+        <div className="round-c-story-step" aria-live="polite">
+          <span ref={storyCounter}>01 / 04</span>
+          <span>{content.roundC.quietDay.stepLabel}</span>
+        </div>
+        <LazySlot minHeight={240} onMount={markDayReady} rootMargin={STORY_MOUNT_ROOT_MARGIN}>
           <div className="round-c-timeline" aria-label={content.roundC.quietDay.title}>
-            {content.roundC.quietDay.moments.map((moment, index) => <article className="round-c-moment" key={moment.title}>
+            {content.roundC.quietDay.moments.map((moment, index) =>             <article className="round-c-moment" key={moment.title} ref={node => { storyCards.current[index] = node }} aria-label={`${String(index + 1).padStart(2, '0')}. ${moment.title}`}>
               <span className="round-c-moment-icon"><MomentIcon name={moment.icon}/></span>
               <span className="round-c-moment-index">0{index + 1}</span>
               <h3>{moment.title}</h3>
@@ -242,15 +504,48 @@ export default function RoundCSections({
     >
       <div className="round-c-section-inner">
         <span className="round-c-eyebrow">{content.roundC.useCases.number}</span>
-        <h2 id="round-c-cases-title" ref={casesTitle.title} onPointerMove={casesTitle.move} onPointerLeave={casesTitle.reset}>{content.roundC.useCases.title}</h2>
+        <h2 id="round-c-cases-title" ref={casesTitle}>{content.roundC.useCases.title}</h2>
         <p className="round-c-section-intro">{content.roundC.useCases.description}</p>
-        <LazySlot minHeight={220}>
-          <div className="round-c-case-grid">
-            {content.roundC.useCases.cards.map(card => <article className="round-c-case-card" key={card.title}>
-              <span className="round-c-case-icon">{card.icon}</span>
-              <h3>{card.title}</h3>
-              <p>{card.body}</p>
-            </article>)}
+        <LazySlot minHeight={400} onMount={markBuildersReady}>
+          <div className="round-c-case-grid" ref={builderGrid}>
+            {content.roundC.useCases.cards.map((card, index) => <div
+              className="round-c-card-reveal"
+              key={card.title}
+              ref={node => { builderCards.current[index] = node }}
+            >
+              <article
+                className="round-c-case-card"
+                onPointerMove={event => {
+                  if (reducedMotion || event.pointerType !== 'mouse') return;
+                  const rect = event.currentTarget.getBoundingClientRect();
+                  const x = (event.clientX - rect.left) / rect.width - 0.5;
+                  const y = (event.clientY - rect.top) / rect.height - 0.5;
+                  event.currentTarget.style.willChange = 'transform';
+                  event.currentTarget.style.setProperty('--tilt-x', `${-y * 12}deg`);
+                  event.currentTarget.style.setProperty('--tilt-y', `${x * 12}deg`);
+                  const icon = event.currentTarget.querySelector<HTMLElement>('.round-c-case-icon');
+                  if (icon) {
+                    icon.style.willChange = 'transform';
+                    icon.style.transform = `translate3d(${x * 5}px,${y * 5}px,0)`;
+                  }
+                }}
+                onPointerLeave={event => {
+                  event.currentTarget.style.removeProperty('--tilt-x');
+                  event.currentTarget.style.removeProperty('--tilt-y');
+                  event.currentTarget.style.willChange = '';
+                  const icon = event.currentTarget.querySelector<HTMLElement>('.round-c-case-icon');
+                  if (icon) {
+                    icon.style.transform = '';
+                    icon.style.willChange = '';
+                  }
+                }}
+              >
+                <span className="round-c-case-icon">{card.icon}</span>
+                <h3>{card.title}</h3>
+                <p>{card.body}</p>
+                <MiniScene card={card} reducedMotion={reducedMotion}/>
+              </article>
+            </div>)}
           </div>
         </LazySlot>
       </div>
