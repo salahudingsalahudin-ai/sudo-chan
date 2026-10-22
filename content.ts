@@ -4,6 +4,14 @@ export type BotMood = 'Calm' | 'Curious' | 'Worried' | 'Happy';
 
 export const content = {
   brand: SUDO_CHAN,
+  siteDescription: 'Meet Sudo-chan, a thoughtful desktop companion for the hard parts of your work.',
+  openGraphImage: {
+    kicker: 'SUDO-CHAN',
+    titleLineOne: 'A little closer,',
+    titleLineTwo: 'when it counts.',
+    description: 'A quiet companion for the hard parts of your work.',
+    alt: 'Sudo-chan — a little closer, when it counts',
+  },
   intro: { eyebrow: 'A little presence for the hard parts', title: `Meet ${SUDO_CHAN}`, line: 'Tum kaam karo. Main dekh rahi hoon.' },
   scenes: [
     { id: 'arrival', number: '01 — HELLO', title: 'Here, when\nyou need her.', body: 'A quiet companion for the moments when the work gets loud.', label: 'AN INTRODUCTION' },
@@ -116,4 +124,24 @@ export const content = {
     },
   },
   footer: 'Made with care, for the hard parts.',
+  waitlistPrivacyLink: 'Read our privacy policy',
+  privacyPage: {
+    title: 'Privacy policy',
+    metadataDescription: 'How the Sudo-chan website handles waitlist email addresses and privacy requests.',
+    intro: 'This page explains how the Sudo-chan website handles information when you join the waitlist.',
+    websiteTitle: 'Website and waitlist',
+    websiteParagraphs: [
+      'When you join the waitlist, we store the email address you provide in Supabase. We use it only to announce the Sudo-chan launch. We do not sell your email address or use it for unrelated marketing.',
+      'To help prevent abuse of the signup form, the server stores a one-way, salted hash of a requester network address and an attempt count in Supabase. It does not store or log the raw address. Old rate-limit records expire when the rate limiter next runs after their one-hour window.',
+      'To ask us to delete your waitlist email, contact the site owner at CONTACT_EMAIL_PLACEHOLDER. Please include the email address you used to sign up so we can find and remove the right entry.',
+    ],
+    plannedTitle: 'Planned desktop app privacy principles',
+    plannedNotice: 'These are plans for a desktop app that is still in development. They describe intentions, not features that are available today.',
+    plannedParagraphs: [
+      'We plan to make privacy controls clear and easy to use.',
+      'We intend to minimize the information needed to provide the experience and explain how information is handled before release.',
+      'The desktop app is not released yet. These principles are not a promise that a particular feature or technical safeguard already exists.',
+    ],
+    backLink: 'Back to Sudo-chan',
+  },
 };

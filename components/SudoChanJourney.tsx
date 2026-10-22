@@ -117,7 +117,7 @@ function Waitlist(){
     }
   };
   const helper=notice.kind==='idle'?'One thoughtful update when she’s ready. Unsubscribe any time.':notice.message;
-  return <form onSubmit={submit} className="waitlist glass-panel"><label htmlFor="waitlist-email">A note when it’s time</label><div className="waitlist-row"><input id="waitlist-email" value={email} onChange={e=>setEmail(e.target.value)} type="email" autoComplete="email" placeholder="you@example.com" required disabled={loading||done}/><button type="submit" disabled={loading||done} aria-busy={loading} className={loading?'is-loading':''}>{loading?'Adding you…':done?'Done':'Get early access ↗'}</button></div><small aria-live="polite" role={notice.kind==='error'||notice.kind==='invalid'?'alert':'status'} className={`form-message ${loading?'loading':notice.kind}`}>{loading?'Sending your signup…':helper}</small></form>
+  return <form onSubmit={submit} className="waitlist glass-panel"><label htmlFor="waitlist-email">A note when it’s time</label><div className="waitlist-row"><input id="waitlist-email" value={email} onChange={e=>setEmail(e.target.value)} type="email" autoComplete="email" placeholder="you@example.com" required disabled={loading||done}/><button type="submit" disabled={loading||done} aria-busy={loading} className={loading?'is-loading':''}>{loading?'Adding you…':done?'Done':'Get early access ↗'}</button></div><small aria-live="polite" role={notice.kind==='error'||notice.kind==='invalid'?'alert':'status'} className={`form-message ${loading?'loading':notice.kind}`}>{loading?'Sending your signup…':helper}</small><a className="waitlist-privacy-link" href="/privacy">{content.waitlistPrivacyLink}</a></form>
 }
 function PrivacyControls(){const [paused,setPaused]=useState(false);const [blocked,setBlocked]=useState(false);return <div className="privacy-controls"><button type="button" aria-pressed={paused} onClick={()=>setPaused(!paused)}><span className={`toggle ${paused?'':'on'}`}/>{paused?'Preview: companion paused':'Preview: pause companion'}</button><button type="button" aria-pressed={blocked} onClick={()=>setBlocked(!blocked)}><span className={`toggle ${blocked?'on':''}`}/>{blocked?'Preview: apps blocked':'Preview: block apps'}</button><p>PREVIEW OF THE DESKTOP APP</p></div>}
 
@@ -160,7 +160,7 @@ export default function SudoChanJourney(){
           {i===6&&<Waitlist/>}
         </div>
         {i===0&&<a className="scroll-cue" href="#inside"><span>SCROLL TO EXPLORE</span><i>↓</i></a>}
-        {i===6&&<footer className="site-footer"><span>© {currentYear} SUDO-CHAN</span><span>{content.footer}</span><a href="#top">BACK TO TOP ↑</a></footer>}
+        {i===6&&<footer className="site-footer"><span>© {currentYear} SUDO-CHAN</span><span>{content.footer}</span><a href="/privacy">{content.privacyPage.title}</a><a href="#top">BACK TO TOP ↑</a></footer>}
       </section>;
     })}
     <CustomCursor/><div className="scroll-progress" ref={progressBar}/><div className="scene-counter">{String(chapter).padStart(2,'0')} <i>/</i> 10</div>

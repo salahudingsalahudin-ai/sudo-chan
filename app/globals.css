@@ -101,6 +101,16 @@
 @keyframes round-c-pop{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:translateY(0)}}
 @keyframes round-c-fix{from{background:#84f0bc4c}to{background:transparent}}
 @media(max-width:760px){.round-c-moods{padding:14px}.round-c-section{min-height:0;padding:70px 22px}.round-c-timeline{grid-template-columns:repeat(4,minmax(190px,1fr))}.round-c-case-grid{grid-template-columns:1fr}.round-c-case-card{min-height:0}.round-c-marquee{margin-left:-22px;margin-right:-22px}.round-c-stuck-demo{padding:13px}.round-c-section h2{font-size:clamp(38px,11vw,60px)}}
+.waitlist-privacy-link{display:inline-block;margin-top:9px;color:#087f91;font-size:9px;text-decoration:underline;text-underline-offset:3px}
+.privacy-page{min-height:100vh;padding:clamp(32px,8vw,96px) 24px;background:#f5f5f7;color:#14151a}
+.privacy-page-content{width:min(100%,720px);margin:0 auto}
+.privacy-page-back{display:inline-block;margin-bottom:42px;color:#087f91;font-size:13px;text-decoration:underline;text-underline-offset:4px}
+.privacy-page h1{margin:0 0 16px;font-size:clamp(40px,7vw,64px);font-weight:520;letter-spacing:-.065em}
+.privacy-page h2{margin:42px 0 14px;font-size:22px;font-weight:550;letter-spacing:-.035em}
+.privacy-page p{max-width:680px;color:#565d66;font-size:15px;line-height:1.8}
+.privacy-page .privacy-page-intro{margin-bottom:32px;font-size:18px}
+.privacy-page .privacy-page-notice{padding:14px 16px;border-left:2px solid #08a4b6;background:#e6f3f4;color:#263d43}
+.privacy-page a:focus-visible{outline-offset:5px}
 @media(prefers-reduced-motion:reduce){.round-c-section h2,.round-c-section-inner,.round-c-case-card,.round-c-marquee-track,.round-c-moment-icon svg,.round-c-fix-bubble,.round-c-code-fixed{transition:none!important;animation:none!important;transform:none!important}.round-c-section:not(.is-visible) .round-c-section-inner{opacity:1}.magnetic-target{translate:0 0}}
 
 .round-c-story-progress{height:2px;max-width:460px;margin-top:24px;overflow:hidden;background:#14151a1a}
