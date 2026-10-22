@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { PointerEvent, ReactNode } from 'react';
 import gsap from 'gsap';
 import { ScrollTrigger } from 'gsap/ScrollTrigger';
-import { content } from '@/content';
+import { content, SUDO_CHAN } from '@/content';
 import type { BotMood } from '@/content';
 
 const STUCK_AUTO_START_MS = 6_000;
@@ -13,16 +13,10 @@ const REVEAL_ROOT_MARGIN = '280px 0px';
 const STORY_MOUNT_ROOT_MARGIN = '2400px 0px';
 const STORY_SCROLL_VIEWPORTS = 3.5;
 const STORY_ENTRANCE_DURATION = 1.25;
-const STORY_STEP_DURATION = 0.9;
+const STORY_STEP_DURATION = 1.2;
 const STORY_PANEL_EXIT_DURATION = 0.45;
 const STORY_PANEL_ENTER_DURATION = 0.65;
-const STORY_ICON_DRAW_DURATION = 0.72;
-const STORY_PANEL_COLOR_TOKENS = [
-  '--color-section-one',
-  '--color-section-two',
-  '--color-section-three',
-  '--color-section-four',
-] as const;
+const STORY_MOODS = ['Calm', 'Worried', 'Happy', 'Calm'] as const satisfies readonly BotMood[];
 const BUILDER_COLOR_STEP_COUNT = 3;
 const BUILDER_CONNECTION_PATHS = [
   { path: 'M450 42 C375 75 255 112 150 145', endX: 150, endY: 145 },
@@ -256,9 +250,11 @@ function MiniScene({ card, reducedMotion }: { card: BuilderCard; reducedMotion: 
 
 export default function RoundCSections({
   onSectionChange,
+  onMoodChange,
   reducedMotion,
 }: {
   onSectionChange: (section: number) => void;
+  onMoodChange: (mood: BotMood | null) => void;
   reducedMotion: boolean;
 }) {
   const enterDay = useCallback(() => onSectionChange(8), [onSectionChange]);
@@ -285,6 +281,46 @@ export default function RoundCSections({
     day.ref.current = node;
     storySection.current = node;
   }, [day.ref]);
+  const activateMoment = useCallback((current: number, visible = true) => {
+    const moments = storyCards.current.filter((card): card is HTMLElement => card !== null);
+    moments.forEach((moment, index) => {
+      const active = index === current;
+      moment.classList.toggle('is-active', active);
+      moment.setAttribute('aria-hidden', String(!active || !visible));
+      if (active && visible) moment.setAttribute('aria-current', 'step');
+      else moment.removeAttribute('aria-current');
+    });
+    if (storySection.current) storySection.current.dataset.activeMoment = String(visible ? current : Math.max(0, current - 1));
+    if (storyCounter.current) storyCounter.current.textContent = `${String(current + 1).padStart(2, '0')} / ${String(moments.length).padStart(2, '0')}`;
+    if (visible) onMoodChange(STORY_MOODS[current] ?? 'Calm');
+  }, [onMoodChange]);
+
+  useEffect(() => {
+    const section = storySection.current;
+    const stage = document.querySelector<HTMLElement>('.scene-stage');
+    const journey = document.querySelector<HTMLElement>('.journey');
+    const sections = document.querySelector<HTMLElement>('.round-c-sections');
+    if (!section || !stage || !journey || !sections) return;
+
+    let wasActive = false;
+    const observer = new IntersectionObserver(([entry]) => {
+      const active = entry.isIntersecting;
+      if (active === wasActive) return;
+      wasActive = active;
+      stage.classList.toggle('is-quiet-day', active);
+      journey.classList.toggle('is-quiet-day-active', active);
+      sections.classList.toggle('is-quiet-day-active', active);
+      if (!active) onMoodChange(null);
+    });
+    observer.observe(section);
+    return () => {
+      observer.disconnect();
+      stage.classList.remove('is-quiet-day');
+      journey.classList.remove('is-quiet-day-active');
+      sections.classList.remove('is-quiet-day-active');
+      if (wasActive) onMoodChange(null);
+    };
+  }, [dayReady, onMoodChange]);
 
   useEffect(() => {
     if (!dayReady) return;
@@ -301,11 +337,29 @@ export default function RoundCSections({
         mobile: '(max-width: 767px), (pointer: coarse)',
         reduced: '(prefers-reduced-motion: reduce)',
       }, conditions => {
-        if (conditions.conditions?.reduced) return;
-
         const moments = storyCards.current.filter((card): card is HTMLElement => card !== null);
+        let activeMoment = -1;
+        let activeMomentVisible = false;
+        const syncMoment = (current: number, visible = true) => {
+          if (current === activeMoment && visible === activeMomentVisible) return;
+          activeMoment = current;
+          activeMomentVisible = visible;
+          activateMoment(current, visible);
+        };
         const titleTweens = [dayTitle.current]
           .filter((title): title is HTMLHeadingElement => title !== null);
+
+        if (conditions.conditions?.reduced) {
+          const observer = new IntersectionObserver(entries => {
+            entries.forEach(entry => {
+              if (!entry.isIntersecting) return;
+              const index = moments.indexOf(entry.target as HTMLElement);
+              if (index >= 0) syncMoment(index);
+            });
+          }, { rootMargin: '-35% 0px -35% 0px' });
+          moments.forEach(moment => observer.observe(moment));
+          return () => observer.disconnect();
+        }
 
         titleTweens.forEach(title => gsap.fromTo(title,
           { opacity: 0.78, scale: 0.985 },
@@ -319,13 +373,8 @@ export default function RoundCSections({
 
         const section = storySection.current;
         if (!conditions.conditions?.desktop || !section) {
-          const activateMoment = (current: number) => {
-            moments.forEach((moment, index) => {
-              moment.classList.toggle('is-active', index === current);
-              if (index === current) moment.setAttribute('aria-current', 'step');
-              else moment.removeAttribute('aria-current');
-            });
-            if (storyCounter.current) storyCounter.current.textContent = `${String(current + 1).padStart(2, '0')} / ${String(moments.length).padStart(2, '0')}`;
+          const handleMomentEnter = (current: number) => {
+            syncMoment(current);
             if (storyProgress.current) storyProgress.current.style.transform = `scaleX(${(current + 1) / moments.length})`;
           };
           moments.forEach((moment, index) => {
@@ -333,8 +382,8 @@ export default function RoundCSections({
               trigger: moment,
               start: 'top center',
               end: 'bottom center',
-              onEnter: () => activateMoment(index),
-              onEnterBack: () => activateMoment(index),
+              onEnter: () => handleMomentEnter(index),
+              onEnterBack: () => handleMomentEnter(index),
             });
             gsap.fromTo(moment,
               { opacity: 0, y: 40, scale: 0.94 },
@@ -366,13 +415,10 @@ export default function RoundCSections({
             invalidateOnRefresh: true,
             onUpdate: self => {
               const elapsed = self.progress * (STORY_ENTRANCE_DURATION + STORY_STEP_DURATION * moments.length) - storyStart;
-              const current = Math.max(0, Math.min(moments.length - 1, Math.floor(Math.max(0, elapsed) / STORY_STEP_DURATION)));
-              if (storyCounter.current) storyCounter.current.textContent = `${String(current + 1).padStart(2, '0')} / ${String(moments.length).padStart(2, '0')}`;
-              moments.forEach((moment, index) => {
-                moment.classList.toggle('is-active', index === current);
-                if (index === current) moment.setAttribute('aria-current', 'step');
-                else moment.removeAttribute('aria-current');
-              });
+              const progress = Math.max(0, elapsed);
+              const current = Math.max(0, Math.min(moments.length - 1, Math.floor(progress / STORY_STEP_DURATION)));
+              const transitionProgress = progress - current * STORY_STEP_DURATION;
+              syncMoment(current, current === 0 || transitionProgress >= STORY_PANEL_EXIT_DURATION);
             },
           },
         });
@@ -396,26 +442,10 @@ export default function RoundCSections({
             timeline.fromTo(moment,
               { opacity: 0, y: 40, scale: 0.94 },
               { opacity: 1, y: 0, scale: 1, zIndex: 2, duration: STORY_PANEL_ENTER_DURATION, ease: 'power3.out' },
-              at,
+              at + STORY_PANEL_EXIT_DURATION,
             );
           }
 
-          const token = STORY_PANEL_COLOR_TOKENS[index];
-          if (token) timeline.to(section, {
-            backgroundColor: () => getComputedStyle(document.documentElement).getPropertyValue(token).trim(),
-            duration: STORY_STEP_DURATION,
-            ease: 'none',
-          }, at);
-
-          const strokes = moment.querySelectorAll<SVGGeometryElement>('svg path, svg rect');
-          strokes.forEach(stroke => {
-            const length = stroke.getTotalLength();
-            timeline.fromTo(stroke,
-              { strokeDasharray: length, strokeDashoffset: length },
-              { strokeDasharray: length, strokeDashoffset: 0, duration: STORY_ICON_DRAW_DURATION, ease: 'power2.out' },
-              at,
-            );
-          });
         });
         if (storyProgress.current) timeline.to(storyProgress.current, { scaleX: 1, duration: STORY_STEP_DURATION * moments.length, ease: 'none' }, storyStart);
 
@@ -436,7 +466,7 @@ export default function RoundCSections({
       media?.revert();
       context.revert();
     };
-  }, [dayTitle, dayReady, reducedMotion]);
+  }, [activateMoment, dayTitle, dayReady, reducedMotion]);
 
   useEffect(() => {
     if (!buildersReady) return;
@@ -533,6 +563,9 @@ export default function RoundCSections({
     };
   }, [buildersReady, casesTitle, reducedMotion, useCases.ref]);
 
+  const dayTitleText = content.roundC.quietDay.title;
+  const brandIndex = dayTitleText.indexOf(SUDO_CHAN);
+
   return <div className={`round-c-sections${reducedMotion ? ' round-c-reduced-motion' : ''}`}>
     <section
       ref={setStoryRef}
@@ -542,7 +575,7 @@ export default function RoundCSections({
     >
       <div className="round-c-section-inner">
         <span className="round-c-eyebrow">{content.roundC.quietDay.number}</span>
-        <h2 id="round-c-day-title" ref={dayTitle}>{content.roundC.quietDay.title}</h2>
+        <h2 id="round-c-day-title" ref={dayTitle}>{dayTitleText.slice(0, brandIndex)}<span className="round-c-brand-nowrap">{SUDO_CHAN}</span>{dayTitleText.slice(brandIndex + SUDO_CHAN.length)}</h2>
         <p className="round-c-section-intro">{content.roundC.quietDay.description}</p>
         <div className="round-c-story-progress" aria-label={content.roundC.quietDay.progressLabel}>
           <span ref={storyProgress}/>
@@ -553,7 +586,7 @@ export default function RoundCSections({
         </div>
         <LazySlot minHeight={240} onMount={markDayReady} rootMargin={STORY_MOUNT_ROOT_MARGIN}>
           <div className="round-c-timeline" aria-label={content.roundC.quietDay.title}>
-            {content.roundC.quietDay.moments.map((moment, index) =>             <article className="round-c-moment" key={moment.title} ref={node => { storyCards.current[index] = node }} aria-label={`${String(index + 1).padStart(2, '0')}. ${moment.title}`}>
+            {content.roundC.quietDay.moments.map((moment, index) => <article className={`round-c-moment${index === 0 ? ' is-active' : ''}`} key={moment.title} ref={node => { storyCards.current[index] = node }} aria-label={`${String(index + 1).padStart(2, '0')}. ${moment.title}`} aria-hidden={index !== 0} aria-current={index === 0 ? 'step' : undefined}>
               <span className="round-c-moment-icon"><MomentIcon name={moment.icon}/></span>
               <span className="round-c-moment-index">0{index + 1}</span>
               <h3>{moment.title}</h3>

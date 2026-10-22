@@ -129,6 +129,7 @@ export default function SudoChanJourney(){
   useEffect(()=>{setHasMounted(true)},[]);
   const showBotSpeech=useCallback((message:string,duration:number)=>{if(speechTimeout.current!==null)window.clearTimeout(speechTimeout.current);setBotSpeech(message);speechTimeout.current=window.setTimeout(()=>{setBotSpeech('');speechTimeout.current=null},duration)},[]);
   const onMoodChange=useCallback((mood:BotMood)=>setSelectedMood(mood),[]);
+  const onQuietDayMoodChange=useCallback((mood:BotMood|null)=>setSelectedMood(mood),[]);
   const onDemoSpeech=useCallback((message:string)=>showBotSpeech(message,WELCOME_DURATION_MS),[showBotSpeech]);
   const onSectionChange=useCallback((section:number)=>{if(chapterRef.current!==section){chapterRef.current=section;setChapter(section)}if(section>7)sceneIndexRef.current=-1},[]);
   const onWelcome=useCallback(()=>{if(sleepingRef.current)return;happyUntilRef.current=performance.now()+WELCOME_DURATION_MS;setBotHappy(true);if(happyTimeout.current!==null)window.clearTimeout(happyTimeout.current);happyTimeout.current=window.setTimeout(()=>{setBotHappy(false);happyTimeout.current=null},WELCOME_DURATION_MS);const message=WELCOME_LINES[welcomeIndex.current];welcomeIndex.current=(welcomeIndex.current+1)%WELCOME_LINES.length;showBotSpeech(message,WELCOME_DURATION_MS)},[showBotSpeech]);
@@ -168,5 +169,5 @@ export default function SudoChanJourney(){
       </section>;
     })}
     <CustomCursor/><div className="scroll-progress" ref={progressBar}/><div className="scene-counter">{String(chapter).padStart(2,'0')} <i>/</i> 10</div>
-  </main><RoundCSections onSectionChange={onSectionChange} reducedMotion={Boolean(reduced)}/></>
+  </main><RoundCSections onSectionChange={onSectionChange} onMoodChange={onQuietDayMoodChange} reducedMotion={Boolean(reduced)}/></>
 }
