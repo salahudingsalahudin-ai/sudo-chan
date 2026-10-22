@@ -23,9 +23,16 @@ const STORY_PANEL_COLOR_TOKENS = [
   '--color-section-three',
   '--color-section-four',
 ] as const;
+const BUILDER_COLOR_STEP_COUNT = 3;
+const BUILDER_CONNECTION_PATHS = [
+  { path: 'M450 42 C375 75 255 112 150 145', endX: 150, endY: 145 },
+  { path: 'M450 42 L450 145', endX: 450, endY: 145 },
+  { path: 'M450 42 C525 75 645 112 750 145', endX: 750, endY: 145 },
+] as const;
 const CARD_REVEAL_DURATION = 0.8;
 const CARD_REVEAL_STAGGER = 0.15;
 const SCENE_LOOP_DURATION_MS = 5_600;
+const CONNECTION_DOT_LOOP_MS = 6_800;
 
 export function LazySlot({ children, minHeight = 150, onMount, rootMargin = REVEAL_ROOT_MARGIN }: { children: ReactNode; minHeight?: number; onMount?: () => void; rootMargin?: string }) {
   const slot = useRef<HTMLDivElement>(null);
@@ -271,6 +278,7 @@ export default function RoundCSections({
   const builderCards = useRef<Array<HTMLDivElement | null>>([]);
   const [dayReady, setDayReady] = useState(false);
   const [buildersReady, setBuildersReady] = useState(false);
+  const [activeConnection, setActiveConnection] = useState<number | null>(null);
   const markDayReady = useCallback(() => setDayReady(true), []);
   const markBuildersReady = useCallback(() => setBuildersReady(true), []);
   const setStoryRef = useCallback((node: HTMLElement | null) => {
@@ -442,10 +450,12 @@ export default function RoundCSections({
       media = gsap.matchMedia();
       media.add({
         desktop: '(min-width: 768px) and (pointer: fine)',
+        mobile: '(max-width: 767px), (pointer: coarse)',
         reduced: '(prefers-reduced-motion: reduce)',
       }, conditions => {
         if (conditions.conditions?.reduced) return;
         const cards = builderCards.current.filter((card): card is HTMLDivElement => card !== null);
+        const section = useCases.ref.current;
         const title = casesTitle.current;
         if (title) gsap.fromTo(title,
           { opacity: 0.78, scale: 0.985 },
@@ -457,7 +467,36 @@ export default function RoundCSections({
           },
         );
 
-        if (!cards.length || !builderGrid.current) return;
+        if (!cards.length || !builderGrid.current || !section) return;
+        const connectorPaths = builderGrid.current.parentElement?.querySelectorAll<SVGPathElement>('.round-c-connection-path') ?? [];
+        let colorStep = -1;
+        const setColorStep = (step: number) => {
+          if (colorStep === step) return;
+          colorStep = step;
+          section.dataset.builderStep = String(step);
+        };
+        const setStepFromProgress = (progress: number) => {
+          setColorStep(Math.min(BUILDER_COLOR_STEP_COUNT - 1, Math.floor(progress * BUILDER_COLOR_STEP_COUNT)));
+        };
+        ScrollTrigger.create({
+          trigger: section,
+          start: 'top bottom',
+          end: 'bottom top',
+          onUpdate: self => setStepFromProgress(self.progress),
+          onRefresh: self => setStepFromProgress(self.progress),
+        });
+        if (connectorPaths.length) {
+          gsap.fromTo(connectorPaths,
+            { strokeDashoffset: 1 },
+            {
+              strokeDashoffset: 0,
+              duration: 0.8,
+              stagger: 0.16,
+              ease: 'power2.out',
+              scrollTrigger: { trigger: builderGrid.current, start: 'top 72%', once: true },
+            },
+          );
+        }
         gsap.fromTo(cards,
           {
             opacity: 0,
@@ -528,21 +567,60 @@ export default function RoundCSections({
     <section
       ref={useCases.ref}
       className={`round-c-section round-c-use-cases${useCases.visible ? ' is-visible' : ''}`}
+      data-builder-step="0"
+      data-active-card={activeConnection ?? undefined}
       aria-labelledby="round-c-cases-title"
     >
       <div className="round-c-section-inner">
         <span className="round-c-eyebrow">{content.roundC.useCases.number}</span>
         <h2 id="round-c-cases-title" ref={casesTitle}>{content.roundC.useCases.title}</h2>
         <p className="round-c-section-intro">{content.roundC.useCases.description}</p>
-        <LazySlot minHeight={400} onMount={markBuildersReady}>
+        <LazySlot minHeight={500} onMount={markBuildersReady}>
+          <div className="round-c-connected-stage">
+            <svg viewBox="0 0 900 160" preserveAspectRatio="none" aria-hidden="true">
+              {BUILDER_CONNECTION_PATHS.map((connection, index) => <g key={index}>
+                <path
+                  id={`round-c-connection-${index}`}
+                  className="round-c-connection-path"
+                  data-connection-index={index}
+                  d={connection.path}
+                  pathLength="1"
+                />
+                <circle
+                  className="round-c-connection-dot"
+                  data-connection-index={index}
+                  cx={reducedMotion ? connection.endX : 0}
+                  cy={reducedMotion ? connection.endY : 0}
+                  r="4"
+                >
+                  {!reducedMotion && <animateMotion dur={`${CONNECTION_DOT_LOOP_MS}ms`} repeatCount="indefinite" rotate="auto">
+                    <mpath href={`#round-c-connection-${index}`}/>
+                  </animateMotion>}
+                </circle>
+              </g>)}
+              <circle className="round-c-connection-hub" cx="450" cy="42" r="6"/>
+            </svg>
+            <span className="round-c-shared-companion">{content.roundC.useCases.sharedCompanion}</span>
+            {content.roundC.useCases.cards.map((card, index) => <span
+              className="round-c-relationship-label"
+              data-connection-index={index}
+              key={card.title}
+            >{card.connectionLabel}</span>)}
+          </div>
           <div className="round-c-case-grid" ref={builderGrid}>
             {content.roundC.useCases.cards.map((card, index) => <div
               className="round-c-card-reveal"
+              data-card-index={index}
               key={card.title}
               ref={node => { builderCards.current[index] = node }}
             >
               <article
                 className="round-c-case-card"
+                tabIndex={0}
+                aria-label={`${card.title}. ${card.connectionLabel}`}
+                onPointerEnter={event => {
+                  if (event.pointerType === 'mouse') setActiveConnection(index);
+                }}
                 onPointerMove={event => {
                   if (reducedMotion || event.pointerType !== 'mouse') return;
                   const rect = event.currentTarget.getBoundingClientRect();
@@ -561,13 +639,17 @@ export default function RoundCSections({
                   event.currentTarget.style.removeProperty('--tilt-x');
                   event.currentTarget.style.removeProperty('--tilt-y');
                   event.currentTarget.style.willChange = '';
+                  if (!event.currentTarget.matches(':focus')) setActiveConnection(null);
                   const icon = event.currentTarget.querySelector<HTMLElement>('.round-c-case-icon');
                   if (icon) {
                     icon.style.transform = '';
                     icon.style.willChange = '';
                   }
                 }}
+                onFocus={() => setActiveConnection(index)}
+                onBlur={() => setActiveConnection(null)}
               >
+                <span className="round-c-card-relationship-mobile">{card.connectionLabel}</span>
                 <span className="round-c-case-icon">{card.icon}</span>
                 <h3>{card.title}</h3>
                 <p>{card.body}</p>
