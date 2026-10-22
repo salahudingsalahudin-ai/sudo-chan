@@ -280,6 +280,46 @@ html,body{background:var(--color-page);color:var(--color-text);transition:backgr
 .waitlist-count-dot{width:7px;height:7px;flex:0 0 7px;border-radius:50%;background:var(--color-accent);box-shadow:0 0 0 0 color-mix(in srgb,var(--color-accent) 35%,transparent);animation:waitlist-count-pulse 2.2s ease-out infinite}
 @keyframes waitlist-count-pulse{70%,100%{box-shadow:0 0 0 7px transparent}}
 @media(prefers-reduced-motion:reduce){.waitlist-count-dot{animation:none}}
+.round-c-day{background-color:var(--color-section-one)}
+.round-c-day .round-c-moment{display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;color:var(--color-text);border:0;border-radius:0}
+.round-c-day .round-c-moment:nth-child(1){background:var(--color-section-one)}
+.round-c-day .round-c-moment:nth-child(2){background:var(--color-section-two)}
+.round-c-day .round-c-moment:nth-child(3){background:var(--color-section-three)}
+.round-c-day .round-c-moment:nth-child(4){background:var(--color-section-four)}
+.round-c-day .round-c-moment-icon{width:58px;height:58px;margin-bottom:20px;border-radius:18px}
+.round-c-day .round-c-moment-icon svg{width:32px;height:32px;animation:none}
+.round-c-day .round-c-moment h3{margin:12px 0;font-size:clamp(32px,5vw,68px);font-weight:520;letter-spacing:-.055em}
+.round-c-day .round-c-moment p{max-width:460px;font-size:clamp(14px,1.25vw,18px);line-height:1.7}
+.round-c-day .round-c-story-progress span{background:var(--color-accent)}
+@media(min-width:768px) and (pointer:fine){
+  .round-c-day[data-story-pinned="true"]{height:100svh;min-height:100svh;padding:0;overflow:hidden;background:var(--color-section-one)}
+  .round-c-day[data-story-pinned="true"] .round-c-section-inner{height:100%;max-width:none;padding:clamp(38px,6vh,72px) clamp(24px,8vw,120px)}
+  .round-c-day[data-story-pinned="true"] .round-c-lazy-slot{position:static!important;min-height:0!important;margin:0}
+  .round-c-day[data-story-pinned="true"] .round-c-timeline{position:absolute;inset:0;display:block;padding:0;overflow:hidden;z-index:1}
+  .round-c-day[data-story-pinned="true"] .round-c-moment{position:absolute;inset:0;width:100%;height:100%;min-width:0;min-height:100%;margin:0;padding:clamp(170px,29vh,310px) clamp(24px,12vw,200px) clamp(110px,19vh,190px);border:0;border-radius:0}
+  .round-c-day[data-story-pinned="true"]>.round-c-section-inner>.round-c-eyebrow,
+  .round-c-day[data-story-pinned="true"]>.round-c-section-inner>h2,
+  .round-c-day[data-story-pinned="true"]>.round-c-section-inner>.round-c-section-intro{position:relative;z-index:3}
+  .round-c-day[data-story-pinned="true"] .round-c-story-progress{position:absolute;z-index:4;left:clamp(24px,8vw,120px);bottom:48px;width:min(40vw,460px);margin:0}
+  .round-c-day[data-story-pinned="true"] .round-c-story-step{position:absolute;z-index:4;left:clamp(24px,8vw,120px);bottom:22px;margin:0}
+}
+@media(max-width:767px),(pointer:coarse){
+  .round-c-day{height:auto;min-height:0;padding:70px 0 0}
+  .round-c-day .round-c-section-inner{max-width:none;padding:0 22px}
+  .round-c-day .round-c-lazy-slot{position:static!important;min-height:0!important;margin:24px -22px 0}
+  .round-c-day .round-c-timeline{position:relative;inset:auto;display:grid;grid-template-columns:1fr;gap:0;overflow:visible;padding:0;scroll-snap-type:none}
+  .round-c-day .round-c-moment{position:relative;width:100%;height:auto;min-width:0;min-height:100svh;margin:0;padding:clamp(48px,10vh,96px) 24px;border:0;border-radius:0;scroll-snap-align:none}
+  .round-c-story-progress{display:block;width:100%;margin-top:24px}
+  .round-c-story-step{display:flex;margin-top:10px}
+}
+@media(prefers-reduced-motion:reduce){
+  .round-c-day{height:auto;min-height:0;padding:70px 0 0}
+  .round-c-day .round-c-section-inner{max-width:none}
+  .round-c-day .round-c-lazy-slot{position:static!important;min-height:0!important;margin-top:24px}
+  .round-c-day .round-c-timeline{position:relative;inset:auto;display:grid;grid-template-columns:1fr;gap:0;overflow:visible;padding:0}
+  .round-c-day .round-c-moment{position:relative;width:100%;height:auto;min-height:100svh;opacity:1!important;transform:none!important}
+  .round-c-story-progress,.round-c-story-step{display:flex}
+}
 .round-c-sections,.round-c-section,.round-c-faq,.privacy-page{background-color:var(--color-page);color:var(--color-text)}
 .round-c-section-intro,.round-c-moment p,.round-c-case-card p,.round-c-faq-item p,.privacy-page p{color:var(--color-text-muted)}
 .round-c-case-card,.round-c-moods,.round-c-faq-item,.waitlist,.glass-panel,.privacy-page-notice{background-color:var(--color-surface);border-color:var(--color-border);color:var(--color-text)}

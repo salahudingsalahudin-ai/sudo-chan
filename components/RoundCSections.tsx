@@ -14,6 +14,15 @@ const STORY_MOUNT_ROOT_MARGIN = '2400px 0px';
 const STORY_SCROLL_VIEWPORTS = 3.5;
 const STORY_ENTRANCE_DURATION = 1.25;
 const STORY_STEP_DURATION = 0.9;
+const STORY_PANEL_EXIT_DURATION = 0.45;
+const STORY_PANEL_ENTER_DURATION = 0.65;
+const STORY_ICON_DRAW_DURATION = 0.72;
+const STORY_PANEL_COLOR_TOKENS = [
+  '--color-section-one',
+  '--color-section-two',
+  '--color-section-three',
+  '--color-section-four',
+] as const;
 const CARD_REVEAL_DURATION = 0.8;
 const CARD_REVEAL_STAGGER = 0.15;
 const SCENE_LOOP_DURATION_MS = 5_600;
@@ -281,6 +290,7 @@ export default function RoundCSections({
       media = gsap.matchMedia();
       media.add({
         desktop: '(min-width: 768px) and (pointer: fine)',
+        mobile: '(max-width: 767px), (pointer: coarse)',
         reduced: '(prefers-reduced-motion: reduce)',
       }, conditions => {
         if (conditions.conditions?.reduced) return;
@@ -299,23 +309,42 @@ export default function RoundCSections({
           },
         ));
 
-        if (!conditions.conditions?.desktop || !storySection.current) {
-          gsap.fromTo(moments,
-            { opacity: 0, y: 40, scale: 0.94 },
-            {
-              opacity: 1,
-              y: 0,
-              scale: 1,
-              duration: CARD_REVEAL_DURATION,
-              stagger: CARD_REVEAL_STAGGER,
-              ease: 'power3.out',
-              scrollTrigger: { trigger: storySection.current, start: 'top 82%', once: true },
-            },
-          );
+        const section = storySection.current;
+        if (!conditions.conditions?.desktop || !section) {
+          const activateMoment = (current: number) => {
+            moments.forEach((moment, index) => {
+              moment.classList.toggle('is-active', index === current);
+              if (index === current) moment.setAttribute('aria-current', 'step');
+              else moment.removeAttribute('aria-current');
+            });
+            if (storyCounter.current) storyCounter.current.textContent = `${String(current + 1).padStart(2, '0')} / ${String(moments.length).padStart(2, '0')}`;
+            if (storyProgress.current) storyProgress.current.style.transform = `scaleX(${(current + 1) / moments.length})`;
+          };
+          moments.forEach((moment, index) => {
+            ScrollTrigger.create({
+              trigger: moment,
+              start: 'top center',
+              end: 'bottom center',
+              onEnter: () => activateMoment(index),
+              onEnterBack: () => activateMoment(index),
+            });
+            gsap.fromTo(moment,
+              { opacity: 0, y: 40, scale: 0.94 },
+              {
+                opacity: 1,
+                y: 0,
+                scale: 1,
+                duration: CARD_REVEAL_DURATION,
+                ease: 'power3.out',
+                scrollTrigger: { trigger: moment, start: 'top 82%', once: true },
+              },
+            );
+          });
           return;
         }
 
-        gsap.set(moments, { opacity: 0.28, scale: 0.9, transformOrigin: 'center center' });
+        section.dataset.storyPinned = 'true';
+        gsap.set(moments, { opacity: 0, y: 40, scale: 0.94, zIndex: 1, transformOrigin: 'center center' });
         const storyStart = STORY_ENTRANCE_DURATION;
         const timeline = gsap.timeline({
           scrollTrigger: {
@@ -340,29 +369,52 @@ export default function RoundCSections({
           },
         });
 
-        timeline.fromTo(moments,
-          { opacity: 0, y: 40, scale: 0.94 },
-          { opacity: 1, y: 0, scale: 1, duration: 0.8, stagger: CARD_REVEAL_STAGGER, ease: 'power3.out' },
-          0,
-        );
-
         moments.forEach((moment, index) => {
           const at = storyStart + index * STORY_STEP_DURATION;
-          const svg = moment.querySelector('svg');
-          const segments = svg?.querySelectorAll('path, rect');
-          timeline.to(moment, { opacity: 1, scale: 1, duration: 0.5, ease: 'power3.out' }, at);
-          timeline.to(moment, { opacity: 0.3, scale: 0.9, duration: 0.45, ease: 'power3.out' }, at + 0.45);
-          if (segments?.length) timeline.fromTo(segments,
-            { opacity: 0.2, scale: 0.35, transformOrigin: 'center center' },
-            { opacity: 1, scale: 1, duration: 0.42, stagger: 0.07, ease: 'power3.out' },
-            at,
-          );
+          if (index === 0) {
+            timeline.fromTo(moment,
+              { opacity: 0, y: 40, scale: 0.94 },
+              { opacity: 1, y: 0, scale: 1, zIndex: 2, duration: STORY_ENTRANCE_DURATION, ease: 'power3.out' },
+              0,
+            );
+          } else {
+            timeline.to(moments[index - 1], {
+              opacity: 0,
+              y: -28,
+              scale: 0.97,
+              duration: STORY_PANEL_EXIT_DURATION,
+              ease: 'power3.out',
+            }, at);
+            timeline.fromTo(moment,
+              { opacity: 0, y: 40, scale: 0.94 },
+              { opacity: 1, y: 0, scale: 1, zIndex: 2, duration: STORY_PANEL_ENTER_DURATION, ease: 'power3.out' },
+              at,
+            );
+          }
+
+          const token = STORY_PANEL_COLOR_TOKENS[index];
+          if (token) timeline.to(section, {
+            backgroundColor: () => getComputedStyle(document.documentElement).getPropertyValue(token).trim(),
+            duration: STORY_STEP_DURATION,
+            ease: 'none',
+          }, at);
+
+          const strokes = moment.querySelectorAll<SVGGeometryElement>('svg path, svg rect');
+          strokes.forEach(stroke => {
+            const length = stroke.getTotalLength();
+            timeline.fromTo(stroke,
+              { strokeDasharray: length, strokeDashoffset: length },
+              { strokeDasharray: length, strokeDashoffset: 0, duration: STORY_ICON_DRAW_DURATION, ease: 'power2.out' },
+              at,
+            );
+          });
         });
         if (storyProgress.current) timeline.to(storyProgress.current, { scaleX: 1, duration: STORY_STEP_DURATION * moments.length, ease: 'none' }, storyStart);
 
         return () => {
           timeline.scrollTrigger?.kill();
           timeline.kill();
+          delete section.dataset.storyPinned;
         };
       });
 
