@@ -36,11 +36,37 @@ const clamp=(n:number,a=0,b=1)=>Math.min(b,Math.max(a,n));
 
 function CustomCursor(){
   const core=useRef<HTMLSpanElement>(null),ring=useRef<HTMLSpanElement>(null);
-  useEffect(()=>{if(matchMedia('(pointer:coarse)').matches||matchMedia('(prefers-reduced-motion: reduce)').matches)return;let frame=0,lastFrame=0,x=-100,y=-100,tx=-100,ty=-100,rx=-100,ry=-100;let activeTarget:HTMLElement|null=null;const clearMagnet=()=>{if(activeTarget){activeTarget.style.removeProperty('--magnet-x');activeTarget.style.removeProperty('--magnet-y');activeTarget.classList.remove('magnetic-target');activeTarget=null}};
-    const tick=(now:number)=>{frame=0;const dt=Math.min(40,now-lastFrame||16);lastFrame=now;const follow=1-Math.exp(-dt/42),lag=1-Math.exp(-dt/58);x+=(tx-x)*follow;y+=(ty-y)*follow;rx+=(tx-rx)*lag;ry+=(ty-ry)*lag;if(core.current)core.current.style.transform=`translate3d(${x}px,${y}px,0) translate(-50%,-50%)`;if(ring.current)ring.current.style.transform=`translate3d(${rx}px,${ry}px,0) translate(-50%,-50%)`;if(Math.abs(tx-x)>.08||Math.abs(ty-y)>.08||Math.abs(tx-rx)>.08||Math.abs(ty-ry)>.08)frame=requestAnimationFrame(tick);else{core.current?.classList.remove('is-moving');ring.current?.classList.remove('is-moving')}};
-    const move=(e:PointerEvent)=>{if(e.pointerType!=='mouse')return;tx=e.clientX;ty=e.clientY;core.current?.classList.add('is-moving');ring.current?.classList.add('is-moving');if(!frame)frame=requestAnimationFrame(tick);const element=e.target instanceof Element?e.target.closest<HTMLElement>('a,button,input'):null;if(element!==activeTarget){clearMagnet();activeTarget=element;if(activeTarget)activeTarget.classList.add('magnetic-target')}if(activeTarget){const rect=activeTarget.getBoundingClientRect();activeTarget.style.setProperty('--magnet-x',`${clamp((e.clientX-rect.left-rect.width/2)*.06,-3,3)}px`);activeTarget.style.setProperty('--magnet-y',`${clamp((e.clientY-rect.top-rect.height/2)*.06,-3,3)}px`)}ring.current?.classList.toggle('is-active',Boolean(element))};
-    const down=(e:PointerEvent)=>{if(e.pointerType==='mouse')ring.current?.classList.add('is-pressed')};const up=()=>ring.current?.classList.remove('is-pressed');
-    window.addEventListener('pointermove',move,{passive:true});window.addEventListener('pointerdown',down);window.addEventListener('pointerup',up);return()=>{if(frame)cancelAnimationFrame(frame);clearMagnet();window.removeEventListener('pointermove',move);window.removeEventListener('pointerdown',down);window.removeEventListener('pointerup',up)}
+  useEffect(()=>{
+    if(matchMedia('(pointer:coarse)').matches||matchMedia('(prefers-reduced-motion: reduce)').matches)return;
+    let activeTarget:HTMLElement|null=null;
+    const clearMagnet=()=>{
+      if(!activeTarget)return;
+      activeTarget.style.removeProperty('--magnet-x');
+      activeTarget.style.removeProperty('--magnet-y');
+      activeTarget.classList.remove('magnetic-target');
+      activeTarget=null;
+    };
+    const move=(e:PointerEvent)=>{
+      if(e.pointerType!=='mouse')return;
+      const position=`translate3d(${e.clientX}px,${e.clientY}px,0) translate(-50%,-50%)`;
+      if(core.current)core.current.style.transform=position;
+      if(ring.current)ring.current.style.transform=position;
+      const element=e.target instanceof Element?e.target.closest<HTMLElement>('a,button,input'):null;
+      if(element!==activeTarget){
+        clearMagnet();
+        activeTarget=element;
+        if(activeTarget)activeTarget.classList.add('magnetic-target');
+      }
+      if(activeTarget){
+        const rect=activeTarget.getBoundingClientRect();
+        activeTarget.style.setProperty('--magnet-x',`${clamp((e.clientX-rect.left-rect.width/2)*.02,-1,1)}px`);
+        activeTarget.style.setProperty('--magnet-y',`${clamp((e.clientY-rect.top-rect.height/2)*.02,-1,1)}px`);
+      }
+      ring.current?.classList.toggle('is-active',Boolean(element));
+    };
+    const down=(e:PointerEvent)=>{if(e.pointerType==='mouse')ring.current?.classList.add('is-pressed')};
+    const up=()=>ring.current?.classList.remove('is-pressed');
+    window.addEventListener('pointermove',move,{passive:true});window.addEventListener('pointerdown',down);window.addEventListener('pointerup',up);return()=>{clearMagnet();window.removeEventListener('pointermove',move);window.removeEventListener('pointerdown',down);window.removeEventListener('pointerup',up)}
   },[]);return <><span ref={core} className="cursor-core"/><span ref={ring} className="cursor-magnet"/></>
 }
 
@@ -61,7 +87,7 @@ function CursorTrail(){
 function Loader(){const [ready,setReady]=useState(false);useEffect(()=>{const t=setTimeout(()=>setReady(true),800);return()=>clearTimeout(t)},[]);return !ready?<div className="brand-loader"><span className="loader-mark">S</span><span>SUDO-CHAN</span><i/></div>:null}
 
 class WebGLBoundary extends Component<{fallback:ReactNode;children:ReactNode},{failed:boolean}>{state={failed:false};static getDerivedStateFromError(){return {failed:true}}render(){return this.state.failed?this.props.fallback:this.props.children}}
-function StaticBot({trackPointer=true,interactions,happy=false,heroActive=false}:{trackPointer?:boolean;interactions:BotInteractions;happy?:boolean;heroActive?:boolean}){
+function StaticBot({trackPointer=true,interactions,happy=false,heroActive=false,quietDayActive=false,quietDayMoment=null}:{trackPointer?:boolean;interactions:BotInteractions;happy?:boolean;heroActive?:boolean;quietDayActive?:boolean;quietDayMoment?:number|null}){
   const head=useRef<HTMLDivElement>(null),pupils=useRef<Array<HTMLElement|null>>([]),eyeNodes=useRef<Array<HTMLElement|null>>([]),eyeTimers=useRef<number[]>([]);
   useEffect(()=>()=>eyeTimers.current.forEach(timer=>window.clearTimeout(timer)),[]);
   useEffect(()=>{if(!trackPointer)return;const move=(e:PointerEvent)=>{const x=(e.clientX/innerWidth-.5)*2,y=(e.clientY/innerHeight-.5)*2;if(head.current)head.current.style.transform=`translateY(-3vh) rotateX(${-y*6}deg) rotateY(${x*9}deg)`;for(const pupil of pupils.current)if(pupil)pupil.style.transform=`translate(calc(-50% + ${x*3.1}px),calc(-50% + ${y*2.5}px))`};window.addEventListener('pointermove',move,{passive:true});return()=>window.removeEventListener('pointermove',move)},[trackPointer]);
@@ -78,6 +104,7 @@ function StaticBot({trackPointer=true,interactions,happy=false,heroActive=false}
     <div style={{position:'absolute',left:64,top:104,width:122,height:47,borderRadius:24,background:'linear-gradient(135deg,#0a131d,#111f2a)',border:'1px solid #9cecf452',display:'flex',justifyContent:'space-evenly',alignItems:'center',boxShadow:'0 0 23px #38e8ff28'}}><i ref={node=>{eyeNodes.current[0]=node}} onPointerEnter={()=>activateEye(0)} onClick={event=>activateEyeClick(event,0)} style={eye(0)}><b ref={node=>{pupils.current[0]=node}} style={pupil}/></i><i ref={node=>{eyeNodes.current[1]=node}} onPointerEnter={()=>activateEye(1)} onClick={event=>activateEyeClick(event,1)} style={eye(1)}><b ref={node=>{pupils.current[1]=node}} style={pupil}/></i></div>
     <div style={{position:'absolute',left:78,top:177,width:94,height:82,borderRadius:'22px 22px 36px 36px',background:'linear-gradient(145deg,#f9f9fb,#c5cad3)',boxShadow:'inset -9px -9px 16px #72798722'}}/><span className={`static-bot-mouth ${happy||interactions.mood==='Happy'?'is-happy':''}`}/><div style={{position:'absolute',left:113,top:194,width:25,height:25,borderRadius:'50%',background:'radial-gradient(circle at 35% 30%,#e3ffff,#38e8ff 42%,#058da7)',boxShadow:'0 0 30px #38e8ff8a'}}/>
     <span style={{...orb,top:22,width:236,height:195,borderTopColor:'#8ff7ff99',transform:'translateX(-50%) rotate(-22deg)'}}/><span style={{position:'absolute',left:65,bottom:18,width:120,height:16,borderRadius:'50%',background:'#38e8ff15',filter:'blur(8px)'}}/>
+    {quietDayActive&&quietDayMoment===3&&<span className="quiet-day-bot-shield" aria-hidden="true"/>}
   </div></div>
 }
 
@@ -125,11 +152,13 @@ function Waitlist(){
 function PrivacyControls(){const [paused,setPaused]=useState(false);const [blocked,setBlocked]=useState(false);return <div className="privacy-controls"><button type="button" aria-pressed={paused} onClick={()=>setPaused(!paused)}><span className={`toggle ${paused?'':'on'}`}/>{paused?'Preview: companion paused':'Preview: pause companion'}</button><button type="button" aria-pressed={blocked} onClick={()=>setBlocked(!blocked)}><span className={`toggle ${blocked?'on':''}`}/>{blocked?'Preview: apps blocked':'Preview: block apps'}</button><p>PREVIEW OF THE DESKTOP APP</p></div>}
 
 export default function SudoChanJourney(){
-  const journey=useRef<HTMLDivElement>(null);const progress=useRef(0);const pointer=useRef({x:0,y:0,vx:0,vy:0});const progressBar=useRef<HTMLDivElement>(null);const demoStatus=useRef<HTMLDivElement>(null);const resolvedDemo=useRef(false);const sceneIndexRef=useRef(0);const chapterRef=useRef(1);const reducedPreference=useReducedMotion();const [hasMounted,setHasMounted]=useState(false);const reduced=hasMounted?reducedPreference:false;const [sceneIndex,setSceneIndex]=useState(0);const [chapter,setChapter]=useState(1);const [selectedMood,setSelectedMood]=useState<BotMood|null>(null);const [loaded,setLoaded]=useState(false);const [canWebGL,setCanWebGL]=useState<boolean|null>(null);const [botSpeech,setBotSpeech]=useState('');const [botSleeping,setBotSleeping]=useState(false);const [botHappy,setBotHappy]=useState(false);const [eyeRedness,setEyeRedness]=useState(0);const [debugEyeClicks,setDebugEyeClicks]=useState(0);const sleepingRef=useRef(false);const rednessRef=useRef(0);const happyUntilRef=useRef(0);const eyeBlinksRef=useRef<[number,number]>([0,0]);const eyeBlinkDirectionsRef=useRef<[number,number]>([0,0]);const eyeBlinkDurationsRef=useRef<[number,number]>([BLINK_CLOSE_DURATION_MS,BLINK_CLOSE_DURATION_MS]);const eyeClickCount=useRef(0);const welcomeIndex=useRef(0);const lastEyeHover=useRef<[number,number]>([-Infinity,-Infinity]);const speechTimeout=useRef<number|null>(null);const happyTimeout=useRef<number|null>(null);const napTimeout=useRef<number|null>(null);const rednessInterval=useRef<number|null>(null);const currentYear = new Date().getFullYear();
+  const journey=useRef<HTMLDivElement>(null);const progress=useRef(0);const pointer=useRef({x:0,y:0,vx:0,vy:0});const progressBar=useRef<HTMLDivElement>(null);const demoStatus=useRef<HTMLDivElement>(null);const resolvedDemo=useRef(false);const sceneIndexRef=useRef(0);const chapterRef=useRef(1);const reducedPreference=useReducedMotion();const [hasMounted,setHasMounted]=useState(false);const reduced=hasMounted?reducedPreference:false;const [sceneIndex,setSceneIndex]=useState(0);const [chapter,setChapter]=useState(1);const [selectedMood,setSelectedMood]=useState<BotMood|null>(null);const [loaded,setLoaded]=useState(false);const [canWebGL,setCanWebGL]=useState<boolean|null>(null);const [quietDayActive,setQuietDayActive]=useState(false);const [quietDayMoment,setQuietDayMoment]=useState<number|null>(null);const [botSpeech,setBotSpeech]=useState('');const [botSleeping,setBotSleeping]=useState(false);const [botHappy,setBotHappy]=useState(false);const [eyeRedness,setEyeRedness]=useState(0);const [debugEyeClicks,setDebugEyeClicks]=useState(0);const sleepingRef=useRef(false);const rednessRef=useRef(0);const happyUntilRef=useRef(0);const eyeBlinksRef=useRef<[number,number]>([0,0]);const eyeBlinkDirectionsRef=useRef<[number,number]>([0,0]);const eyeBlinkDurationsRef=useRef<[number,number]>([BLINK_CLOSE_DURATION_MS,BLINK_CLOSE_DURATION_MS]);const eyeClickCount=useRef(0);const welcomeIndex=useRef(0);const lastEyeHover=useRef<[number,number]>([-Infinity,-Infinity]);const speechTimeout=useRef<number|null>(null);const happyTimeout=useRef<number|null>(null);const napTimeout=useRef<number|null>(null);const rednessInterval=useRef<number|null>(null);const currentYear = new Date().getFullYear();
   useEffect(()=>{setHasMounted(true)},[]);
   const showBotSpeech=useCallback((message:string,duration:number)=>{if(speechTimeout.current!==null)window.clearTimeout(speechTimeout.current);setBotSpeech(message);speechTimeout.current=window.setTimeout(()=>{setBotSpeech('');speechTimeout.current=null},duration)},[]);
   const onMoodChange=useCallback((mood:BotMood)=>setSelectedMood(mood),[]);
   const onQuietDayMoodChange=useCallback((mood:BotMood|null)=>setSelectedMood(mood),[]);
+  const onQuietDayActiveChange=useCallback((active:boolean)=>setQuietDayActive(active),[]);
+  const onQuietDayMomentChange=useCallback((moment:number|null)=>setQuietDayMoment(moment),[]);
   const onDemoSpeech=useCallback((message:string)=>showBotSpeech(message,WELCOME_DURATION_MS),[showBotSpeech]);
   const onSectionChange=useCallback((section:number)=>{if(chapterRef.current!==section){chapterRef.current=section;setChapter(section)}if(section>7)sceneIndexRef.current=-1},[]);
   const onWelcome=useCallback(()=>{if(sleepingRef.current)return;happyUntilRef.current=performance.now()+WELCOME_DURATION_MS;setBotHappy(true);if(happyTimeout.current!==null)window.clearTimeout(happyTimeout.current);happyTimeout.current=window.setTimeout(()=>{setBotHappy(false);happyTimeout.current=null},WELCOME_DURATION_MS);const message=WELCOME_LINES[welcomeIndex.current];welcomeIndex.current=(welcomeIndex.current+1)%WELCOME_LINES.length;showBotSpeech(message,WELCOME_DURATION_MS)},[showBotSpeech]);
@@ -144,7 +173,7 @@ export default function SudoChanJourney(){
   return <><main id="top" className={`journey ${reduced?'reduced-motion':''} ${!reduced&&sceneIndex>0&&sceneIndex<6?'is-dark-world':''} ${sceneIndex===0?'is-hero-active':''}`} ref={journey}>
     <a href="#page-content" className="skip-link">Skip to content</a>
     <div id="page-content" />
-    <div className="scene-stage">{reduced?<StaticBot trackPointer={false} interactions={interactions} happy={botHappy} heroActive={sceneIndex===0}/>:canWebGL===false?<StaticBot interactions={interactions} happy={botHappy} heroActive={sceneIndex===0}/>:canWebGL===true?<WebGLBoundary fallback={<StaticBot interactions={interactions} happy={botHappy} heroActive={sceneIndex===0}/>}><SudoChanCanvas progress={progress} pointer={pointer} interactions={interactions} onReady={()=>setLoaded(true)}/></WebGLBoundary>:null}{botSpeech&&<div className="bot-speech" role="status" aria-live="polite">{botSpeech}</div>}{DEBUG_EYE_CLICKS&&<div className="eye-click-debug" aria-live="polite">Eye clicks: {debugEyeClicks}/{EYE_REDNESS_CLICK_LIMIT} · redness: {Math.round(eyeRedness*100)}%</div>}<div className="stage-hud"/><div className="stage-vignette"/></div>
+    <div className="scene-stage">{reduced?<StaticBot trackPointer={false} interactions={interactions} happy={botHappy} heroActive={sceneIndex===0} quietDayActive={quietDayActive} quietDayMoment={quietDayMoment}/>:canWebGL===false?<StaticBot interactions={interactions} happy={botHappy} heroActive={sceneIndex===0} quietDayActive={quietDayActive} quietDayMoment={quietDayMoment}/>:canWebGL===true?<WebGLBoundary fallback={<StaticBot interactions={interactions} happy={botHappy} heroActive={sceneIndex===0} quietDayActive={quietDayActive} quietDayMoment={quietDayMoment}/>}><SudoChanCanvas progress={progress} pointer={pointer} interactions={interactions} quietDayActive={quietDayActive} quietDayMoment={quietDayMoment} onReady={()=>setLoaded(true)}/></WebGLBoundary>:null}{botSpeech&&<div className="bot-speech" role="status" aria-live="polite">{botSpeech}</div>}{DEBUG_EYE_CLICKS&&<div className="eye-click-debug" aria-live="polite">Eye clicks: {debugEyeClicks}/{EYE_REDNESS_CLICK_LIMIT} · redness: {Math.round(eyeRedness*100)}%</div>}<div className="stage-hud"/><div className="stage-vignette"/></div>
     <header className="site-nav"><a href="#top" className="wordmark"><span>S</span> {content.brand}</a><span className="nav-note">A QUIET KIND OF COMPANY</span><div className="site-nav-actions"><ThemeToggle/><a className="nav-link" href="#join">Early access <i>↗</i></a></div></header>
     {!loaded&&<Loader/>}
     {content.scenes.map((item,i)=>{
@@ -169,5 +198,5 @@ export default function SudoChanJourney(){
       </section>;
     })}
     <CustomCursor/><div className="scroll-progress" ref={progressBar}/><div className="scene-counter">{String(chapter).padStart(2,'0')} <i>/</i> 10</div>
-  </main><RoundCSections onSectionChange={onSectionChange} onMoodChange={onQuietDayMoodChange} reducedMotion={Boolean(reduced)}/></>
+  </main><RoundCSections onSectionChange={onSectionChange} onMoodChange={onQuietDayMoodChange} onQuietDayActiveChange={onQuietDayActiveChange} onQuietDayMomentChange={onQuietDayMomentChange} reducedMotion={Boolean(reduced)}/></>
 }

@@ -238,6 +238,9 @@
   --color-accent-hover:#066a79;
   --color-accent-soft:#d9f1f3;
   --color-accent-contrast:#ffffff;
+  --color-error:#a32222;
+  --color-success:#08735f;
+  --color-progress:#285d67;
   --color-secondary:#5650a8;
   --color-secondary-soft:#eae9f7;
   --color-section-one:#eaf2f4;
@@ -261,6 +264,9 @@ html[data-theme="dark"]{
   --color-accent-hover:#8be4eb;
   --color-accent-soft:#1e3e44;
   --color-accent-contrast:#11262b;
+  --color-error:#ffb4ab;
+  --color-success:#7ee2b8;
+  --color-progress:#a4dce5;
   --color-secondary:#b0a7ff;
   --color-secondary-soft:#343147;
   --color-section-one:#26383d;

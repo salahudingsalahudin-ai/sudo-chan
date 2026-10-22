@@ -14,10 +14,10 @@ Open [http://localhost:3000](http://localhost:3000). Build and run the productio
 ## Supabase waitlist setup
 
 1. In Supabase SQL Editor, run [`supabase/schema.sql`](./supabase/schema.sql) to create the `public.waitlist` table and its unique, lowercase email constraint.
-2. Copy `.env.example` to `.env.local` and fill in `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` from the Supabase project settings. These values are used by the server route only; never add a `NEXT_PUBLIC_` prefix to the service-role key.
+2. Copy `.env.example` to `.env.local` and configure `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, and a private, random `RATE_LIMIT_SALT`. These values are used by the server route only; never add a `NEXT_PUBLIC_` prefix to the service-role key. Without the salt, submissions return 503. Never share these values in chat or commit local environment files.
 3. Restart the Next.js dev server after changing environment variables.
 
-The API is `POST /api/waitlist`. It validates and lowercases email addresses, returns a friendly duplicate response, and limits each IP to five submissions per minute. The in-memory limiter is per running Node.js process, so use a shared rate-limit store if deploying across multiple server instances.
+The API is `POST /api/waitlist`. It validates and lowercases email addresses, returns a friendly duplicate response, limits request bodies to 2 KiB, and limits submissions to five attempts per hour per hashed IP. Apply the complete `supabase/schema.sql`, including the `waitlist_rate_limits` table and `consume_waitlist_attempt` RPC: the limiter is shared through Supabase rather than process memory. Raw IPs are not stored by this limiter. Supabase requests have a five-second timeout. `GET /api/waitlist` returns the real count without exposing email addresses.
 
 ## Character model
 
@@ -31,3 +31,12 @@ All landing page copy and scene labels are collected in `content.ts`.
 - The procedural fallback keeps the page usable without a model asset. The optional GLB can include a rig or use the existing runtime head tracking.
 - Three.js effects are capped at DPR 2. Touch devices hide the custom cursor; reduced-motion preferences suppress UI animation.
 - Latest production build: 142 KB first-load JavaScript. The WebGL scene is code-split and adds about 272 KiB gzip only on desktop browsers that support WebGL.
+
+## Validation
+
+- `npm test`: run the Vitest waitlist route tests with mocked Supabase; this does not verify the deployed database or environment configuration.
+- `npx tsc --noEmit`: check TypeScript.
+- `npm run build`: compile the production application.
+- Manually check eye tracking, bot interactions, scroll behavior, keyboard access, reduced motion, mobile layout, both themes, and the browser console.
+
+The desktop companion is not released. Website demonstrations and privacy controls are previews; they do not capture the screen or call an AI service.

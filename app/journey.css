@@ -4,11 +4,11 @@
 .cursor-lens{animation:cursor-ripple .72s ease-out}
 .cursor-trail{position:fixed;inset:0;z-index:70;pointer-events:none}
 .magnetic-target{translate:var(--magnet-x,0px) var(--magnet-y,0px);transition:translate .36s cubic-bezier(.22,1,.36,1)}
-.waitlist .form-message.error{color:#a32222;opacity:1}
-.waitlist .form-message.invalid{color:#a32222;opacity:1}
-.waitlist .form-message.duplicate{color:#08735f;opacity:1}
-.waitlist .form-message.success{color:#08735f;opacity:1}
-.waitlist .form-message.loading{color:#285d67;opacity:.9}
+.waitlist .form-message.error{color:var(--color-error);opacity:1}
+.waitlist .form-message.invalid{color:var(--color-error);opacity:1}
+.waitlist .form-message.duplicate{color:var(--color-success);opacity:1}
+.waitlist .form-message.success{color:var(--color-success);opacity:1}
+.waitlist .form-message.loading{color:var(--color-progress);opacity:.9}
 .waitlist button:disabled{cursor:wait;opacity:.72}
 .scene-stage::after{content:"";position:absolute;z-index:1;inset:0;pointer-events:none;opacity:.8;background:radial-gradient(260px circle at var(--cursor-x,50%) var(--cursor-y,45%),rgba(56,232,255,.12),transparent 74%);mix-blend-mode:soft-light;transition:opacity .25s}
 .scene-stage .stage-vignette,.scene-stage .stage-hud{z-index:2}
