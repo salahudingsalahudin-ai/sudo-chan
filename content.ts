@@ -4,6 +4,11 @@ export type BotMood = 'Calm' | 'Curious' | 'Worried' | 'Happy';
 
 export const content = {
   brand: SUDO_CHAN,
+  theme: {
+    toggleLabel: 'Toggle color theme',
+    lightModeLabel: 'Switch to dark mode',
+    darkModeLabel: 'Switch to light mode',
+  },
   siteDescription: 'Meet Sudo-chan, a thoughtful desktop companion for the hard parts of your work.',
   openGraphImage: {
     kicker: 'SUDO-CHAN',

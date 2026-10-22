@@ -4,6 +4,8 @@ import './journey.css';
 import { content, SUDO_CHAN } from '@/content';
 import { siteUrl } from '@/lib/site';
 
+const themeInitScript = `try{var saved=localStorage.getItem('sudo-chan-theme');document.documentElement.dataset.theme=saved==='dark'||saved==='light'?saved:(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light')}catch{document.documentElement.dataset.theme=matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'}`;
+
 const description = content.siteDescription;
 export const metadata: Metadata = {
   metadataBase: siteUrl,
@@ -26,4 +28,9 @@ export const metadata: Metadata = {
     images: ['/opengraph-image'],
   },
 };
-export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) { return <html lang="en"><body>{children}</body></html>; }
+export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+  return <html lang="en">
+    <head><script dangerouslySetInnerHTML={{ __html: themeInitScript }}/></head>
+    <body>{children}</body>
+  </html>;
+}
