@@ -251,10 +251,14 @@ function MiniScene({ card, reducedMotion }: { card: BuilderCard; reducedMotion: 
 export default function RoundCSections({
   onSectionChange,
   onMoodChange,
+  onQuietDayActiveChange,
+  onQuietDayMomentChange,
   reducedMotion,
 }: {
   onSectionChange: (section: number) => void;
   onMoodChange: (mood: BotMood | null) => void;
+  onQuietDayActiveChange: (active: boolean) => void;
+  onQuietDayMomentChange: (moment: number | null) => void;
   reducedMotion: boolean;
 }) {
   const enterDay = useCallback(() => onSectionChange(8), [onSectionChange]);
@@ -292,8 +296,9 @@ export default function RoundCSections({
     });
     if (storySection.current) storySection.current.dataset.activeMoment = String(visible ? current : Math.max(0, current - 1));
     if (storyCounter.current) storyCounter.current.textContent = `${String(current + 1).padStart(2, '0')} / ${String(moments.length).padStart(2, '0')}`;
+    onQuietDayMomentChange(visible ? current : null);
     if (visible) onMoodChange(STORY_MOODS[current] ?? 'Calm');
-  }, [onMoodChange]);
+  }, [onMoodChange, onQuietDayMomentChange, reducedMotion]);
 
   useEffect(() => {
     const section = storySection.current;
@@ -310,7 +315,11 @@ export default function RoundCSections({
       stage.classList.toggle('is-quiet-day', active);
       journey.classList.toggle('is-quiet-day-active', active);
       sections.classList.toggle('is-quiet-day-active', active);
-      if (!active) onMoodChange(null);
+      onQuietDayActiveChange(active);
+      if (!active) {
+        onMoodChange(null);
+        onQuietDayMomentChange(null);
+      }
     });
     observer.observe(section);
     return () => {
@@ -318,9 +327,13 @@ export default function RoundCSections({
       stage.classList.remove('is-quiet-day');
       journey.classList.remove('is-quiet-day-active');
       sections.classList.remove('is-quiet-day-active');
-      if (wasActive) onMoodChange(null);
+      if (wasActive) {
+        onQuietDayActiveChange(false);
+        onMoodChange(null);
+        onQuietDayMomentChange(null);
+      }
     };
-  }, [dayReady, onMoodChange]);
+  }, [dayReady, onMoodChange, onQuietDayActiveChange, onQuietDayMomentChange]);
 
   useEffect(() => {
     if (!dayReady) return;
