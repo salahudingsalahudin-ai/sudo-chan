@@ -133,7 +133,7 @@ export const content = {
     websiteParagraphs: [
       'When you join the waitlist, we store the email address you provide in Supabase. We use it only to announce the Sudo-chan launch. We do not sell your email address or use it for unrelated marketing.',
       'To help prevent abuse of the signup form, the server stores a one-way, salted hash of a requester network address and an attempt count in Supabase. It does not store or log the raw address. Old rate-limit records expire when the rate limiter next runs after their one-hour window.',
-      'To ask us to delete your waitlist email, contact the site owner at CONTACT_EMAIL_PLACEHOLDER. Please include the email address you used to sign up so we can find and remove the right entry.',
+      'To ask us to delete your waitlist email, contact the site owner at salahudingsalahudin@gmail.com (i am sid) Please include the email address you used to sign up so we can find and remove the right entry.',
     ],
     plannedTitle: 'Planned desktop app privacy principles',
     plannedNotice: 'These are plans for a desktop app that is still in development. They describe intentions, not features that are available today.',
