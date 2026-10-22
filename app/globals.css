@@ -274,6 +274,12 @@ html[data-theme="dark"]{
 html,body{background:var(--color-page);color:var(--color-text);transition:background-color .25s ease,color .25s ease}
 .journey{background-color:var(--color-journey);color:var(--color-text)}
 .journey.is-hero-active{background-color:var(--color-journey)!important}
+.waitlist-count-slot{display:flex;align-items:center;min-height:38px}
+.waitlist-count-top{display:flex;align-items:center;gap:8px;margin:8px 0 0;color:var(--color-text-muted);font-size:11px;line-height:1.4;letter-spacing:.01em}
+.waitlist-count-top strong{color:var(--color-accent);font-variant-numeric:tabular-nums}
+.waitlist-count-dot{width:7px;height:7px;flex:0 0 7px;border-radius:50%;background:var(--color-accent);box-shadow:0 0 0 0 color-mix(in srgb,var(--color-accent) 35%,transparent);animation:waitlist-count-pulse 2.2s ease-out infinite}
+@keyframes waitlist-count-pulse{70%,100%{box-shadow:0 0 0 7px transparent}}
+@media(prefers-reduced-motion:reduce){.waitlist-count-dot{animation:none}}
 .round-c-sections,.round-c-section,.round-c-faq,.privacy-page{background-color:var(--color-page);color:var(--color-text)}
 .round-c-section-intro,.round-c-moment p,.round-c-case-card p,.round-c-faq-item p,.privacy-page p{color:var(--color-text-muted)}
 .round-c-case-card,.round-c-moods,.round-c-faq-item,.waitlist,.glass-panel,.privacy-page-notice{background-color:var(--color-surface);border-color:var(--color-border);color:var(--color-text)}

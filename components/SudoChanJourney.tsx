@@ -11,6 +11,7 @@ import { content } from '@/content';
 import type { BotMood } from '@/content';
 import type { BotInteractions } from './SudoChanCanvas';
 import RoundCSections, { LazySlot, MoodPicker, StuckDetectorPreview } from './RoundCSections';
+import WaitlistCount, { refreshWaitlistCount } from './WaitlistCount';
 import ThemeToggle from './ThemeToggle';
 import {
   BLINK_CLOSE_DURATION_MS,
@@ -106,6 +107,7 @@ function Waitlist(){
       setEmail('');
       setDone(true);
       setNotice({kind:'success',message:message||"You're on the list. We'll be in touch soon."});
+      refreshWaitlistCount();
     }catch(error){
       if(error instanceof Error&&error.name==='AbortError'){
         setNotice({kind:'error',message:'This is taking longer than expected. Please try again.'});
@@ -151,6 +153,7 @@ export default function SudoChanJourney(){
           <span className="scene-index"><i/>{item.number}</span>
           <HeadingTag>{item.title.split('\n').map((line,j)=><span key={j}>{line}</span>)}</HeadingTag>
           <p>{item.body}</p>
+          {i===0&&<WaitlistCount/>}
           {i===0&&<span className="intro-quote">“{content.intro.line}”</span>}
           {i===0&&<MoodPicker selected={selectedMood} onMoodChange={onMoodChange}/>}
           {i===2&&<div className="feature-callouts">{content.core.map((c,n)=><div key={c.title} className={`callout callout-${n}`}><i>{String(n+1).padStart(2,'0')}</i><b>{c.title}</b><span>{c.body}</span></div>)}</div>}

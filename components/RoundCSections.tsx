@@ -9,7 +9,6 @@ import type { BotMood } from '@/content';
 
 const STUCK_AUTO_START_MS = 6_000;
 const STUCK_OFFER_AFTER_SECONDS = 3;
-const COUNT_ENDPOINT = '/api/waitlist';
 const REVEAL_ROOT_MARGIN = '280px 0px';
 const STORY_MOUNT_ROOT_MARGIN = '2400px 0px';
 const STORY_SCROLL_VIEWPORTS = 3.5;
@@ -237,29 +236,6 @@ function MiniScene({ card, reducedMotion }: { card: BuilderCard; reducedMotion: 
       </div>}
     </div>
   </div>;
-}
-
-function WaitlistCount() {
-  const [count, setCount] = useState<number | null>(null);
-  useEffect(() => {
-    const controller = new AbortController();
-    fetch(COUNT_ENDPOINT, { method: 'GET', cache: 'no-store', signal: controller.signal })
-      .then(async response => {
-        if (!response.ok) throw new Error(`Waitlist count request failed with status ${response.status}.`);
-        const result: unknown = await response.json();
-        if (typeof result !== 'object' || result === null || !('count' in result) || typeof result.count !== 'number' || !Number.isInteger(result.count) || result.count < 0) {
-          throw new Error('Waitlist count response was invalid.');
-        }
-        setCount(result.count);
-      })
-      .catch(error => {
-        if (controller.signal.aborted) return;
-        console.warn(content.roundC.delights.counterUnavailable, error);
-      });
-    return () => controller.abort();
-  }, []);
-  if (count === null) return null;
-  return <p className="round-c-count">{content.roundC.delights.counter}: <strong>{count.toLocaleString()}</strong></p>;
 }
 
 export default function RoundCSections({
@@ -572,7 +548,6 @@ export default function RoundCSections({
               {[0, 1].map(copy => <span key={copy}>{content.roundC.delights.words.map(word => <b key={`${copy}-${word}`}>{word}<i>✳</i></b>)}</span>)}
             </div>
           </div>
-          <WaitlistCount/>
           <a className="round-c-join-button" href="#join">{content.roundC.delights.joinLink}</a>
         </LazySlot>
       </div>

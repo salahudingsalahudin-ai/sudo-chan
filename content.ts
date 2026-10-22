@@ -123,7 +123,8 @@ export const content = {
     },
     delights: {
       words: ['take your time', 'one thing at a time', 'you can pause', 'made with care'],
-      counter: 'People on the waitlist',
+      counter: 'People on the early-access list',
+      counterZero: 'Be the first to join',
       counterUnavailable: 'The waitlist count is temporarily unavailable.',
       joinLink: 'Join the waitlist',
     },
