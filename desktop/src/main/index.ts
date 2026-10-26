@@ -720,8 +720,10 @@ async function start() {
       position: null,
     },
   });
+  // Never call safeStorage here: on this Linux setup isEncryptionAvailable() can block forever on the
+  // keyring, which stopped every window from opening. Encryption happens only when the user saves a key.
   try {
-    const migrated = migrateProviders(store.get('cloud'), store.get('providers') as ProviderMap | undefined, keyCodec, canEncryptKeys());
+    const migrated = migrateProviders(store.get('cloud'), store.get('providers') as ProviderMap | undefined, keyCodec, false);
     if (migrated) store.set('providers', migrated as Record<string, StoredCloud | undefined>);
   } catch {
     // key migration is best effort

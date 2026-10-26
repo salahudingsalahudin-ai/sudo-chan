@@ -47,3 +47,7 @@
 - STT: `src/main/stt.ts` `SttRouter`: Gemini (`gemini-flash-lite-latest`, then `gemini-flash-latest`) with a prompt that asks for Roman Urdu in Latin letters for Urdu speech and English for English, then Groq Whisper (Roman Urdu prompt hint; `language` only when the user explicitly chose en/ur), then OpenAI. 'auto'/'ur-PK' do not force English. 429 backs a route off for 60 s (and is reported as `rateLimited` for the wake gate), other errors for 15 s (not reported as rate limiting). Urdu-script output when Latin was expected is returned with `scriptWarning`, not discarded. Gemini `[none]` means silence and does not spend other providers' quota. Repeated-token and punctuation-only output is rejected.
 - Model names: `gemini-2.5-flash` and `gemini-2.5-flash-lite` returned HTTP 404 for the user's key, so the `-latest` aliases are used. `gemini-flash-latest` exceeded the 9 s timeout in a sanity check, so lite goes first.
 - Key sent in the `x-goog-api-key` header, never in the URL.
+
+## Startup hang fix
+- On this machine `safeStorage.isEncryptionAvailable()` blocks indefinitely (verified with a scratch Electron app: no result after 25 s, process ignored SIGTERM). The key migration added to `start()` called it, so no window was ever created. Startup no longer touches safeStorage; encryption is attempted only when the user saves a key. Legacy base64 keys therefore stay base64 until re-saved.
+- Lesson: never run `pkill -f <pattern>` from the agent shell when the pattern appears in the command line itself (it kills the shell).
