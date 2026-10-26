@@ -30,6 +30,11 @@ export interface TtsResult {
   error?: string;
   status?: number;
   provider?: TtsProviderId;
+  /** Gemini quota back-off hint in ms (from Retry-After / retryDelay / per-day detection). */
+  retryAfterMs?: number;
+  cached?: boolean;
+  /** Network requests this result cost (Google chunks). */
+  calls?: number;
 }
 
 export interface TtsProvider {

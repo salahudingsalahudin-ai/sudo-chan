@@ -1203,7 +1203,7 @@ function SettingsView({ state }: { state: AppState }) {
               🔊 Test Voice Sound
             </button>
           </SettingRow>
-          <SettingRow title="Voice engine" description="Gemini gives a more natural, expressive voice (needs your Gemini key; about 4-6 s per sentence on the free tier). Google is faster but flatter. Falls back to Google automatically if Gemini fails.">
+          <SettingRow title="Voice engine" description="Gemini gives a more natural, expressive voice but its free tier allows only about 10 requests a day, so it runs out quickly (each reply uses 1-2). Google is unlimited but flatter. When Gemini is out of quota the app switches to Google by itself and tries Gemini again later.">
             <select className="wake-word-input" aria-label="Voice engine" value={settings.ttsProvider ?? 'gemini'} onChange={event => setSettings({ ...settings, ttsProvider: event.target.value as Settings['ttsProvider'] })}>
               <option value="gemini">Gemini (expressive)</option>
               <option value="google">Google (fast)</option>

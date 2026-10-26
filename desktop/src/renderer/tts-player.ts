@@ -1,4 +1,5 @@
 import { UtteranceTracker, type SpeechEvent, type StopReason } from '../shared/speech-events.ts';
+import { dataUriToBytes } from '../shared/audio-data.ts';
 
 /**
  * ONE central place that starts and stops spoken audio. Every end path
@@ -70,13 +71,15 @@ export function isSpeakingNow(): boolean {
   return tracker.active || currentSource !== null;
 }
 
-/** Fetch + decode an audio data URI so it can be played with a precise stop and an output level. */
+/** Decode an audio data URI so it can be played with a precise stop and an output level. */
 export async function decodeDataUri(dataUri: string): Promise<AudioBuffer | null> {
+  const bytes = dataUriToBytes(dataUri);
+  if (!bytes) return null;
   try {
-    const response = await fetch(dataUri);
-    const data = await response.arrayBuffer();
-    return await audioContext().decodeAudioData(data);
-  } catch {
+    const copy = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+    return await audioContext().decodeAudioData(copy);
+  } catch (error) {
+    console.warn('[TTS] decodeAudioData failed:', (error as Error).message);
     return null;
   }
 }

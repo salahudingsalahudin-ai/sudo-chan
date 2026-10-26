@@ -94,26 +94,26 @@ test('router falls back to Google when Gemini fails, then backs off instead of r
   let t = 1000;
   const f = fakeFetch({ gemini: () => new Response('quota', { status: 429 }), google: googleOk });
   const router = new TtsRouter({ getKey: () => 'k', getPreferred: () => 'gemini', fetchFn: f, now: () => t });
-  const first = await router.synthesize({ text: 'One', lang: 'en' });
+  const first = await router.synthesize({ text: 'One of these sentences', lang: 'en' });
   assert.equal(first.ok, true);
   assert.equal(first.provider, 'google');
-  const second = await router.synthesize({ text: 'Two', lang: 'en' });
+  const second = await router.synthesize({ text: 'Two of these sentences', lang: 'en' });
   assert.equal(second.provider, 'google');
   assert.equal(f.calls.filter(c => c.url.includes('generativelanguage')).length, 1, 'no second Gemini attempt inside the backoff window');
   t += 61_000;
-  await router.synthesize({ text: 'Three', lang: 'en' });
+  await router.synthesize({ text: 'Three of these sentences', lang: 'en' });
   assert.equal(f.calls.filter(c => c.url.includes('generativelanguage')).length, 2, 'Gemini is retried after the backoff');
 });
 
 test('router uses Google when there is no Gemini key or Google is the chosen engine', async () => {
   const f = fakeFetch({ gemini: geminiOk, google: googleOk });
   const noKey = new TtsRouter({ getKey: () => '', getPreferred: () => undefined, fetchFn: f });
-  assert.equal((await noKey.synthesize({ text: 'Hi', lang: 'en' })).provider, 'google');
+  assert.equal((await noKey.synthesize({ text: 'Hi there my friend', lang: 'en' })).provider, 'google');
   const chosen = new TtsRouter({ getKey: () => 'k', getPreferred: () => 'google', fetchFn: f });
-  assert.equal((await chosen.synthesize({ text: 'Hi', lang: 'en' })).provider, 'google');
+  assert.equal((await chosen.synthesize({ text: 'Hi there my friend', lang: 'en' })).provider, 'google');
   assert.equal(f.calls.filter(c => c.url.includes('generativelanguage')).length, 0);
   const preferred = new TtsRouter({ getKey: () => 'k', getPreferred: () => undefined, fetchFn: f });
-  assert.equal((await preferred.synthesize({ text: 'Hi', lang: 'en' })).provider, 'gemini', 'Gemini is the default engine');
+  assert.equal((await preferred.synthesize({ text: 'Hi there my friend', lang: 'en' })).provider, 'gemini', 'Gemini is the default engine');
 });
 
 test('settings validation covers the Gemini voice and speed', () => {

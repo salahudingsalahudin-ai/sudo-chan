@@ -44,3 +44,9 @@ Tests: `tests/wake-word.check.mjs` (matching, gate, window, settings defaults).
 ## How to test each item
 See `TEST-VOICE.md`: barge-in steps 3-4, lip-sync steps 2 and 5-8, wake word step 9, voice quality step 10.
 Quit the old running Sudo-chan first (an instance from Oct 26 is still running with the old code and makes new launches exit silently).
+
+## Update: voice realism follow-up
+- **Why there was no sound:** the renderer CSP (`connect-src 'none'`) blocked the `fetch('data:...')` used to decode audio, so every clip failed silently (fixed, see DECISIONS.md).
+- **Gemini free tier = about 10 TTS requests/day** (HTTP 429: "retry in 7h11m"). Mitigations: batching (6-sentence reply: 6 calls before, 2 now), cache, skip 1-2 word replies, proper back-off. Realism is capped by quota: with this key most speech will use the Google voice until the quota resets or billing is enabled.
+- Objective checks of the Google fallback (10 samples, decoded in Electron): all decode, 4.8-7.1 s, 11-14 chars/s, peak 0.49-0.66, no silent clips, about 1 s per request (0.5-3 s). Gemini output with the new prompt could not be checked (quota).
+- Listening kit: `/tmp/claude-1000/-home-lenovo/34364725-11fb-4f5a-8a8e-29ec88fc703d/scratchpad/voice-compare/index.html` (Google samples only; Gemini excluded because of the 429). Naturalness is for a human ear to judge.

@@ -462,6 +462,7 @@ function setupIPC() {
     }
   }, ['chat', 'settings']);
   handle(CHANNELS.cloudConfig, async (_e, value) => {
+    router?.resetBackoff(); // a new key or plan may have quota again
     if (!validCloudConfig(value)) return { ok: false, error: 'Enter a valid provider and HTTPS endpoint.' };
     const currentSaved = store.get('cloud');
     const existingKey = getProviderKey(value.provider);

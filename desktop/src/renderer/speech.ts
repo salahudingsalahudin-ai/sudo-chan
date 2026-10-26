@@ -1,4 +1,4 @@
-import { detectSentenceLanguage, splitIntoSpokenSentences } from '../shared/speech';
+import { detectSentenceLanguage, groupForSynthesis, splitIntoSpokenSentences } from '../shared/speech';
 import type { Emotion } from '../shared/speech';
 import { beginPlayback, currentGeneration, decodeDataUri, finishPlayback, markSpeechStart, playBuffer, stopSpeaking } from './tts-player';
 
@@ -84,7 +84,9 @@ async function synthesize(sentence: string, emotion: Emotion): Promise<AudioBuff
   try {
     const result = await window.companion?.playSpeech({ text: sentence, lang, emotion });
     if (result?.ok && result.dataUri) return await decodeDataUri(result.dataUri);
-  } catch {}
+  } catch (error) {
+    console.warn('[TTS] synthesis request failed:', (error as Error).message);
+  }
   return null;
 }
 
@@ -114,7 +116,8 @@ export async function speak(
 ): Promise<void> {
   if (getMutedPreference()) return;
 
-  const sentences = splitIntoSpokenSentences(rawText, 180);
+  // First sentence alone (fast start), later same-emotion sentences are batched into one request to save Gemini quota.
+  const sentences = groupForSynthesis(splitIntoSpokenSentences(rawText, 180), 450);
   if (!sentences.length) return;
 
   const generation = beginPlayback();
