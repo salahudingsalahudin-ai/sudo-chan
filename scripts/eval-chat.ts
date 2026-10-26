@@ -120,14 +120,22 @@ function isGenericFallback(text: string, unclearAllowed?: boolean): boolean {
   return GENERIC_PATTERNS.some(p => p.test(text));
 }
 
-function detectLanguage(text: string): 'ur' | 'en' {
-  // Check for distinctive Roman Urdu marker words (excluding common English words like 'main' and 'se')
-  const romanUrduWords = /\b(aap|tum|meri|mera|mere|hum|hoon|hai|hain|kya|kyun|kaise|karo|karein|kar|raha|rahi|rahe|bohot|theek|acha|yeh|woh|batao|shukriya|zaroor|hoga|hogi|mein|nahi|nhi)\b/i;
-  const urduHits = (text.match(new RegExp(romanUrduWords.source, 'gi')) || []).length;
-  const englishWords = /\b(the|this|that|with|have|your|you|will|help|can|are|from|and|for)\b/i;
-  const englishHits = (text.match(new RegExp(englishWords.source, 'gi')) || []).length;
-  if (englishHits > urduHits && englishHits >= 2) return 'en';
-  return urduHits >= 2 ? 'ur' : 'en';
+function detectLanguage(text: string, category?: string): 'ur' | 'en' {
+  // Strip code blocks so code syntax (keywords, imports, type names) does not bias natural language detection
+  const commentary = text.replace(/```[\s\S]*?```/g, '').trim();
+  const toCheck = commentary.length >= 10 ? commentary : text;
+
+  // Distinctive Roman Urdu marker words (pronouns, auxiliary verbs, adverbs, question words)
+  const romanUrduWords = /\b(aap|aapka|aapke|aapki|tum|tumhara|tumhari|tumhare|meri|mera|mere|hum|hoon|hai|hain|kya|kyun|kaise|karo|karein|kar|raha|rahi|rahe|bohot|theek|acha|achi|ache|yeh|woh|batao|shukriya|zaroor|hoga|hogi|mein|nahi|nhi|chahiye|sakta|sakti|sakte|wala|wali|wale|bhi|koi|kuch|agar|phir|lekin|shuru|madad)\b/i;
+  const urduHits = (toCheck.match(new RegExp(romanUrduWords.source, 'gi')) || []).length;
+
+  const englishWords = /\b(the|this|that|with|have|your|you|will|help|can|are|from|and|for|about|would|could|should|there|their|what|when|where|which|because|between|please)\b/i;
+  const englishHits = (toCheck.match(new RegExp(englishWords.source, 'gi')) || []).length;
+
+  if (urduHits > 0 && englishHits === 0) return 'ur';
+  if (englishHits > 0 && urduHits === 0) return 'en';
+  if (urduHits >= englishHits && urduHits > 0) return 'ur';
+  return 'en';
 }
 
 async function sleep(ms: number) {
@@ -384,8 +392,9 @@ export async function runEvaluation(
 
     const reply = accumulatedText.trim();
     const isGeneric = isGenericFallback(reply, item.unclearAllowed);
-    const isCutOff = hasError || !reply || (!reply.endsWith('.') && !reply.endsWith('!') && !reply.endsWith('?') && !reply.endsWith('`') && !reply.endsWith('۔') && reply.length > 500);
-    const detectedLang = detectLanguage(reply);
+    const hasAbruptEnd = !/[.!?۔`'"\)\]\}:*~>]\s*$/.test(reply);
+    const isCutOff = hasError || !reply || (hasAbruptEnd && reply.length > 500);
+    const detectedLang = detectLanguage(reply, item.category);
     const langMatch = item.category === 'unclear' ? true : (detectedLang === item.expectedLanguage);
 
     // LLM judge score
