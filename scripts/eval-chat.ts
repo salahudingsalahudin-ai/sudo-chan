@@ -208,7 +208,9 @@ Do not wrap in markdown quotes if possible, output pure JSON.`;
       }
 
       // Groq Judge (primary when judgeProvider === 'groq', or fallback when Gemini times out)
-      const groqJudgeModel = judgeProvider === 'gemini' ? 'openai/gpt-oss-120b' : 'qwen/qwen3.8-27b';
+      const groqJudgeModel = targetModel === 'openai/gpt-oss-120b'
+        ? 'qwen/qwen3.8-27b'
+        : (targetModel === 'qwen/qwen3.8-27b' ? 'openai/gpt-oss-120b' : 'qwen/qwen3.8-27b');
       const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
         method: 'POST',
         signal: AbortSignal.timeout(10000),
@@ -223,7 +225,7 @@ Do not wrap in markdown quotes if possible, output pure JSON.`;
             { role: 'user', content: `USER PROMPT: "${prompt}"\nASSISTANT REPLY: "${reply}"` }
           ],
           temperature: 0.1,
-          max_tokens: 500
+          max_tokens: 300
         })
       });
 

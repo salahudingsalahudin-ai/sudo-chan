@@ -517,24 +517,43 @@ export class LocalAI {
 
     const combined = AbortSignal.any([signal, AbortSignal.timeout(60_000)]);
     try {
-      const response = await this.request(endpoint, {
-        method: 'POST',
-        redirect: 'error',
-        signal: combined,
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify({
-          model,
-          stream: true,
-          temperature: 0.6,
-          top_p: 0.95,
-          max_tokens: maxTokens,
-          messages: fullMessages,
-        }),
-      });
-      if (!response.ok || !response.body) {
+      let response: Response | null = null;
+      let retries = 3;
+      let delayMs = 2500;
+
+      while (retries > 0) {
+        response = await this.request(endpoint, {
+          method: 'POST',
+          redirect: 'error',
+          signal: combined,
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${apiKey}`,
+          },
+          body: JSON.stringify({
+            model,
+            stream: true,
+            temperature: 0.6,
+            top_p: 0.95,
+            max_tokens: maxTokens,
+            messages: fullMessages,
+          }),
+        });
+
+        if (response.status === 429 && retries > 1) {
+          console.warn(`[Cloud AI 429] Rate limited on ${model}. Retrying after ${delayMs}ms backoff...`);
+          await new Promise(r => setTimeout(r, delayMs));
+          delayMs *= 2;
+          retries--;
+          continue;
+        }
+        break;
+      }
+
+      if (!response || !response.ok || !response.body) {
+        if (!response) {
+          throw new LocalAIError('Cloud API connection failed: no response received.');
+        }
         if (response.status === 401 || response.status === 403) {
           throw new LocalAIError('Cloud API key rejected (401/403). Check your key in Settings → Local AI.');
         }
