@@ -365,17 +365,25 @@ html,body{background:var(--color-page);color:var(--color-text);transition:backgr
 .site-nav-actions{display:flex;align-items:center;gap:18px}
 .site-nav-actions .nav-link{white-space:nowrap}
 .scene-stage{transition:filter .25s ease}
-html[data-theme="dark"] .scene-stage::after{opacity:.82;background:radial-gradient(ellipse at 72% 45%,#83efff21,transparent 48%)}
-.journey.is-hero-active .static-bot-head{transform:translate(24vw,-3vh)!important}
-.static-bot-head{transition:transform .35s ease-out}
+.scene-stage::after{content:"";position:absolute;inset:0;pointer-events:none;opacity:.65;background:radial-gradient(ellipse 38% 44% at 74% 48%,#38e8ff1a,transparent 70%);transition:background .85s cubic-bezier(.22,1,.36,1),opacity .5s ease}
+.journey[data-scene-side="left"] .scene-stage::after{background:radial-gradient(ellipse 38% 44% at 26% 48%,#38e8ff1f,transparent 70%)}
+html[data-theme="dark"] .scene-stage::after{opacity:.88;background:radial-gradient(ellipse 40% 46% at 74% 48%,#83efff24,transparent 68%)}
+html[data-theme="dark"] .journey[data-scene-side="left"] .scene-stage::after{background:radial-gradient(ellipse 40% 46% at 26% 48%,#83efff24,transparent 68%)}
+.journey[data-scene-side="right"] .bot-speech{left:73%}
+.journey[data-scene-side="left"] .bot-speech{left:27%}
+.bot-speech{transition:left .65s cubic-bezier(.22,1,.36,1)}
+.static-bot[data-scene-side="right"] .static-bot-head,.journey.is-hero-active .static-bot-head{transform:translate(23vw,-3vh)!important}
+.static-bot[data-scene-side="left"] .static-bot-head{transform:translate(-23vw,-3vh)!important}
+.static-bot-head{transition:transform .6s cubic-bezier(.22,1,.36,1)}
 @media(max-width:767px){
   .site-nav{padding:0 16px}
   .nav-note{display:none}
   .site-nav-actions{gap:9px}
   .theme-toggle{width:36px;padding:0}
   .theme-toggle span{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
-  .journey.is-hero-active .static-bot-head{transform:translateY(-32vh) scale(.7)!important;transform-origin:center}
-  html[data-theme="dark"] .scene-stage::after{background:radial-gradient(ellipse at 50% 16%,#83efff21,transparent 35%)}
+  .journey[data-scene-side="right"] .bot-speech,.journey[data-scene-side="left"] .bot-speech{left:50%}
+  .static-bot[data-scene-side="right"] .static-bot-head,.static-bot[data-scene-side="left"] .static-bot-head,.journey.is-hero-active .static-bot-head{transform:translateY(-30vh) scale(.72)!important;transform-origin:center}
+  html[data-theme="dark"] .scene-stage::after,html[data-theme="dark"] .journey[data-scene-side="left"] .scene-stage::after{background:radial-gradient(ellipse at 50% 18%,#83efff21,transparent 42%)}
 }
 @media(prefers-reduced-motion:reduce){
   html,body,.journey,.round-c-section,.round-c-case-card,.waitlist,.glass-panel,.privacy-page,.theme-toggle,.static-bot-head{transition:none!important}

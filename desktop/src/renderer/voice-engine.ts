@@ -34,8 +34,25 @@ export function deleteVoiceProfile(): void {
   } catch {}
 }
 
+// High-quality linear resampler to 16 kHz (Whisper's native optimal sample rate)
+function downsampleTo16k(samples: Float32Array, sampleRate: number): { samples: Float32Array; sampleRate: number } {
+  if (sampleRate <= 16000) return { samples, sampleRate };
+  const ratio = sampleRate / 16000;
+  const newLength = Math.round(samples.length / ratio);
+  const result = new Float32Array(newLength);
+  for (let i = 0; i < newLength; i++) {
+    const srcIndex = i * ratio;
+    const base = Math.floor(srcIndex);
+    const frac = srcIndex - base;
+    const next = Math.min(base + 1, samples.length - 1);
+    result[i] = samples[base] * (1 - frac) + samples[next] * frac;
+  }
+  return { samples: result, sampleRate: 16000 };
+}
+
 // Convert audio buffer into standard 16-bit PCM WAV Blob with digital peak normalization
-export function encodeWav(samples: Float32Array, sampleRate: number): Blob {
+export function encodeWav(rawSamples: Float32Array, rawSampleRate: number): Blob {
+  const { samples, sampleRate } = downsampleTo16k(rawSamples, rawSampleRate);
   // Peak normalization: dynamically boost quiet microphones so Whisper hears loud, crisp speech
   let maxPeak = 0;
   for (let i = 0; i < samples.length; i++) {

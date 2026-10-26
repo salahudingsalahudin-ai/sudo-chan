@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { FormEvent, ReactNode } from 'react';
-import type { AIState, AppState, BotSize, ChatState, Settings } from '../shared/types';
+import type { AIState, AppState, BotSize, ChatState, Settings, VoiceLanguage } from '../shared/types';
 import { DEFAULT_SETTINGS, MAX_MESSAGE_LENGTH } from '../shared/validation';
 import { Bot } from './Bot';
 import { SonicOrb } from './SonicOrb';
@@ -110,6 +110,7 @@ function Overlay({ state }: { state: AppState }) {
 
     session.start({
       isSpeaking: () => Boolean(stateRef.current.isSpeaking),
+      language: stateRef.current.settings.voiceLanguage,
       onAudioLevel: level => {
         setOverlayAudioLevel(level);
       },
@@ -321,7 +322,7 @@ function Chat({ state }: { state: AppState }) {
     if (!micMuted) {
       session.start({
         isSpeaking: () => Boolean(isSpeakingRef.current),
-        language: state.settings.voiceLanguage === 'auto' ? undefined : state.settings.voiceLanguage,
+        language: state.settings.voiceLanguage,
         onInterim: text => {
           setUserSubtitle(text);
           setLiveTranscript(text);
@@ -353,7 +354,7 @@ function Chat({ state }: { state: AppState }) {
         voiceSessionRef.current = null;
       }
     };
-  }, [isVoiceMode, micMuted]);
+  }, [isVoiceMode, micMuted, state.settings.voiceLanguage]);
 
   useEffect(() => {
     const last = conversation.messages[conversation.messages.length - 1];
@@ -1094,6 +1095,21 @@ function SettingsView({ state }: { state: AppState }) {
               onChange={e => setSettings({ ...settings, customWakeWord: e.target.value })}
               placeholder="e.g. Sudo-chan"
             />
+          </SettingRow>
+          <SettingRow
+            title="Voice Recognition Language"
+            description="Whisper & Live Talk transcription language preference (Auto-detects Urdu, Roman Urdu & English)."
+          >
+            <select
+              className="wake-word-input"
+              value={settings.voiceLanguage ?? 'auto'}
+              onChange={e => setSettings({ ...settings, voiceLanguage: e.target.value as VoiceLanguage })}
+              aria-label="Voice language"
+            >
+              <option value="auto">Auto</option>
+              <option value="en">English</option>
+              <option value="ur">Urdu</option>
+            </select>
           </SettingRow>
         </section>
         <section id="companion-features" className="settings-card scroll-reveal">

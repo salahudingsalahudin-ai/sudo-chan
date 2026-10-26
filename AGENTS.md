@@ -8,7 +8,7 @@ Sudo-chan is a Next.js 14 App Router application using React, TypeScript, Tailwi
 - `components/`: interface components and the animated 3D journey; `sudoChanConfig.ts` holds scene configuration.
 - `content.ts`: centralized landing-page copy and scene labels.
 - `lib/`: shared helpers; `supabase/schema.sql`: database setup.
-- `tests/`: Vitest API tests. The optional character asset belongs at `public/models/sudo-chan.glb`; the scene supports a procedural fallback.
+- `tests/`: Vitest API tests. `desktop/`: separate Electron + Vite companion with native main process, sandboxed preload, React renderer and shared IPC types. The optional character asset belongs at `public/models/sudo-chan.glb`; the website supports a procedural fallback.
 
 ## Build, Test, and Development Commands
 
@@ -19,7 +19,8 @@ Run commands from this directory:
 - `npm run build`: compile the production application and check types.
 - `npm start`: serve an existing production build.
 - `npm test`: run Vitest once; `npm test -- --watch` enables watch mode.
-- `npx tsc --noEmit`: check TypeScript without emitting files.
+- `npx tsc --noEmit`: check website TypeScript without emitting files.
+- In `desktop/`, use `npm ci`, `npm run dev`, `npm run typecheck`, `npm test` (after build) and `npm run package`. The desktop app uses its own lockfile and commands.
 
 `npm run lint` invokes Next.js linting, but no ESLint dependency or configuration is currently committed. No formatter is configured.
 

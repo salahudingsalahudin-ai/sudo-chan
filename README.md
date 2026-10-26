@@ -39,4 +39,4 @@ All landing page copy and scene labels are collected in `content.ts`.
 - `npm run build`: compile the production application.
 - Manually check eye tracking, bot interactions, scroll behavior, keyboard access, reduced motion, mobile layout, both themes, and the browser console.
 
-The desktop companion is not released. Website demonstrations and privacy controls are previews; they do not capture the screen or call an AI service.
+The desktop companion has an early local Electron prototype in [`desktop/`](./desktop/). Run it separately with its setup and preview notes in [`desktop/README.md`](./desktop/README.md); chat replies are local mock text. It is not a released product and it does not capture the screen or call an AI service. Website privacy controls remain previews.

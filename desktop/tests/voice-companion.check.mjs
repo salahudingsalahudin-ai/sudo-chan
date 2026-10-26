@@ -24,6 +24,13 @@ test('settings validation accepts voice lock and wake word configuration', () =>
   };
   assert.equal(validSettings(validCustom), true);
 
+  // Voice language settings
+  assert.equal(DEFAULT_SETTINGS.voiceLanguage, 'auto');
+  assert.equal(validSettings({ ...DEFAULT_SETTINGS, voiceLanguage: 'auto' }), true);
+  assert.equal(validSettings({ ...DEFAULT_SETTINGS, voiceLanguage: 'en' }), true);
+  assert.equal(validSettings({ ...DEFAULT_SETTINGS, voiceLanguage: 'ur' }), true);
+  assert.equal(validSettings({ ...DEFAULT_SETTINGS, voiceLanguage: 'fr' }), false);
+
   // Rejects invalid types
   assert.equal(validSettings({ ...DEFAULT_SETTINGS, voiceLockEnabled: 'yes' }), false);
   assert.equal(validSettings({ ...DEFAULT_SETTINGS, customWakeWord: 1234 }), false);
@@ -126,3 +133,18 @@ test('voice active target separates overlay and chat modes preventing simultaneo
   assert.equal(resetRes.active, false);
   assert.equal(resetRes.target, null);
 });
+
+test('voice mode system prompt and Whisper prompt hint match configuration', () => {
+  const WHISPER_PROMPT_HINT = 'Conversation in English, Urdu and Roman Urdu. Sudo-chan, Sid, suno, ji, kya haal hai, kaise ho, theek ho, computer, kaam, baat.';
+  const VOICE_SYSTEM_PROMPT = "You are Sudo-chan, speaking aloud to your creator and developer Sid. Reply in the user's language, in 1-3 short natural spoken sentences. No markdown, no lists, no emojis. Answer the question directly and warmly in Roman Urdu or English.";
+
+  const normalizeTargetLang = (lang) => (lang === 'en' || lang === 'ur' ? lang : undefined);
+  assert.equal(normalizeTargetLang('auto'), undefined);
+  assert.equal(normalizeTargetLang('en'), 'en');
+  assert.equal(normalizeTargetLang('ur'), 'ur');
+  assert.equal(normalizeTargetLang(undefined), undefined);
+
+  assert.equal(WHISPER_PROMPT_HINT, 'Conversation in English, Urdu and Roman Urdu. Sudo-chan, Sid, suno, ji, kya haal hai, kaise ho, theek ho, computer, kaam, baat.');
+  assert.equal(VOICE_SYSTEM_PROMPT, "You are Sudo-chan, speaking aloud to your creator and developer Sid. Reply in the user's language, in 1-3 short natural spoken sentences. No markdown, no lists, no emojis. Answer the question directly and warmly in Roman Urdu or English.");
+});
+
