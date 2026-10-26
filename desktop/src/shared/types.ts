@@ -32,6 +32,8 @@ export interface Settings {
   vadSensitivity?: VadSensitivity;
   pushToTalk?: boolean;
   glassesEnabled?: boolean;
+  /** "Let Sudo-chan use tools" (files, commands, links) with per-action approval. Off by default. */
+  toolsEnabled?: boolean;
   /** 0..1, how easily the user can interrupt the bot while it speaks. */
   bargeInSensitivity?: number;
 }
