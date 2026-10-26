@@ -113,6 +113,10 @@ function Overlay({ state }: { state: AppState }) {
       onAudioLevel: level => {
         setOverlayAudioLevel(level);
       },
+      onBargeIn: () => {
+        stopSpeech();
+        void api?.stopReply();
+      },
       onFinal: (text, features) => {
         if (!text.trim()) return;
         const currentLive = isOverlayVoiceActiveRef.current;
@@ -266,6 +270,7 @@ function Chat({ state }: { state: AppState }) {
   const [activeVisualizer, setActiveVisualizer] = useState<'bot' | 'orb'>(() => state.settings.voiceVisualizerMode ?? 'bot');
   const [userSubtitle, setUserSubtitle] = useState('');
   const [botSubtitle, setBotSubtitle] = useState('');
+  const [liveTranscript, setLiveTranscript] = useState('');
   const [audioLevel, setAudioLevel] = useState(0);
   const [micMuted, setMicMuted] = useState(false);
   const voiceSessionRef = useRef<VoiceSession | null>(null);
@@ -275,6 +280,23 @@ function Chat({ state }: { state: AppState }) {
       setActiveVisualizer(state.settings.voiceVisualizerMode);
     }
   }, [state.settings.voiceVisualizerMode]);
+
+  // Global Ctrl+M shortcut to toggle mic / voice talk
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'm' || e.key === 'M')) {
+        e.preventDefault();
+        if (!isVoiceMode) {
+          void api?.setVoiceActive(true, 'chat');
+          setMicMuted(false);
+        } else {
+          setMicMuted(prev => !prev);
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isVoiceMode]);
 
   const isSpeakingRef = useRef(state.isSpeaking);
   isSpeakingRef.current = state.isSpeaking;
@@ -299,11 +321,14 @@ function Chat({ state }: { state: AppState }) {
     if (!micMuted) {
       session.start({
         isSpeaking: () => Boolean(isSpeakingRef.current),
+        language: state.settings.voiceLanguage === 'auto' ? undefined : state.settings.voiceLanguage,
         onInterim: text => {
           setUserSubtitle(text);
+          setLiveTranscript(text);
         },
         onFinal: text => {
           setUserSubtitle(text);
+          setLiveTranscript('');
           if (text.trim() && !conversationBusyRef.current) {
             setBotSubtitle('');
             void api?.sendMessage(text.trim());
@@ -311,6 +336,10 @@ function Chat({ state }: { state: AppState }) {
         },
         onAudioLevel: level => {
           setAudioLevel(level);
+        },
+        onBargeIn: () => {
+          stopSpeech();
+          void api?.stopReply();
         },
       });
     } else {
@@ -674,6 +703,14 @@ function Chat({ state }: { state: AppState }) {
                   )}
                 </article>
               ))}
+              {liveTranscript && (
+                <article className="message message-user live-transcript-bubble">
+                  <span className="message-author">
+                    YOU <span className="voice-badge">🎙️ Voice input...</span>
+                  </span>
+                  <p>{liveTranscript}</p>
+                </article>
+              )}
             </div>
           )}
         </div>
@@ -729,6 +766,86 @@ function Chat({ state }: { state: AppState }) {
               </div>
             </div>
           </form>
+
+          {/* Voice States Bar under the input: Listening / Thinking / Speaking */}
+          <div className="voice-state-bar">
+            {state.isSpeaking ? (
+              <>
+                <span className="voice-state-badge speaking">
+                  <span className="state-pulse" />
+                  🔊 Speaking...
+                </span>
+                <div className="voice-state-actions">
+                  <button
+                    type="button"
+                    className="voice-pill-btn danger"
+                    onClick={() => {
+                      stopSpeech();
+                      void api?.stopReply();
+                    }}
+                  >
+                    Stop speaking
+                  </button>
+                </div>
+              </>
+            ) : conversation.busy ? (
+              <>
+                <span className="voice-state-badge thinking">
+                  <span className="state-pulse" />
+                  ✨ Thinking...
+                </span>
+                <div className="voice-state-actions">
+                  <button
+                    type="button"
+                    className="voice-pill-btn"
+                    onClick={() => void api?.stopReply()}
+                  >
+                    Stop
+                  </button>
+                </div>
+              </>
+            ) : (isVoiceMode && !micMuted) ? (
+              <>
+                <span className="voice-state-badge listening">
+                  <span className="state-pulse" />
+                  🎙️ Listening...
+                  <span className="voice-meter-mini" title={`Mic level: ${Math.round(audioLevel * 100)}%`}>
+                    <span className="voice-meter-fill" style={{ width: `${Math.round(audioLevel * 100)}%` }} />
+                  </span>
+                </span>
+                <div className="voice-state-actions">
+                  <span style={{ fontSize: '10px', color: '#64748b' }}>Ctrl+M to mute</span>
+                  <button
+                    type="button"
+                    className="voice-pill-btn"
+                    onClick={() => setMicMuted(true)}
+                  >
+                    Mute
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <span className="voice-state-badge">
+                  <span style={{ opacity: 0.6 }}>🎙️</span>
+                  {micMuted ? 'Mic muted' : 'Mic idle'}
+                </span>
+                <div className="voice-state-actions">
+                  <button
+                    type="button"
+                    className="voice-pill-btn"
+                    onClick={() => {
+                      if (!isVoiceMode) void api?.setVoiceActive(true, 'chat');
+                      setMicMuted(false);
+                    }}
+                  >
+                    {isVoiceMode ? 'Unmute (Ctrl+M)' : 'Start Voice (Ctrl+M)'}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+
           <p className="composer-note">AI can make mistakes. Microphone is used for voice calls on this device.</p>
         </div>
       </>
