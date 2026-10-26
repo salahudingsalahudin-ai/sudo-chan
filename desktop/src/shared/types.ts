@@ -1,0 +1,131 @@
+export type Mood = 'calm' | 'worried' | 'happy';
+export type WindowKind = 'overlay' | 'chat' | 'settings';
+export type BotSize = 'small' | 'medium' | 'large';
+export type AIMode = 'local' | 'cloud';
+export type CloudProviderId = 'gemini' | 'groq' | 'openai' | 'openrouter' | 'custom';
+export type SttProviderId = 'auto' | 'browser' | 'whisper' | 'gemini';
+export type TtsProviderId = 'google' | 'gemini' | 'azure' | 'elevenlabs';
+export type VoiceLanguage = 'auto' | 'ur-PK' | 'en' | 'ur';
+export type SttLanguage = 'auto' | 'ur' | 'en' | 'ur-PK';
+export type VadSensitivity = 'low' | 'medium' | 'high';
+export interface Settings {
+  shortcut: string;
+  launchAtLogin: boolean;
+  botSize: BotSize;
+  pomodoroEnabled?: boolean;
+  pomodoroMinutes?: number;
+  voiceLockEnabled?: boolean;
+  registeredVoiceSample?: string;
+  customWakeWord?: string;
+  voiceVisualizerMode?: 'bot' | 'orb';
+  sttProvider?: SttProviderId;
+  sttLanguage?: SttLanguage;
+  ttsProvider?: TtsProviderId;
+  ttsVoice?: string;
+  ttsSpeed?: number;
+  voiceLanguage?: VoiceLanguage;
+  micDeviceId?: string;
+  vadSensitivity?: VadSensitivity;
+  pushToTalk?: boolean;
+  glassesEnabled?: boolean;
+}
+export interface AppState {
+  settings: Settings;
+  paused: boolean;
+  mood: Mood;
+  speech: string;
+  overlayVisible: boolean;
+  shortcutAvailable: boolean;
+  platform: string;
+  displayBackend: string;
+  loginSupported: boolean;
+  pomodoro?: { status: 'idle' | 'focus' | 'break'; minutesLeft: number; secondsLeft: number };
+  systemMemory?: { percent: number; isHeavy: boolean };
+  voiceCallActive?: boolean;
+  voiceActiveTarget?: 'overlay' | 'chat' | null;
+  isSpeaking?: boolean;
+}
+export interface ModelMeta {
+  sizeMB: number;
+  sizeLabel: string;
+  paramSize: string;
+  heavy: boolean;
+  warning?: string;
+}
+export interface CloudConfig {
+  provider: CloudProviderId;
+  endpoint: string;
+  model: string;
+  apiKeySet: boolean;
+  maskedKey: string;
+}
+export interface CloudConfigInput {
+  provider: CloudProviderId;
+  endpoint: string;
+  model: string;
+  apiKey?: string;
+}
+export interface ChatMessage { id: string; role: 'user' | 'assistant'; text: string; status?: 'streaming' | 'complete' | 'stopped' | 'error'; isVoice?: boolean; }
+export interface ChatState { messages: ChatMessage[]; busy: boolean; error: string; revision: number }
+export interface AIState {
+  mode: AIMode;
+  model: string;
+  models: string[];
+  modelSizes: Record<string, ModelMeta>;
+  connected: boolean;
+  error: string;
+  cloud: CloudConfig;
+}
+export interface ActionResult { ok: boolean; error?: string }
+export interface DesktopAPI {
+  getState(): Promise<AppState>;
+  onState(callback: (state: AppState) => void): () => void;
+  openChat(): Promise<void>;
+  openSettings(): Promise<void>;
+  hideWindow(): Promise<void>;
+  welcome(): Promise<void>;
+  setPaused(paused: boolean): Promise<void>;
+  saveSettings(settings: Settings): Promise<ActionResult>;
+  resetPosition(): Promise<void>;
+  setInteractive(interactive: boolean): void;
+  sendMessage(text: string): Promise<ActionResult>;
+  getMessages(): Promise<ChatState>;
+  onChat(callback: (state: ChatState) => void): () => void;
+  stopReply(): Promise<void>;
+  getAI(): Promise<AIState>;
+  onAI(callback: (state: AIState) => void): () => void;
+  checkAI(): Promise<AIState>;
+  selectModel(model: string): Promise<ActionResult>;
+  setAIMode(mode: AIMode): Promise<ActionResult>;
+  saveCloudConfig(config: CloudConfigInput): Promise<ActionResult>;
+  fetchCloudModels(config: { provider: CloudProviderId; endpoint: string; apiKey?: string }): Promise<{ ok: boolean; models?: string[]; error?: string }>;
+  detectProvider(apiKey: string): Promise<{ ok: boolean; provider?: CloudProviderId }>;
+  testCloud(config: CloudConfigInput): Promise<ActionResult>;
+  testFeature(feature: 'break' | 'heavy'): Promise<ActionResult>;
+  playSpeech(text: string): Promise<{ ok: boolean; dataUri?: string }>;
+  setVoiceActive(active: boolean, target?: 'overlay' | 'chat'): Promise<ActionResult>;
+  setIsSpeaking(speaking: boolean): Promise<ActionResult>;
+  transcribeAudio(base64Audio: string, mimeType?: string): Promise<{ ok: boolean; text?: string; error?: string }>;
+  playAudio(dataUri: string): Promise<{ ok: boolean; error?: string }>;
+  clearMessages(): Promise<void>;
+  quit(): Promise<void>;
+}
+export const CHANNELS = {
+  state: 'companion:state', getState: 'companion:get-state',
+  chat: 'companion:open-chat', settings: 'companion:open-settings',
+  hide: 'companion:hide', welcome: 'companion:welcome', pause: 'companion:pause',
+  save: 'companion:save', reset: 'companion:reset', interactive: 'companion:interactive',
+  send: 'companion:send', messages: 'companion:messages', clear: 'companion:clear', quit: 'companion:quit',
+  chatState: 'companion:chat-state', stop: 'companion:stop',
+  ai: 'companion:ai', aiState: 'companion:ai-state', checkAI: 'companion:check-ai',
+  model: 'companion:model', aiMode: 'companion:ai-mode', cloudConfig: 'companion:cloud-config',
+  fetchCloudModels: 'companion:fetch-cloud-models',
+  detectProvider: 'companion:detect-provider',
+  testCloud: 'companion:test-cloud',
+  testFeature: 'companion:test-feature',
+  playSpeech: 'companion:play-speech',
+  setVoiceActive: 'companion:set-voice-active',
+  setIsSpeaking: 'companion:set-is-speaking',
+  transcribeAudio: 'companion:transcribe-audio',
+  playAudio: 'companion:play-audio',
+} as const;
