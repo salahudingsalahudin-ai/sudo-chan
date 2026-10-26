@@ -20,6 +20,7 @@ export const DEFAULT_SETTINGS: Settings = {
   vadSensitivity: 'medium',
   pushToTalk: false,
   glassesEnabled: true,
+  bargeInSensitivity: 0.5,
 };
 export const BOT_DIMENSIONS = { small: [190, 230], medium: [220, 260], large: [264, 312] } as const;
 export const MAX_MESSAGE_LENGTH = 2000;
@@ -76,6 +77,7 @@ export function validSettings(value: unknown): value is Settings {
   if (s.voiceLanguage !== undefined && !['auto', 'ur-PK', 'en', 'ur'].includes(s.voiceLanguage)) return false;
   if (s.micDeviceId !== undefined && typeof s.micDeviceId !== 'string') return false;
   if (s.glassesEnabled !== undefined && typeof s.glassesEnabled !== 'boolean') return false;
+  if (s.bargeInSensitivity !== undefined && (typeof s.bargeInSensitivity !== 'number' || !Number.isFinite(s.bargeInSensitivity) || s.bargeInSensitivity < 0 || s.bargeInSensitivity > 1)) return false;
   return true;
 }
 export function validPosition(value: unknown): value is { x: number; y: number } {

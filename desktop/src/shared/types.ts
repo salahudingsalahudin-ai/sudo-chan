@@ -1,3 +1,4 @@
+import type { SpeechEvent } from './speech-events.js';
 export type Mood = 'calm' | 'worried' | 'happy';
 export type WindowKind = 'overlay' | 'chat' | 'settings';
 export type BotSize = 'small' | 'medium' | 'large';
@@ -28,6 +29,8 @@ export interface Settings {
   vadSensitivity?: VadSensitivity;
   pushToTalk?: boolean;
   glassesEnabled?: boolean;
+  /** 0..1, how easily the user can interrupt the bot while it speaks. */
+  bargeInSensitivity?: number;
 }
 export interface AppState {
   settings: Settings;
@@ -105,6 +108,8 @@ export interface DesktopAPI {
   playSpeech(payload: string | { text: string; lang?: string }): Promise<{ ok: boolean; dataUri?: string }>;
   setVoiceActive(active: boolean, target?: 'overlay' | 'chat'): Promise<ActionResult>;
   setIsSpeaking(speaking: boolean): Promise<ActionResult>;
+  emitSpeechEvent(event: SpeechEvent): void;
+  onSpeechEvent(callback: (event: SpeechEvent) => void): () => void;
   transcribeAudio(base64Audio: string, mimeType?: string, language?: string): Promise<{ ok: boolean; text?: string; error?: string; fallbackToBrowser?: boolean }>;
   playAudio(dataUri: string): Promise<{ ok: boolean; error?: string }>;
   clearMessages(): Promise<void>;
@@ -128,4 +133,6 @@ export const CHANNELS = {
   setIsSpeaking: 'companion:set-is-speaking',
   transcribeAudio: 'companion:transcribe-audio',
   playAudio: 'companion:play-audio',
+  speechEvent: 'companion:speech-event',
+  speechBroadcast: 'companion:speech-broadcast',
 } as const;

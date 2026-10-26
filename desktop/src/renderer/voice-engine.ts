@@ -338,15 +338,27 @@ export function checkWakeIntent(
   return { isWake, isQuestionOrHelp: isWake };
 }
 
+import { BargeInDetector, DEFAULT_BARGE_IN_SENSITIVITY } from '../shared/barge-in.ts';
+
+export interface BargeInInfo {
+  /** performance.now() when the user's interrupting speech began */
+  speechStartedAt: number;
+  /** performance.now() when the detector fired */
+  detectedAt: number;
+}
+
 export interface VoiceSessionCallbacks {
   isSpeaking?: () => boolean;
+  getBargeInSensitivity?: () => number;
   language?: string;
   onInterim?: (text: string) => void;
   onFinal?: (text: string, features?: { pitch?: number; centroid?: number }) => void;
   onAudioLevel?: (level: number) => void;
   onError?: (error: string) => void;
-  onBargeIn?: () => void;
+  onBargeIn?: (info?: BargeInInfo) => void;
 }
+
+const BARGE_IN_BASE_THRESHOLD = 0.009;
 
 /**
  * Continuous Voice Activity Detection (VAD) & Instant Speech Recognizer
@@ -365,6 +377,7 @@ export class VoiceSession {
   private silenceTimer: any = null;
   private isProcessingTranscribe = false;
   private callbacks: VoiceSessionCallbacks = {};
+  private bargeInDetector = new BargeInDetector({ baseThreshold: BARGE_IN_BASE_THRESHOLD, sensitivity: DEFAULT_BARGE_IN_SENSITIVITY });
 
   setCallbacks(callbacks: VoiceSessionCallbacks) {
     this.callbacks = callbacks;
@@ -383,6 +396,7 @@ export class VoiceSession {
         echoCancellation: true,
         noiseSuppression: true,
         autoGainControl: true,
+        channelCount: 1,
       },
     }).then(stream => {
       if (!this.active) {
@@ -399,7 +413,7 @@ export class VoiceSession {
       this.analyser = analyser;
       source.connect(analyser);
 
-      const processor = ctx.createScriptProcessor(4096, 1, 1);
+      const processor = ctx.createScriptProcessor(1024, 1, 1);
       const muteGain = ctx.createGain();
       muteGain.gain.value = 0;
       this.processor = processor;
@@ -412,13 +426,8 @@ export class VoiceSession {
 
       processor.onaudioprocess = e => {
         if (!this.active) return;
-        if (this.callbacks.isSpeaking?.()) {
-          // Companion is speaking aloud, ignore microphone audio to prevent feedback loop
-          this.preRollChunks = [];
-          return;
-        }
-
         const inputData = e.inputBuffer.getChannelData(0);
+        const frameMs = (inputData.length / sampleRate) * 1000;
         analyser.getFloatTimeDomainData(pcmBuffer);
 
         // Calculate Root Mean Square (RMS) volume
@@ -429,6 +438,34 @@ export class VoiceSession {
         const rms = Math.sqrt(sum / pcmBuffer.length);
         const normalized = Math.min(1, rms * 18); // 0 to 1 level
         this.callbacks.onAudioLevel?.(normalized);
+
+        // While the bot is speaking: keep mic + pre-roll alive and watch for barge-in only.
+        if (this.callbacks.isSpeaking?.()) {
+          const now = performance.now();
+          this.bargeInDetector.setConfig({
+            baseThreshold: BARGE_IN_BASE_THRESHOLD,
+            sensitivity: this.callbacks.getBargeInSensitivity?.() ?? DEFAULT_BARGE_IN_SENSITIVITY,
+          });
+          if (!this.isSpeakingSpeech) {
+            this.preRollChunks.push(new Float32Array(inputData));
+            // Keep ~400ms of audio so the start of the interruption is not clipped
+            const maxChunks = Math.ceil(400 / frameMs);
+            while (this.preRollChunks.length > maxChunks) this.preRollChunks.shift();
+          }
+          if (this.bargeInDetector.feed(rms, frameMs, now)) {
+            const speechStartedAt = this.bargeInDetector.speechStartedAt ?? now;
+            this.isSpeakingSpeech = true;
+            this.speechChunks = [...this.preRollChunks];
+            this.preRollChunks = [];
+            this.burstPitches = [];
+            this.callbacks.onBargeIn?.({ speechStartedAt, detectedAt: now });
+            this.callbacks.onInterim?.('🎙️ Sun rahi hoon...');
+          }
+          // After barge-in the bot is stopped; until isSpeaking() flips we just keep recording below
+          if (!this.isSpeakingSpeech) return;
+        } else {
+          this.bargeInDetector.reset();
+        }
 
         // Sensitive vocal threshold calibrated for natural laptop distance (covers quiet speech 50-70cm from laptop)
         const speechThreshold = 0.009;
@@ -465,7 +502,7 @@ export class VoiceSession {
             this.silenceTimer = setTimeout(() => {
               this.silenceTimer = null;
               this.isSpeakingSpeech = false;
-              if (this.speechChunks.length > 2 && !this.isProcessingTranscribe) {
+              if (this.speechChunks.length > 8 && !this.isProcessingTranscribe) {
                 const avgPitch = this.burstPitches.length > 0
                   ? Math.round(this.burstPitches.reduce((a, b) => a + b, 0) / this.burstPitches.length)
                   : undefined;
@@ -474,8 +511,8 @@ export class VoiceSession {
             }, 750);
           }
         } else {
-          // Standby background ambient: maintain circular pre-roll buffer (up to 4 chunks = ~340ms)
-          if (this.preRollChunks.length >= 4) {
+          // Standby background ambient: maintain circular pre-roll buffer (~340ms)
+          if (this.preRollChunks.length >= Math.ceil(340 / frameMs)) {
             this.preRollChunks.shift();
           }
           this.preRollChunks.push(new Float32Array(inputData));
