@@ -356,6 +356,13 @@ export interface VoiceSessionCallbacks {
   onAudioLevel?: (level: number) => void;
   onError?: (error: string) => void;
   onBargeIn?: (info?: BargeInInfo) => void;
+  /** Return false to drop a finished speech clip without sending it to the cloud (wake-word rate limiting). */
+  shouldTranscribe?: () => boolean;
+  /** Only the first N ms of a clip is sent. Wake-word listening needs just the name, not a monologue. */
+  maxClipMs?: number;
+  /** Vocabulary hint for the speech-to-text provider (e.g. the assistant's name and aliases). */
+  sttHint?: string;
+  onTranscribeResult?: (outcome: 'ok' | 'rate-limited' | 'error') => void;
 }
 
 const BARGE_IN_BASE_THRESHOLD = 0.009;
@@ -537,13 +544,22 @@ export class VoiceSession {
       this.speechChunks = [];
       this.burstPitches = [];
 
-      const wavBlob = encodeWav(merged, sampleRate);
+      if (callbacks.shouldTranscribe && !callbacks.shouldTranscribe()) {
+        callbacks.onInterim?.('');
+        this.isProcessingTranscribe = false;
+        return;
+      }
+      const maxSamples = callbacks.maxClipMs ? Math.floor((callbacks.maxClipMs / 1000) * sampleRate) : 0;
+      const clip = maxSamples > 0 && merged.length > maxSamples ? merged.subarray(0, maxSamples) : merged;
+
+      const wavBlob = encodeWav(clip, sampleRate);
       const reader = new FileReader();
       reader.onloadend = async () => {
         const dataUri = reader.result as string;
         if (typeof window !== 'undefined' && window.companion?.transcribeAudio) {
           callbacks.onInterim?.('✨ Samajh rahi hoon...');
-          const result = await window.companion.transcribeAudio(dataUri, 'audio/wav', callbacks.language);
+          const result = await window.companion.transcribeAudio(dataUri, 'audio/wav', callbacks.language, callbacks.sttHint);
+          callbacks.onTranscribeResult?.(result.rateLimited ? 'rate-limited' : result.ok || result.error === 'Could not transcribe speech.' ? 'ok' : 'error');
           if (result.ok && result.text) {
             callbacks.onFinal?.(result.text, { pitch: burstPitch });
           } else {

@@ -1115,3 +1115,7 @@ body[data-window=overlay]{overflow:hidden}.overlay-room{position:relative;width:
   from { box-shadow: 0 0 6px #38bdf822; }
   to { box-shadow: 0 0 14px #38bdf855; }
 }
+
+/* Wake-word indicator under the companion pill */
+.wake-indicator{margin-top:6px;border:1px solid rgba(149,220,228,.45);background:rgba(16,29,37,.82);color:#cfe9ee;font:600 11px/1 inherit;padding:5px 10px;border-radius:999px;cursor:pointer}
+.wake-indicator.is-paused{opacity:.7;border-style:dashed}

@@ -49,7 +49,7 @@ const api: DesktopAPI = {
     ipcRenderer.on(CHANNELS.speechBroadcast, listener);
     return () => ipcRenderer.removeListener(CHANNELS.speechBroadcast, listener);
   },
-  transcribeAudio: (base64Audio, mimeType, language) => ipcRenderer.invoke(CHANNELS.transcribeAudio, { base64Audio, mimeType, language }),
+  transcribeAudio: (base64Audio, mimeType, language, hint) => ipcRenderer.invoke(CHANNELS.transcribeAudio, { base64Audio, mimeType, language, hint }),
   playAudio: dataUri => ipcRenderer.invoke(CHANNELS.playAudio, dataUri),
   clearMessages: () => ipcRenderer.invoke(CHANNELS.clear),
   quit: () => ipcRenderer.invoke(CHANNELS.quit),

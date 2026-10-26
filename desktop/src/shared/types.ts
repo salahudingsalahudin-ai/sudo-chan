@@ -18,14 +18,16 @@ export interface Settings {
   voiceLockEnabled?: boolean;
   registeredVoiceSample?: string;
   customWakeWord?: string;
+  wakeWordEnabled?: boolean;
+  wakeAliases?: string[];
   voiceVisualizerMode?: 'bot' | 'orb';
   sttProvider?: SttProviderId;
   sttLanguage?: SttLanguage;
   ttsProvider?: TtsProviderId;
   ttsVoice?: string;
+  ttsGeminiVoice?: string;
   ttsSpeed?: number;
   voiceLanguage?: VoiceLanguage;
-  ttsGeminiVoice?: string;
   micDeviceId?: string;
   vadSensitivity?: VadSensitivity;
   pushToTalk?: boolean;
@@ -111,7 +113,7 @@ export interface DesktopAPI {
   setIsSpeaking(speaking: boolean): Promise<ActionResult>;
   emitSpeechEvent(event: SpeechEvent): void;
   onSpeechEvent(callback: (event: SpeechEvent) => void): () => void;
-  transcribeAudio(base64Audio: string, mimeType?: string, language?: string): Promise<{ ok: boolean; text?: string; error?: string; fallbackToBrowser?: boolean }>;
+  transcribeAudio(base64Audio: string, mimeType?: string, language?: string, hint?: string): Promise<{ ok: boolean; text?: string; error?: string; fallbackToBrowser?: boolean; rateLimited?: boolean }>;
   playAudio(dataUri: string): Promise<{ ok: boolean; error?: string }>;
   clearMessages(): Promise<void>;
   quit(): Promise<void>;

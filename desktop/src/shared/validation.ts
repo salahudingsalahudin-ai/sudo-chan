@@ -9,14 +9,16 @@ export const DEFAULT_SETTINGS: Settings = {
   voiceLockEnabled: false,
   registeredVoiceSample: '',
   customWakeWord: 'Sudo-chan',
+  wakeWordEnabled: false,
+  wakeAliases: ['Sudo', 'Sid', 'Sudo-chan', 'Suddo', 'Sit'],
   voiceVisualizerMode: 'bot',
   sttProvider: 'whisper',
   sttLanguage: 'auto',
   ttsProvider: 'gemini',
   ttsVoice: 'default',
+  ttsGeminiVoice: 'Kore',
   ttsSpeed: 1.0,
   voiceLanguage: 'auto',
-  ttsGeminiVoice: 'Kore',
   micDeviceId: 'default',
   vadSensitivity: 'medium',
   pushToTalk: false,
@@ -70,15 +72,17 @@ export function validSettings(value: unknown): value is Settings {
   if (s.voiceLockEnabled !== undefined && typeof s.voiceLockEnabled !== 'boolean') return false;
   if (s.registeredVoiceSample !== undefined && typeof s.registeredVoiceSample !== 'string') return false;
   if (s.customWakeWord !== undefined && (typeof s.customWakeWord !== 'string' || s.customWakeWord.length > 100)) return false;
+  if (s.wakeWordEnabled !== undefined && typeof s.wakeWordEnabled !== 'boolean') return false;
+  if (s.wakeAliases !== undefined && (!Array.isArray(s.wakeAliases) || s.wakeAliases.length > 20 || s.wakeAliases.some(a => typeof a !== 'string' || a.length > 40))) return false;
   if (s.voiceVisualizerMode !== undefined && s.voiceVisualizerMode !== 'bot' && s.voiceVisualizerMode !== 'orb') return false;
   if (s.sttProvider !== undefined && !['auto', 'browser', 'whisper', 'gemini'].includes(s.sttProvider)) return false;
   if (s.ttsProvider !== undefined && !['google', 'gemini', 'azure', 'elevenlabs'].includes(s.ttsProvider)) return false;
   if (s.ttsVoice !== undefined && typeof s.ttsVoice !== 'string') return false;
+  if (s.ttsGeminiVoice !== undefined && (typeof s.ttsGeminiVoice !== 'string' || !/^[A-Za-z]{2,30}$/.test(s.ttsGeminiVoice))) return false;
   if (s.ttsSpeed !== undefined && (typeof s.ttsSpeed !== 'number' || s.ttsSpeed < 0.5 || s.ttsSpeed > 2.0)) return false;
   if (s.voiceLanguage !== undefined && !['auto', 'ur-PK', 'en', 'ur'].includes(s.voiceLanguage)) return false;
   if (s.micDeviceId !== undefined && typeof s.micDeviceId !== 'string') return false;
   if (s.glassesEnabled !== undefined && typeof s.glassesEnabled !== 'boolean') return false;
-  if (s.ttsGeminiVoice !== undefined && (typeof s.ttsGeminiVoice !== 'string' || !/^[A-Za-z]{2,30}$/.test(s.ttsGeminiVoice))) return false;
   if (s.bargeInSensitivity !== undefined && (typeof s.bargeInSensitivity !== 'number' || !Number.isFinite(s.bargeInSensitivity) || s.bargeInSensitivity < 0 || s.bargeInSensitivity > 1)) return false;
   return true;
 }

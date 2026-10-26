@@ -6,10 +6,11 @@ import { Bot } from './Bot';
 import { SonicOrb } from './SonicOrb';
 import { AISettings } from './AISettings';
 import { useLipSync } from './lipsync';
+import { ConversationWindow, DEFAULT_ASSISTANT_NAME, DEFAULT_WAKE_ALIASES, WakeGate, buildWakeHint, matchWakeWord } from '../shared/wake-word.ts';
 import { getMutedPreference, setMutedPreference, speak, stopSpeech } from './speech';
 import { DEFAULT_BARGE_IN_SENSITIVITY } from '../shared/barge-in.ts';
 import { stopSpeaking } from './tts-player';
-import { VoiceSession, type BargeInInfo, checkWakeIntent, getVoiceProfile, isSpeakerMatch, recordVoiceSample } from './voice-engine';
+import { VoiceSession, type BargeInInfo, getVoiceProfile, isSpeakerMatch, recordVoiceSample } from './voice-engine';
 import type { VoiceProfile } from './voice-engine';
 
 const api = window.companion;
@@ -106,11 +107,19 @@ function Overlay({ state }: { state: AppState }) {
     }
   }, [state.mood]);
 
-  // Continuous Voice Listener for overlay (both Hands-Free Standby Wake-Up & Active Live Talk)
-  // Keeps mic persistent so wake-up words ("Sudo", "Sid") are NEVER missed or clipped!
+  // Wake word + Live Talk listener for the overlay.
+  // Privacy first: the mic is only open when "Listen for my name" is ON (and not paused) or Live Talk is active.
+  const wakeEnabled = Boolean(state.settings.wakeWordEnabled);
+  const [wakePaused, setWakePaused] = useState(false);
+  const wakeGate = useRef(new WakeGate(2000));
+  const wakeWindow = useRef(new ConversationWindow());
+  const wakeOpened = useRef(false);
+  const shouldListen = isOverlayVoiceActive || (wakeEnabled && !wakePaused);
+  const assistantName = state.settings.customWakeWord || DEFAULT_ASSISTANT_NAME;
+
   useEffect(() => {
     // If Chat window is actively having a voice session, Overlay yields the mic to Chat
-    if (state.voiceActiveTarget === 'chat') {
+    if (state.voiceActiveTarget === 'chat' || !shouldListen) {
       if (overlaySessionRef.current) {
         overlaySessionRef.current.stop();
         overlaySessionRef.current = null;
@@ -127,6 +136,13 @@ function Overlay({ state }: { state: AppState }) {
     session.start({
       isSpeaking: () => Boolean(stateRef.current.isSpeaking),
       language: stateRef.current.settings.voiceLanguage,
+      // Standby only needs the name: short clips, rate-limited, hinted with the name and aliases.
+      maxClipMs: isOverlayVoiceActive ? undefined : 4000,
+      sttHint: isOverlayVoiceActive ? undefined : buildWakeHint(stateRef.current.settings.customWakeWord, stateRef.current.settings.wakeAliases),
+      shouldTranscribe: () => isOverlayVoiceActiveRef.current || wakeGate.current.allow(performance.now()),
+      onTranscribeResult: outcome => {
+        if (!isOverlayVoiceActiveRef.current) wakeGate.current.report(performance.now(), outcome);
+      },
       onAudioLevel: level => {
         setOverlayAudioLevel(level);
       },
@@ -138,28 +154,25 @@ function Overlay({ state }: { state: AppState }) {
         const currentSettings = stateRef.current.settings;
 
         if (!currentLive) {
-          // In Standby: STRICT wake check — bot MUST only activate if user says "sudo", "sid", or custom wake word
-          const intent = checkWakeIntent(text, currentSettings.customWakeWord);
-          if (!intent.isWake) {
-            // Wake name was not spoken, ignore background chatter
-            return;
-          }
+          // Standby: fuzzy-match the assistant's name or aliases; ignore everything else.
+          const match = matchWakeWord(text, currentSettings.customWakeWord, currentSettings.wakeAliases);
+          if (!match.matched) return;
 
           // If personal voice lock is enabled, additionally verify the speaker is Sid
           const profile = getVoiceProfile();
           if (currentSettings.voiceLockEnabled && profile) {
-            const matchesSid = isSpeakerMatch(features ?? {}, profile);
-            if (!matchesSid) {
-              // Different voice detected while voice lock is active, ignore
-              return;
-            }
+            if (!isSpeakerMatch(features ?? {}, profile)) return;
           }
 
-          // Wake name verified -> activate Live Talk & send command
+          // Name heard: bot reacts, a 30 s conversation window opens where no name is needed.
+          wakeOpened.current = true;
+          wakeWindow.current.open(performance.now());
+          void api?.welcome();
           void api?.setVoiceActive(true, 'overlay');
-          void api?.sendMessage(text.trim());
+          if (match.rest) void api?.sendMessage(match.rest);
         } else {
-          // In Active Live Talk on Desktop: respond to whatever is spoken!
+          // In Live Talk: respond to whatever is spoken, and keep the wake window alive.
+          wakeWindow.current.touch(performance.now());
           void api?.sendMessage(text.trim());
         }
       },
@@ -171,7 +184,26 @@ function Overlay({ state }: { state: AppState }) {
         overlaySessionRef.current = null;
       }
     };
-  }, [state.voiceActiveTarget === 'chat']);
+  }, [state.voiceActiveTarget === 'chat', shouldListen, isOverlayVoiceActive]);
+
+  // The wake window ends Live Talk that the wake word started (never one the user started by hand).
+  useEffect(() => {
+    if (!isOverlayVoiceActive) {
+      wakeOpened.current = false;
+      wakeWindow.current.close();
+      return;
+    }
+    const timer = setInterval(() => {
+      if (!wakeOpened.current) return;
+      const now = performance.now();
+      if (stateRef.current.isSpeaking) wakeWindow.current.touch(now);
+      else if (!wakeWindow.current.isOpen(now)) {
+        wakeOpened.current = false;
+        void api?.setVoiceActive(false);
+      }
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [isOverlayVoiceActive]);
 
   // Spoken reply playback when conversation updates in overlay mode
   useEffect(() => {
@@ -250,6 +282,16 @@ function Overlay({ state }: { state: AppState }) {
               : 'Right here'}
         <Icon name="chat" size={13}/>
       </button>
+      {wakeEnabled && !isOverlayVoiceActive && (
+        <button
+          className={`wake-indicator ${wakePaused ? 'is-paused' : ''}`}
+          onClick={() => setWakePaused(prev => !prev)}
+          title={wakePaused ? 'Name listening is paused. Click to resume.' : `Listening locally for "${assistantName}". Click to pause.`}
+          aria-pressed={wakePaused}
+        >
+          {wakePaused ? '⏸ Paused' : `👂 Listening for "${assistantName}"`}
+        </button>
+      )}
     </div>
   </main>;
 }
@@ -930,6 +972,8 @@ function SettingsView({ state }: { state: AppState }) {
     settings.voiceLockEnabled !== state.settings.voiceLockEnabled ||
     settings.registeredVoiceSample !== state.settings.registeredVoiceSample ||
     settings.customWakeWord !== state.settings.customWakeWord ||
+    settings.wakeWordEnabled !== state.settings.wakeWordEnabled ||
+    JSON.stringify(settings.wakeAliases) !== JSON.stringify(state.settings.wakeAliases) ||
     settings.voiceVisualizerMode !== state.settings.voiceVisualizerMode ||
     settings.glassesEnabled !== state.settings.glassesEnabled ||
     settings.bargeInSensitivity !== state.settings.bargeInSensitivity ||
@@ -945,9 +989,14 @@ function SettingsView({ state }: { state: AppState }) {
     state.settings.voiceLockEnabled,
     state.settings.registeredVoiceSample,
     state.settings.customWakeWord,
+    state.settings.wakeWordEnabled,
+    JSON.stringify(state.settings.wakeAliases),
     state.settings.voiceVisualizerMode,
     state.settings.glassesEnabled,
     state.settings.bargeInSensitivity,
+    state.settings.ttsProvider,
+    state.settings.ttsGeminiVoice,
+    state.settings.ttsSpeed,
   ]);
   useEffect(() => {
     const root = settingsScroll.current;
@@ -994,9 +1043,6 @@ function SettingsView({ state }: { state: AppState }) {
                 <span/>
               </button>
             </div>
-    state.settings.ttsProvider,
-    state.settings.ttsGeminiVoice,
-    state.settings.ttsSpeed,
           </SettingRow>
           <SettingRow title="Back to a familiar place" description="Move her to the bottom-right of your main screen."><button className="soft-button" type="button" onClick={() => void api?.resetPosition()}><Icon name="reset" size={15}/>Reset position</button></SettingRow>
           <div className="gentle-note"><Icon name="chat" size={16}/><p>Drag the three little dots above her head. Click her to say hello; double-click to chat.</p></div>
@@ -1107,16 +1153,31 @@ function SettingsView({ state }: { state: AppState }) {
               </button>
             </div>
           </SettingRow>
+          <SettingRow title="Listen for my name" description="Off by default. When on, the mic listens locally and only short clips with speech are sent to speech-to-text. Pause any time from the bot's indicator.">
+            <div className="switch-control"><span>{settings.wakeWordEnabled ? 'On' : 'Off'}</span><button className="switch" type="button" role="switch" aria-label="Listen for my name" aria-checked={Boolean(settings.wakeWordEnabled)} onClick={() => setSettings({ ...settings, wakeWordEnabled: !settings.wakeWordEnabled })}><span/></button></div>
+          </SettingRow>
           <SettingRow
-            title="Custom Wake Phrase"
-            description="Agar koi aur user baat karna chahta hai, ya fallback ke tor par yeh phrase bolain:"
+            title="Assistant name"
+            description="The name you call her by. Spoken names are matched loosely (small mishearings are fine)."
           >
             <input
               type="text"
               className="wake-word-input"
               value={settings.customWakeWord ?? 'Sudo-chan'}
               onChange={e => setSettings({ ...settings, customWakeWord: e.target.value })}
-              placeholder="e.g. Sudo-chan"
+              placeholder="e.g. Sudo"
+            />
+          </SettingRow>
+          <SettingRow
+            title="Name aliases"
+            description="Other ways you call her, comma separated. Very short aliases must match exactly."
+          >
+            <input
+              type="text"
+              className="wake-word-input"
+              value={(settings.wakeAliases ?? DEFAULT_WAKE_ALIASES).join(', ')}
+              onChange={e => setSettings({ ...settings, wakeAliases: e.target.value.split(',').map(a => a.trim()).filter(Boolean).slice(0, 20) })}
+              placeholder="Sudo, Sid, Sudo-chan"
             />
           </SettingRow>
           <SettingRow
@@ -1141,6 +1202,20 @@ function SettingsView({ state }: { state: AppState }) {
             <button type="button" className="soft-button" onClick={() => void speak('Assalam o Alaikum Sid! Main Sudo-chan hoon, aapki desktop companion.')}>
               🔊 Test Voice Sound
             </button>
+          </SettingRow>
+          <SettingRow title="Voice engine" description="Gemini gives a more natural, expressive voice (needs your Gemini key; about 4-6 s per sentence on the free tier). Google is faster but flatter. Falls back to Google automatically if Gemini fails.">
+            <select className="wake-word-input" aria-label="Voice engine" value={settings.ttsProvider ?? 'gemini'} onChange={event => setSettings({ ...settings, ttsProvider: event.target.value as Settings['ttsProvider'] })}>
+              <option value="gemini">Gemini (expressive)</option>
+              <option value="google">Google (fast)</option>
+            </select>
+          </SettingRow>
+          <SettingRow title="Gemini voice" description="Voice used by the Gemini engine.">
+            <select className="wake-word-input" aria-label="Gemini voice" value={settings.ttsGeminiVoice ?? 'Kore'} onChange={event => setSettings({ ...settings, ttsGeminiVoice: event.target.value })}>
+              {['Kore', 'Puck', 'Zephyr', 'Aoede', 'Leda', 'Charon', 'Fenrir'].map(voice => <option key={voice} value={voice}>{voice}</option>)}
+            </select>
+          </SettingRow>
+          <SettingRow title="Speaking speed" description={`Gemini voice pace (${(settings.ttsSpeed ?? 1).toFixed(1)}x). Not applied to the Google engine.`}>
+            <label className="shortcut-label"><span className="sr-only">Speaking speed</span><input type="range" min={0.7} max={1.4} step={0.1} value={settings.ttsSpeed ?? 1} onChange={event => setSettings({ ...settings, ttsSpeed: Number(event.target.value) })}/></label>
           </SettingRow>
           <SettingRow title="Barge-in sensitivity" description={`How easily you can interrupt Sudo-chan while she speaks (${Math.round((settings.bargeInSensitivity ?? DEFAULT_BARGE_IN_SENSITIVITY) * 100)}%). Raise it for headphones, lower it on speakers.`}>
             <label className="shortcut-label"><span className="sr-only">Barge-in sensitivity</span><input type="range" min={0} max={100} step={5} value={Math.round((settings.bargeInSensitivity ?? DEFAULT_BARGE_IN_SENSITIVITY) * 100)} onChange={event => setSettings({ ...settings, bargeInSensitivity: Number(event.target.value) / 100 })}/></label>
@@ -1194,17 +1269,3 @@ export default function App() {
   if (kind === 'chat') return <Chat state={state}/>;
   return <SettingsView state={state}/>;
 }
-          <SettingRow title="Voice engine" description="Gemini gives a more natural, expressive voice (needs your Gemini key; about 4-6 s per sentence on the free tier). Google is faster but flatter. Falls back to Google automatically if Gemini fails.">
-            <select className="wake-word-input" aria-label="Voice engine" value={settings.ttsProvider ?? 'gemini'} onChange={event => setSettings({ ...settings, ttsProvider: event.target.value as Settings['ttsProvider'] })}>
-              <option value="gemini">Gemini (expressive)</option>
-              <option value="google">Google (fast)</option>
-            </select>
-          </SettingRow>
-          <SettingRow title="Gemini voice" description="Voice used by the Gemini engine.">
-            <select className="wake-word-input" aria-label="Gemini voice" value={settings.ttsGeminiVoice ?? 'Kore'} onChange={event => setSettings({ ...settings, ttsGeminiVoice: event.target.value })}>
-              {['Kore', 'Puck', 'Zephyr', 'Aoede', 'Leda', 'Charon', 'Fenrir'].map(voice => <option key={voice} value={voice}>{voice}</option>)}
-            </select>
-          </SettingRow>
-          <SettingRow title="Speaking speed" description={`Gemini voice pace (${(settings.ttsSpeed ?? 1).toFixed(1)}x). Not applied to the Google engine.`}>
-            <label className="shortcut-label"><span className="sr-only">Speaking speed</span><input type="range" min={0.7} max={1.4} step={0.1} value={settings.ttsSpeed ?? 1} onChange={event => setSettings({ ...settings, ttsSpeed: Number(event.target.value) })}/></label>
-          </SettingRow>

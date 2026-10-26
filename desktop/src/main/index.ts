@@ -652,7 +652,9 @@ function setupIPC() {
   });
   handle(CHANNELS.transcribeAudio, async (_event: IpcMainInvokeEvent, payload: unknown) => {
     if (!payload || typeof payload !== 'object') return { ok: false, error: 'No audio provided' };
-    const { base64Audio, mimeType, language } = payload as { base64Audio?: string; mimeType?: string; language?: string };
+    const { base64Audio, mimeType, language, hint } = payload as { base64Audio?: string; mimeType?: string; language?: string; hint?: string };
+    const sttHint = typeof hint === 'string' ? hint.replace(/[^\p{L}\p{N}\s,.'-]/gu, ' ').slice(0, 300).trim() : '';
+    let rateLimited = false;
     if (typeof base64Audio !== 'string' || !base64Audio) return { ok: false, error: 'No audio provided' };
     const base64 = base64Audio.includes('base64,') ? base64Audio.split('base64,')[1] : base64Audio;
     const buffer = Buffer.from(base64, 'base64');
@@ -691,7 +693,7 @@ function setupIPC() {
               {
                 parts: [
                   {
-                    text: `Transcribe the spoken words in this audio exactly as heard ${langHint}. If the user calls Sudo or Sid, write Sid or Sudo. Return ONLY the transcribed text verbatim with no markdown, quotes, or explanations. If there is no speech, reply with an empty string.`,
+                    text: `Transcribe the spoken words in this audio exactly as heard ${langHint}. If the user calls Sudo or Sid, write Sid or Sudo.${sttHint ? ` ${sttHint}` : ''} Return ONLY the transcribed text verbatim with no markdown, quotes, or explanations. If there is no speech, reply with an empty string.`,
                   },
                   {
                     inlineData: {
@@ -733,7 +735,7 @@ function setupIPC() {
           if (targetLang) {
             formData.append('language', targetLang);
           }
-          formData.append('prompt', 'Conversation in English, Urdu and Roman Urdu. Sudo-chan, Sid, suno, ji, kya haal hai, kaise ho, theek ho, computer, kaam, baat.');
+          formData.append('prompt', sttHint || 'Conversation in English, Urdu and Roman Urdu. Sudo-chan, Sid, suno, ji, kya haal hai, kaise ho, theek ho, computer, kaam, baat.');
           formData.append('temperature', '0');
 
           return fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
@@ -753,6 +755,7 @@ function setupIPC() {
           res = await sendWhisper('whisper-large-v3-turbo').catch(() => null);
         }
 
+        if (res && res.status === 429) rateLimited = true;
         if (res && res.ok) {
           const data = await res.json() as { text?: string };
           const rawText = data.text?.trim() ?? '';
@@ -796,7 +799,7 @@ function setupIPC() {
       }
     }
 
-    return { ok: false, error: 'Could not transcribe speech.', fallbackToBrowser: true };
+    return { ok: false, error: rateLimited ? 'rate-limited' : 'Could not transcribe speech.', fallbackToBrowser: true, rateLimited };
   });
   handle(CHANNELS.playAudio, async (_event, dataUri: unknown) => {
     if (typeof dataUri !== 'string' || !dataUri) return { ok: false, error: 'Invalid audio' };
