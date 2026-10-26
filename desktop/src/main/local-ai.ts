@@ -1,6 +1,8 @@
 import { freemem, totalmem } from 'node:os';
 import type { AIMode, CloudProviderId, ModelMeta } from '../shared/types.js';
 import { CLOUD_PRESETS } from '../shared/validation.js';
+import { runToolLoop, ToolLoopHttpError, ToolsUnsupportedError } from './tools/agent-loop.js';
+import type { ToolRuntimeLike } from './tools/types.js';
 
 export function normalizeCloudModel(provider: CloudProviderId, model: string): string {
   let clean = model.trim();
@@ -82,10 +84,25 @@ export function getModelsEndpoint(provider: CloudProviderId, endpoint: string): 
 
 const BASE = 'http://127.0.0.1:11434';
 
+function safeJson(text: string): unknown {
+  try { return JSON.parse(text); } catch { return undefined; }
+}
+
+export const TOOLS_PROMPT = [
+  '[TOOLS ARE ON]',
+  'You can act on the user\'s computer ONLY through tool calls:',
+  '- read-only (home folder only): read_file, list_dir, search_files, get_system_info',
+  '- need the user to click Allow on screen every time: write_file, append_file, run_command (one program, no pipes), open_url, open_app',
+  'Rules: use a tool only when the request needs it. Before a risky action say in one short sentence what you are about to do; the user approves with a button on screen, NOT by voice or by saying "yes".',
+  'If a tool result says blocked, denied, timed out or NOT done, tell the user plainly and do not pretend otherwise. NEVER claim you read, wrote, ran or opened anything unless a tool result confirms it.',
+  'You cannot see the screen or browse the web, and secrets (.ssh, .env, passwords, browser data) are off limits.',
+].join('\n');
+
 export function buildSystemPrompt(options?: {
   voice?: boolean;
   model?: string;
   provider?: string;
+  tools?: boolean;
 }): string {
   if (options?.voice) {
     return [
@@ -95,6 +112,7 @@ export function buildSystemPrompt(options?: {
       "Start EVERY sentence with exactly one emotion tag in square brackets, chosen from: [warm] [excited] [calm] [curious] [soft] [happy].",
       "Use [happy] for greetings, [soft] for apologies, [curious] for questions, [excited] for good news, [calm] for reassurance, [warm] otherwise.",
       "Example: [happy] Assalam o Alaikum Sid! [curious] Aaj kis cheez par kaam karna hai?",
+      ...(options.tools ? ["You can use computer tools (files, commands, links) but risky ones need the user to click Allow on screen: say \"please approve on screen\" and never treat a spoken yes as approval. Never claim an action happened unless the tool result confirms it."] : []),
     ].join(' ');
   }
 
@@ -126,7 +144,10 @@ export function buildSystemPrompt(options?: {
     modelFact,
     providerFact,
     '- Real Desktop Features: Pomodoro focus timer, live system RAM health alert, Live Talk voice companion, cute customizable glasses, quiet standby overlay.',
-    '- Real System Boundaries: Privacy-first desktop companion. Cannot view desktop screen pixels, cannot modify or delete OS files directly, cannot browse the live web.',
+    options?.tools
+      ? '- Real System Boundaries: Privacy-first desktop companion. Cannot view desktop screen pixels or browse the live web. Files and commands are only possible through the tools below, with the user\'s approval.'
+      : '- Real System Boundaries: Privacy-first desktop companion. Cannot view desktop screen pixels, cannot modify or delete OS files directly, cannot browse the live web.',
+    options?.tools ? `\n${TOOLS_PROMPT}` : '',
   ].filter(Boolean).join('\n');
 }
 
@@ -197,6 +218,8 @@ export interface StreamOptions {
   heavy?: boolean;
   cloud?: StoredCloudConfig;
   voice?: boolean;
+  /** Present only when the user enabled "Let Sudo-chan use tools". */
+  tools?: ToolRuntimeLike;
 }
 type Fetch = typeof fetch;
 export class LocalAIError extends Error {}
@@ -509,6 +532,43 @@ export class LocalAI {
     console.log(`[Cloud AI] Stream request model: ${model}`);
 
     const providerLabel = CLOUD_PRESETS[cloud.provider]?.label || cloud.provider;
+    if (options?.tools && options.tools.definitions.length) {
+      const toolSystem = buildSystemPrompt({ voice: options.voice, model, provider: providerLabel, tools: true });
+      const toolMessages = options.voice
+        ? [{ role: 'system' as const, content: toolSystem }, ...messages]
+        : [{ role: 'system' as const, content: toolSystem }, ...FEW_SHOT_EXAMPLES, ...messages];
+      try {
+        const outcome = await runToolLoop({
+          // Each model request has its own 60 s limit; waiting for the user's approval is not counted.
+          fetchFn: (url, init) => this.request(url, { ...init, signal: AbortSignal.any([...(init.signal ? [init.signal] : []), AbortSignal.timeout(60_000)]) }),
+          endpoint,
+          apiKey,
+          model,
+          messages: toolMessages,
+          tools: options.tools,
+          signal,
+          onText,
+          maxTokens: cloud.provider === 'groq' ? 950 : 1500,
+          onToolCall: name => console.log(`[Tools] model called ${name}`),
+        });
+        console.log(`[Tools] finished after ${outcome.steps} step(s), ${outcome.toolCalls} tool call(s)`);
+        return;
+      } catch (error) {
+        if (signal.aborted) throw error;
+        if (error instanceof ToolsUnsupportedError) {
+          console.warn('[Tools] provider rejected tools; continuing with plain chat.');
+        } else if (error instanceof ToolLoopHttpError) {
+          if (error.status === 401 || error.status === 403) throw new LocalAIError('Cloud API key rejected (401/403). Check your key in Settings → Local AI.');
+          if (error.status === 404) throw new LocalAIError('Model not found (404). Click "Auto-Detect Models" in Settings.');
+          if (error.status === 0) throw new LocalAIError('Cloud API returned an empty reply. Please try again.');
+          throw new LocalAIError(`Cloud API request failed (${error.status}): ${extractErrorMessage(safeJson(error.detail)) || error.detail.slice(0, 100) || 'Check your model in Settings.'}`);
+        } else if (error instanceof LocalAIError) {
+          throw error;
+        } else {
+          throw new LocalAIError(`Cloud API error: ${(error as Error)?.message || 'connection failed.'}`);
+        }
+      }
+    }
     const systemPrompt = buildSystemPrompt({
       voice: options?.voice,
       model,
