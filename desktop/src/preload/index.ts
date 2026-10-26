@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import { CHANNELS } from '../shared/types.js';
+import type { SpeechEvent } from '../shared/speech-events.js';
 import type { AIState, AppState, ChatState, DesktopAPI } from '../shared/types.js';
 
 const api: DesktopAPI = {
@@ -42,6 +43,12 @@ const api: DesktopAPI = {
   playSpeech: payload => ipcRenderer.invoke(CHANNELS.playSpeech, payload),
   setVoiceActive: (active, target) => ipcRenderer.invoke(CHANNELS.setVoiceActive, { active, target }),
   setIsSpeaking: speaking => ipcRenderer.invoke(CHANNELS.setIsSpeaking, speaking),
+  emitSpeechEvent: event => ipcRenderer.send(CHANNELS.speechEvent, event),
+  onSpeechEvent: callback => {
+    const listener = (_event: Electron.IpcRendererEvent, event: SpeechEvent) => callback(event);
+    ipcRenderer.on(CHANNELS.speechBroadcast, listener);
+    return () => ipcRenderer.removeListener(CHANNELS.speechBroadcast, listener);
+  },
   transcribeAudio: (base64Audio, mimeType, language) => ipcRenderer.invoke(CHANNELS.transcribeAudio, { base64Audio, mimeType, language }),
   playAudio: dataUri => ipcRenderer.invoke(CHANNELS.playAudio, dataUri),
   clearMessages: () => ipcRenderer.invoke(CHANNELS.clear),

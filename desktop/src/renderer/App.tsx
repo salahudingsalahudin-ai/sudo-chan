@@ -5,8 +5,11 @@ import { DEFAULT_SETTINGS, MAX_MESSAGE_LENGTH } from '../shared/validation';
 import { Bot } from './Bot';
 import { SonicOrb } from './SonicOrb';
 import { AISettings } from './AISettings';
+import { useLipSync } from './lipsync';
 import { getMutedPreference, setMutedPreference, speak, stopSpeech } from './speech';
-import { VoiceSession, checkWakeIntent, getVoiceProfile, isSpeakerMatch, recordVoiceSample } from './voice-engine';
+import { DEFAULT_BARGE_IN_SENSITIVITY } from '../shared/barge-in.ts';
+import { stopSpeaking } from './tts-player';
+import { VoiceSession, type BargeInInfo, checkWakeIntent, getVoiceProfile, isSpeakerMatch, recordVoiceSample } from './voice-engine';
 import type { VoiceProfile } from './voice-engine';
 
 const api = window.companion;
@@ -69,10 +72,23 @@ function useCompanion() {
 function WindowHeader({ subtitle, settings = false }: { subtitle: string; settings?: boolean }) {
   return <header className="window-header"><div className="brand-mark">s<span/></div><div className="header-brand"><b>Sudo-chan</b><span>{subtitle}</span></div><div className="header-actions">{!settings && <button className="icon-button" aria-label="Open settings" onClick={() => void api?.openSettings()}><Icon name="settings"/></button>}<button className="icon-button" aria-label="Hide window" onClick={() => void api?.hideWindow()}><Icon name="close"/></button></div></header>;
 }
+declare global { interface Window { __bargeInLatency?: Array<{ speechToDetectMs: number; detectToStoppedMs: number }> } }
+// Barge-in: user speech detected while the bot talks -> stop audio, clear queue, abort the LLM stream.
+function handleBargeIn(info?: BargeInInfo) {
+  const detectedAt = info?.detectedAt ?? performance.now();
+  stopSpeaking('barge-in');
+  void api?.stopReply();
+  const stoppedAt = performance.now();
+  const speechToDetectMs = Math.round(detectedAt - (info?.speechStartedAt ?? detectedAt));
+  const detectToStoppedMs = Math.round(stoppedAt - detectedAt);
+  console.info(`[barge-in] speech→detect ${speechToDetectMs}ms, detect→stopped ${detectToStoppedMs}ms`);
+  (window.__bargeInLatency ??= []).push({ speechToDetectMs, detectToStoppedMs });
+}
 function Overlay({ state }: { state: AppState }) {
   const [arriving, setArriving] = useState(false);
   const [cursorOffset, setCursorOffset] = useState<{ x: number; y: number } | undefined>(undefined);
   const [overlayAudioLevel, setOverlayAudioLevel] = useState(0);
+  const lip = useLipSync(Boolean(state.voiceCallActive));
   const lastSpokenOverlayId = useRef<string | null>(null);
   const isOverlayVoiceActive = state.voiceActiveTarget === 'overlay';
   const overlaySessionRef = useRef<VoiceSession | null>(null);
@@ -114,10 +130,8 @@ function Overlay({ state }: { state: AppState }) {
       onAudioLevel: level => {
         setOverlayAudioLevel(level);
       },
-      onBargeIn: () => {
-        stopSpeech();
-        void api?.stopReply();
-      },
+      getBargeInSensitivity: () => stateRef.current.settings.bargeInSensitivity ?? DEFAULT_BARGE_IN_SENSITIVITY,
+      onBargeIn: handleBargeIn,
       onFinal: (text, features) => {
         if (!text.trim()) return;
         const currentLive = isOverlayVoiceActiveRef.current;
@@ -205,8 +219,8 @@ function Overlay({ state }: { state: AppState }) {
     >
       {(state.settings.voiceVisualizerMode ?? 'bot') === 'orb' ? (
         <SonicOrb
-          isSpeaking={state.isSpeaking}
-          audioLevel={overlayAudioLevel}
+          isSpeaking={lip.speaking}
+          audioLevel={lip.speaking ? lip.level : overlayAudioLevel}
           size={140}
           onClick={() => void api?.setVoiceActive(!isOverlayVoiceActive, 'overlay')}
         />
@@ -216,8 +230,8 @@ function Overlay({ state }: { state: AppState }) {
           paused={state.paused}
           cursorOffset={cursorOffset}
           voiceActive={isOverlayVoiceActive}
-          isSpeaking={state.isSpeaking}
-          audioLevel={overlayAudioLevel}
+          isSpeaking={lip.speaking}
+          audioLevel={lip.speaking ? lip.level : overlayAudioLevel}
           glasses={state.settings.glassesEnabled ?? true}
           onToggleVoice={() => void api?.setVoiceActive(!isOverlayVoiceActive, 'overlay')}
           onOpenSettings={() => void api?.openSettings()}
@@ -273,6 +287,7 @@ function Chat({ state }: { state: AppState }) {
   const [botSubtitle, setBotSubtitle] = useState('');
   const [liveTranscript, setLiveTranscript] = useState('');
   const [audioLevel, setAudioLevel] = useState(0);
+  const lip = useLipSync(Boolean(state.voiceCallActive));
   const [micMuted, setMicMuted] = useState(false);
   const voiceSessionRef = useRef<VoiceSession | null>(null);
 
@@ -301,6 +316,8 @@ function Chat({ state }: { state: AppState }) {
 
   const isSpeakingRef = useRef(state.isSpeaking);
   isSpeakingRef.current = state.isSpeaking;
+  const settingsRef = useRef(state.settings);
+  settingsRef.current = state.settings;
   const conversationBusyRef = useRef(conversation.busy);
   conversationBusyRef.current = conversation.busy;
 
@@ -338,10 +355,8 @@ function Chat({ state }: { state: AppState }) {
         onAudioLevel: level => {
           setAudioLevel(level);
         },
-        onBargeIn: () => {
-          stopSpeech();
-          void api?.stopReply();
-        },
+        getBargeInSensitivity: () => settingsRef.current.bargeInSensitivity ?? DEFAULT_BARGE_IN_SENSITIVITY,
+        onBargeIn: handleBargeIn,
       });
     } else {
       session.stop();
@@ -367,7 +382,7 @@ function Chat({ state }: { state: AppState }) {
     const next = !muted;
     setMuted(next);
     setMutedPreference(next);
-    if (next) stopSpeech();
+    if (next) stopSpeaking('mute');
   };
 
   useEffect(() => {
@@ -597,9 +612,9 @@ function Chat({ state }: { state: AppState }) {
         <div className="voice-avatar-stage">
           {activeVisualizer === 'orb' ? (
             <SonicOrb
-              isSpeaking={state.isSpeaking}
+              isSpeaking={lip.speaking}
               isBusy={conversation.busy}
-              audioLevel={audioLevel}
+              audioLevel={lip.speaking ? lip.level : audioLevel}
               size={210}
               onClick={() => setMicMuted(prev => !prev)}
             />
@@ -614,8 +629,8 @@ function Chat({ state }: { state: AppState }) {
                 mood={state.mood}
                 paused={state.paused}
                 voiceActive={true}
-                isSpeaking={state.isSpeaking}
-                audioLevel={audioLevel}
+                isSpeaking={lip.speaking}
+                audioLevel={lip.speaking ? lip.level : audioLevel}
                 glasses={state.settings.glassesEnabled ?? true}
               />
             </>
@@ -916,7 +931,8 @@ function SettingsView({ state }: { state: AppState }) {
     settings.registeredVoiceSample !== state.settings.registeredVoiceSample ||
     settings.customWakeWord !== state.settings.customWakeWord ||
     settings.voiceVisualizerMode !== state.settings.voiceVisualizerMode ||
-    settings.glassesEnabled !== state.settings.glassesEnabled;
+    settings.glassesEnabled !== state.settings.glassesEnabled ||
+    settings.bargeInSensitivity !== state.settings.bargeInSensitivity;
   useEffect(() => setSettings(state.settings), [
     state.settings.botSize,
     state.settings.shortcut,
@@ -928,6 +944,7 @@ function SettingsView({ state }: { state: AppState }) {
     state.settings.customWakeWord,
     state.settings.voiceVisualizerMode,
     state.settings.glassesEnabled,
+    state.settings.bargeInSensitivity,
   ]);
   useEffect(() => {
     const root = settingsScroll.current;
@@ -1118,6 +1135,9 @@ function SettingsView({ state }: { state: AppState }) {
             <button type="button" className="soft-button" onClick={() => void speak('Assalam o Alaikum Sid! Main Sudo-chan hoon, aapki desktop companion.')}>
               🔊 Test Voice Sound
             </button>
+          </SettingRow>
+          <SettingRow title="Barge-in sensitivity" description={`How easily you can interrupt Sudo-chan while she speaks (${Math.round((settings.bargeInSensitivity ?? DEFAULT_BARGE_IN_SENSITIVITY) * 100)}%). Raise it for headphones, lower it on speakers.`}>
+            <label className="shortcut-label"><span className="sr-only">Barge-in sensitivity</span><input type="range" min={0} max={100} step={5} value={Math.round((settings.bargeInSensitivity ?? DEFAULT_BARGE_IN_SENSITIVITY) * 100)} onChange={event => setSettings({ ...settings, bargeInSensitivity: Number(event.target.value) / 100 })}/></label>
           </SettingRow>
           <SettingRow title="Pomodoro Focus Reminders" description={`25 min focus / 5 min break timer. ${state.pomodoro ? `${state.pomodoro.minutesLeft}m ${state.pomodoro.secondsLeft}s remaining` : 'Active'}.`}>
             <button type="button" className="soft-button" onClick={() => void api?.testFeature('break')}>

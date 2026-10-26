@@ -5,14 +5,13 @@ import { setLaunchAtLogin } from './autostart.js';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { mkdtempSync, promises as fsp } from 'node:fs';
-import { execFile } from 'node:child_process';
-import type { ChildProcess } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { CHANNELS } from '../shared/types.js';
 import type { AIMode, AIState, AppState, CloudConfigInput, CloudProviderId, Settings, WindowKind } from '../shared/types.js';
 import { BOT_DIMENSIONS, clampPosition, CLOUD_PRESETS, DEFAULT_SETTINGS, maskApiKey, validCloudConfig, validPosition, validSettings } from '../shared/validation.js';
 import { cleanTextForSpeech, detectSentenceLanguage } from '../shared/speech.js';
 import { displayBackend } from '../shared/display-backend.js';
+import type { SpeechEvent, StopReason } from '../shared/speech-events.js';
 import { overlayShape } from '../shared/overlay-shape.js';
 import { LocalAI, normalizeCloudModel } from './local-ai.js';
 import { ChatSession } from './chat-session.js';
@@ -64,7 +63,7 @@ let happyTimer: ReturnType<typeof setTimeout> | undefined;
 let displayTimer: ReturnType<typeof setTimeout> | undefined;
 let resetInterval: ReturnType<typeof setInterval> | undefined;
 let state: AppState;
-let activeSpeechProc: ChildProcess | null = null;
+let activeSpeech: { id: number; senderId: number } | null = null;
 let pomodoroTimer: PomodoroTimer | undefined;
 let healthMonitor: SystemHealthMonitor | undefined;
 const localAI = new LocalAI();
@@ -169,6 +168,22 @@ function updateOverlayShape() {
   if (process.platform !== 'linux' || nativeWayland || !overlay || overlay.isDestroyed()) return;
   const [width, height] = overlay.getContentSize();
   overlay.setShape(overlayShape(width, height, Boolean(state.speech)));
+}
+function parseSpeechEvent(value: unknown): SpeechEvent | null {
+  if (!value || typeof value !== 'object') return null;
+  const v = value as { type?: unknown; id?: unknown; level?: unknown; reason?: unknown };
+  if (typeof v.id !== 'number' || !Number.isFinite(v.id)) return null;
+  if (v.type === 'start') return { type: 'start', id: v.id };
+  if (v.type === 'level' && typeof v.level === 'number' && Number.isFinite(v.level)) return { type: 'level', id: v.id, level: Math.max(0, Math.min(1, v.level)) };
+  if (v.type === 'stop') return { type: 'stop', id: v.id, reason: typeof v.reason === 'string' ? (v.reason as StopReason) : 'finish' };
+  return null;
+}
+function applySpeechEvent(evt: SpeechEvent) {
+  for (const win of BrowserWindow.getAllWindows()) if (!win.isDestroyed()) win.webContents.send(CHANNELS.speechBroadcast, evt);
+  if (evt.type === 'level') return;
+  const speaking = evt.type === 'start';
+  if (evt.type === 'stop') activeSpeech = null;
+  if (Boolean(state.isSpeaking) !== speaking) { state.isSpeaking = speaking; publish(); }
 }
 function publish() {
   updateOverlayShape();
@@ -571,42 +586,12 @@ function setupIPC() {
         signal: AbortSignal.timeout(7000),
       });
       if (res.ok) {
+        // Synthesis only. Playback, stop and the output level live in ONE place: the renderer's tts-player.
         const buffer = Buffer.from(await res.arrayBuffer());
-        const filePath = join(tmpdir(), `sudo_speech_${Date.now()}.mp3`);
-        await fsp.writeFile(filePath, buffer);
-
-        if (activeSpeechProc) {
-          try { activeSpeechProc.kill(); } catch {}
-          activeSpeechProc = null;
-        }
-
-        state.isSpeaking = true;
-        publish();
-
-        await new Promise<void>((resolve) => {
-          const proc = execFile('pw-play', [filePath], () => {
-            void fsp.unlink(filePath).catch(() => {});
-            if (activeSpeechProc === proc) activeSpeechProc = null;
-            resolve();
-          });
-          activeSpeechProc = proc;
-          proc.on('error', () => {
-            // Fallback to paplay if pw-play fails
-            execFile('paplay', [filePath], () => {
-              void fsp.unlink(filePath).catch(() => {});
-              if (activeSpeechProc === proc) activeSpeechProc = null;
-              resolve();
-            });
-          });
-        });
-
-        state.isSpeaking = false;
-        publish();
         return { ok: true, dataUri: `data:audio/mp3;base64,${buffer.toString('base64')}` };
       }
     } catch {
-      state.isSpeaking = false;
-      publish();
+      // fall through to { ok: false }
     }
 
     return { ok: false };
@@ -641,14 +626,23 @@ function setupIPC() {
     publish();
     return { ok: true, target: state.voiceActiveTarget };
   });
-  handle(CHANNELS.setIsSpeaking, (_event, speaking: unknown) => {
-    state.isSpeaking = Boolean(speaking);
-    if (!state.isSpeaking && activeSpeechProc) {
-      try { activeSpeechProc.kill(); } catch {}
-      activeSpeechProc = null;
+  // Compatibility only: speech state is owned by CHANNELS.speechEvent below.
+  handle(CHANNELS.setIsSpeaking, () => ({ ok: true }));
+  ipcMain.on(CHANNELS.speechEvent, (event, payload: unknown) => {
+    authorize(event, ['overlay', 'chat']);
+    const evt = parseSpeechEvent(payload);
+    if (!evt) return;
+    const senderId = event.sender.id;
+    if (evt.type === 'start') {
+      activeSpeech = { id: evt.id, senderId };
+      event.sender.once('destroyed', () => {
+        // Window closed mid-speech: nobody else will ever send the stop.
+        if (activeSpeech && activeSpeech.senderId === senderId) applySpeechEvent({ type: 'stop', id: activeSpeech.id, reason: 'window-closed' });
+      });
+    } else if (!activeSpeech || activeSpeech.id !== evt.id) {
+      return; // stale event from a superseded utterance
     }
-    publish();
-    return { ok: true };
+    applySpeechEvent(evt);
   });
   handle(CHANNELS.transcribeAudio, async (_event: IpcMainInvokeEvent, payload: unknown) => {
     if (!payload || typeof payload !== 'object') return { ok: false, error: 'No audio provided' };
