@@ -13,6 +13,9 @@ import { cleanTextForSpeech, detectSentenceLanguage, emotionStyle, EMOTIONS } fr
 import type { Emotion } from '../shared/speech.js';
 import { TtsRouter } from './tts-provider.js';
 import { displayBackend } from '../shared/display-backend.js';
+import { migrateProviders, resolveProviderKey, shouldActivate, withProviderEntry } from './provider-keys.js';
+import type { KeyCodec, ProviderMap } from './provider-keys.js';
+import { SttRouter } from './stt.js';
 import type { SpeechEvent, StopReason } from '../shared/speech-events.js';
 import { overlayShape } from '../shared/overlay-shape.js';
 import { LocalAI, normalizeCloudModel } from './local-ai.js';
@@ -33,6 +36,7 @@ interface StoreSchema {
   model: string;
   position: { x: number; y: number } | null;
   cloud?: StoredCloud;
+  providers?: Record<string, StoredCloud | undefined>;
 }
 
 const smokeTest = process.argv.includes('--smoke-test');
@@ -84,12 +88,21 @@ function encryptApiKey(key: string): { encryptedKey?: string; rawKey?: string } 
 }
 
 let router: TtsRouter | undefined;
+const keyCodec: KeyCodec = { encrypt: encryptApiKey, decrypt: stored => decryptApiKey(stored as StoredCloud | undefined) };
+function canEncryptKeys(): boolean {
+  try { return Boolean(safeStorage && safeStorage.isEncryptionAvailable()); } catch { return false; }
+}
+/** Key for any provider, whether or not it is the active chat provider. */
+function getProviderKey(id: 'gemini' | 'groq' | 'openai' | 'openrouter' | 'custom'): string {
+  return resolveProviderKey(id, store.get('cloud'), store.get('providers') as ProviderMap | undefined, keyCodec);
+}
 function geminiKey(): string {
-  const active = store.get('cloud');
-  const activeKey = decryptApiKey(active);
-  if (activeKey && (active?.provider === 'gemini' || activeKey.startsWith('AIza'))) return activeKey;
-  const providers = store.get('providers') as Record<string, StoredCloud | undefined> | undefined;
-  return decryptApiKey(providers?.gemini);
+  return getProviderKey('gemini');
+}
+let sttRouter: SttRouter | undefined;
+function stt(): SttRouter {
+  sttRouter ??= new SttRouter({ fetch: (url, init) => fetch(url, init as RequestInit), getKey: id => getProviderKey(id), now: () => Date.now() });
+  return sttRouter;
 }
 function ttsRouter(): TtsRouter {
   router ??= new TtsRouter({ getKey: geminiKey, getPreferred: () => state.settings.ttsProvider });
@@ -451,7 +464,7 @@ function setupIPC() {
   handle(CHANNELS.cloudConfig, async (_e, value) => {
     if (!validCloudConfig(value)) return { ok: false, error: 'Enter a valid provider and HTTPS endpoint.' };
     const currentSaved = store.get('cloud');
-    const existingKey = decryptApiKey(currentSaved);
+    const existingKey = getProviderKey(value.provider);
     const newKey = typeof value.apiKey === 'string' ? value.apiKey.trim() : '';
     const effectiveKey = newKey || existingKey;
     if (!effectiveKey) return { ok: false, error: 'Enter your API key first.' };
@@ -476,6 +489,12 @@ function setupIPC() {
         model: cleanModel,
         ...keyStorage,
       };
+      // Every provider keeps its own entry, so a Gemini key for voice survives while chat stays on another provider.
+      store.set('providers', withProviderEntry(store.get('providers') as ProviderMap | undefined, value.provider, toStore) as Record<string, StoredCloud | undefined>);
+      if (!shouldActivate(currentSaved?.provider, value.provider, (value as { makeActive?: boolean }).makeActive)) {
+        publishAI();
+        return { ok: true, notice: `${CLOUD_PRESETS[value.provider].label} key saved for voice (speech recognition and voice). Chat stays on ${CLOUD_PRESETS[currentSaved!.provider].label}.` };
+      }
       store.set('cloud', toStore);
       aiState.cloud = {
         provider: value.provider,
@@ -502,7 +521,7 @@ function setupIPC() {
       : CLOUD_PRESETS[provider].endpoint;
 
     const currentSaved = store.get('cloud');
-    const existingKey = decryptApiKey(currentSaved);
+    const existingKey = getProviderKey(provider);
     const passedKey = typeof input.apiKey === 'string' ? input.apiKey.trim() : '';
     const effectiveKey = passedKey || existingKey;
 
@@ -538,7 +557,7 @@ function setupIPC() {
     authorize(event, 'settings');
     if (!validCloudConfig(config)) return { ok: false, error: 'Enter a valid provider and HTTPS endpoint.' };
     const currentSaved = store.get('cloud');
-    const existingKey = decryptApiKey(currentSaved);
+    const existingKey = getProviderKey((config as { provider: CloudProviderId }).provider);
     const newKey = typeof (config as { apiKey?: string }).apiKey === 'string' ? (config as { apiKey?: string }).apiKey!.trim() : '';
     const effectiveKey = newKey || existingKey;
     if (!effectiveKey) return { ok: false, error: 'Enter your API key first.' };
@@ -653,153 +672,18 @@ function setupIPC() {
   handle(CHANNELS.transcribeAudio, async (_event: IpcMainInvokeEvent, payload: unknown) => {
     if (!payload || typeof payload !== 'object') return { ok: false, error: 'No audio provided' };
     const { base64Audio, mimeType, language, hint } = payload as { base64Audio?: string; mimeType?: string; language?: string; hint?: string };
-    const sttHint = typeof hint === 'string' ? hint.replace(/[^\p{L}\p{N}\s,.'-]/gu, ' ').slice(0, 300).trim() : '';
-    let rateLimited = false;
     if (typeof base64Audio !== 'string' || !base64Audio) return { ok: false, error: 'No audio provided' };
     const base64 = base64Audio.includes('base64,') ? base64Audio.split('base64,')[1] : base64Audio;
-    const buffer = Buffer.from(base64, 'base64');
-    const audioMime = typeof mimeType === 'string' ? mimeType : 'audio/wav';
-
-    // Normalize target STT language: 'en' | 'ur' | undefined (for auto)
-    const targetLang = language === 'en' || language === 'ur' ? language : undefined;
-
-    const savedCloud = store.get('cloud');
-    const apiKey = decryptApiKey(savedCloud);
-
-    const WHISPER_HALLUCINATIONS = /^(thank you|thank you\.|thanks for watching|thank you for watching|thank you very much|thanks\.|you|bye\.|subtitles by|amara\.org|watching!|please subscribe|subscribe)[.!? ]*$/i;
-
-    const isValidTranscription = (text: string) => {
-      const trimmed = text.trim();
-      if (!trimmed) return false;
-      if (WHISPER_HALLUCINATIONS.test(trimmed)) return false;
-      const words = trimmed.split(/\s+/).filter(Boolean);
-      if (words.length < 2) {
-        const validShort = /^(sid|sudo|ji|haan|suno|kaho|bye|hello|hi|yes|no|theek|kya)$/i;
-        if (!validShort.test(trimmed)) return false;
-      }
-      return true;
-    };
-
-    // 1. Google Gemini Audio STT (Ultra-fast, native Roman Urdu understanding)
-    if (apiKey && (savedCloud?.provider === 'gemini' || apiKey.startsWith('AIza'))) {
-      try {
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
-        const langHint = targetLang === 'ur' ? 'in Urdu or Pakistani Roman Urdu' : targetLang === 'en' ? 'in English' : 'in Pakistani Roman Urdu or English';
-        const response = await fetch(url, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [
-              {
-                parts: [
-                  {
-                    text: `Transcribe the spoken words in this audio exactly as heard ${langHint}. If the user calls Sudo or Sid, write Sid or Sudo.${sttHint ? ` ${sttHint}` : ''} Return ONLY the transcribed text verbatim with no markdown, quotes, or explanations. If there is no speech, reply with an empty string.`,
-                  },
-                  {
-                    inlineData: {
-                      mimeType: audioMime,
-                      data: base64,
-                    },
-                  },
-                ],
-              },
-            ],
-            generationConfig: {
-              temperature: 0.0,
-              maxOutputTokens: 120,
-            },
-          }),
-          signal: AbortSignal.timeout(9000),
-        });
-
-        if (response.ok) {
-          const result = await response.json() as { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> };
-          const rawText = result.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ?? '';
-          if (isValidTranscription(rawText)) {
-            return { ok: true, text: rawText };
-          }
-        }
-      } catch (e) {
-        console.warn('Gemini audio STT failed:', e);
-      }
-    }
-
-    // 2. Groq Whisper (High accuracy whisper-large-v3 with turbo fallback, language parameter and prompt hint)
-    if (apiKey && (savedCloud?.provider === 'groq' || apiKey.startsWith('gsk_'))) {
-      try {
-        const ext = audioMime.includes('webm') ? 'webm' : 'wav';
-        const sendWhisper = async (model: string) => {
-          const formData = new FormData();
-          formData.append('file', new Blob([buffer], { type: audioMime }), `speech.${ext}`);
-          formData.append('model', model);
-          if (targetLang) {
-            formData.append('language', targetLang);
-          }
-          formData.append('prompt', sttHint || 'Conversation in English, Urdu and Roman Urdu. Sudo-chan, Sid, suno, ji, kya haal hai, kaise ho, theek ho, computer, kaam, baat.');
-          formData.append('temperature', '0');
-
-          return fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
-            method: 'POST',
-            headers: {
-              'Authorization': `Bearer ${apiKey}`,
-              'User-Agent': 'Sudo-chan-Companion/1.0 (Linux; x86_64)',
-            },
-            body: formData,
-            signal: AbortSignal.timeout(9000),
-          });
-        };
-
-        // Try primary whisper-large-v3 (vastly fewer hallucinations), fallback to turbo if needed
-        let res = await sendWhisper('whisper-large-v3').catch(() => null);
-        if (!res || !res.ok) {
-          res = await sendWhisper('whisper-large-v3-turbo').catch(() => null);
-        }
-
-        if (res && res.status === 429) rateLimited = true;
-        if (res && res.ok) {
-          const data = await res.json() as { text?: string };
-          const rawText = data.text?.trim() ?? '';
-          if (isValidTranscription(rawText)) {
-            return { ok: true, text: rawText };
-          }
-        }
-      } catch (e) {
-        console.warn('Groq whisper failed:', e);
-      }
-    }
-
-    // 3. OpenAI Whisper
-    if (apiKey && (savedCloud?.provider === 'openai' || apiKey.startsWith('sk-'))) {
-      try {
-        const ext = audioMime.includes('webm') ? 'webm' : 'wav';
-        const formData = new FormData();
-        formData.append('file', new Blob([buffer], { type: audioMime }), `speech.${ext}`);
-        formData.append('model', 'whisper-1');
-        if (targetLang) {
-          formData.append('language', targetLang);
-        }
-        formData.append('prompt', 'Conversation in English, Urdu and Roman Urdu. Sudo-chan, Sid, suno, ji, kya haal hai, kaise ho.');
-        formData.append('temperature', '0');
-
-        const res = await fetch('https://api.openai.com/v1/audio/transcriptions', {
-          method: 'POST',
-          headers: { 'Authorization': `Bearer ${apiKey}` },
-          body: formData,
-          signal: AbortSignal.timeout(9000),
-        });
-        if (res.ok) {
-          const data = await res.json() as { text?: string };
-          const rawText = data.text?.trim() ?? '';
-          if (isValidTranscription(rawText)) {
-            return { ok: true, text: rawText };
-          }
-        }
-      } catch (e) {
-        console.warn('OpenAI whisper failed:', e);
-      }
-    }
-
-    return { ok: false, error: rateLimited ? 'rate-limited' : 'Could not transcribe speech.', fallbackToBrowser: true, rateLimited };
+    const sttHint = typeof hint === 'string' ? hint.replace(/[^\p{L}\p{N}\s,.'-]/gu, ' ').slice(0, 300).trim() : '';
+    // Gemini first (best on Urdu / Roman Urdu), then Groq Whisper, then OpenAI; keys come from per-provider storage.
+    const result = await stt().transcribe({
+      base64,
+      mimeType: typeof mimeType === 'string' ? mimeType : 'audio/wav',
+      language: typeof language === 'string' ? language : undefined,
+      hint: sttHint || undefined,
+    });
+    if (result.ok) return { ok: true, text: result.text, scriptWarning: result.scriptWarning };
+    return { ok: false, error: result.error ?? 'Could not transcribe speech.', fallbackToBrowser: true, rateLimited: Boolean(result.rateLimited) };
   });
   handle(CHANNELS.playAudio, async (_event, dataUri: unknown) => {
     if (typeof dataUri !== 'string' || !dataUri) return { ok: false, error: 'Invalid audio' };
@@ -836,6 +720,12 @@ async function start() {
       position: null,
     },
   });
+  try {
+    const migrated = migrateProviders(store.get('cloud'), store.get('providers') as ProviderMap | undefined, keyCodec, canEncryptKeys());
+    if (migrated) store.set('providers', migrated as Record<string, StoredCloud | undefined>);
+  } catch {
+    // key migration is best effort
+  }
   const saved = store.get('settings');
   const savedMode = store.get('mode');
   if (savedMode === 'local' || savedMode === 'cloud') aiState.mode = savedMode;

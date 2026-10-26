@@ -341,7 +341,7 @@ export function AISettings() {
       });
       if (result.ok) {
         setStatusBadge('connected');
-        setCloudNotice('Connected successfully! Cloud provider is ready.');
+        setCloudNotice(result.notice ?? 'Connected successfully! Cloud provider is ready.');
         setIsCloudError(false);
         const savedKey = cloudApiKey.trim();
         setCloudApiKey('');

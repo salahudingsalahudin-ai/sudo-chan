@@ -36,6 +36,11 @@ Tests: `tests/wake-word.check.mjs` (matching, gate, window, settings defaults).
 - Security: `~/.config/Sudo-chan/config.json` keeps API keys only base64-encoded (`rawKey`), not encrypted. Out of scope here, but rotate those keys.
 - A newer commit `3887770` (Vercel build fix) landed on `main` from another session while I worked; `voice-fix` is based on it.
 
+## Follow-up: keys and speech recognition
+- Saving a Gemini key in Settings no longer switches chat from Groq; it is stored per provider and used for Gemini voice and Gemini speech recognition (`src/main/provider-keys.ts`, `src/main/stt.ts`).
+- Speech recognition is Gemini-first, Whisper as fallback. Sanity check with 2 synthesized Roman Urdu clips: returned correct Latin-script Roman Urdu in about 2 s. **These were clean synthetic clips, not your microphone**, so real-world Urdu accuracy is still unmeasured.
+- `gemini-2.5-flash*` gave 404 for this key; the `-latest` aliases are used.
+
 ## How to test each item
 See `TEST-VOICE.md`: barge-in steps 3-4, lip-sync steps 2 and 5-8, wake word step 9, voice quality step 10.
 Quit the old running Sudo-chan first (an instance from Oct 26 is still running with the old code and makes new launches exit silently).

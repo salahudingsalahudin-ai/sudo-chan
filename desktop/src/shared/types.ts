@@ -70,6 +70,8 @@ export interface CloudConfigInput {
   endpoint: string;
   model: string;
   apiKey?: string;
+  /** Make this provider the active chat provider. A Gemini key saved while another provider is active is otherwise kept for voice only. */
+  makeActive?: boolean;
 }
 export interface ChatMessage { id: string; role: 'user' | 'assistant'; text: string; spoken?: string; status?: 'streaming' | 'complete' | 'stopped' | 'error'; isVoice?: boolean; }
 export interface ChatState { messages: ChatMessage[]; busy: boolean; error: string; revision: number }
@@ -82,7 +84,7 @@ export interface AIState {
   error: string;
   cloud: CloudConfig;
 }
-export interface ActionResult { ok: boolean; error?: string }
+export interface ActionResult { ok: boolean; error?: string; notice?: string }
 export interface DesktopAPI {
   getState(): Promise<AppState>;
   onState(callback: (state: AppState) => void): () => void;
@@ -113,7 +115,7 @@ export interface DesktopAPI {
   setIsSpeaking(speaking: boolean): Promise<ActionResult>;
   emitSpeechEvent(event: SpeechEvent): void;
   onSpeechEvent(callback: (event: SpeechEvent) => void): () => void;
-  transcribeAudio(base64Audio: string, mimeType?: string, language?: string, hint?: string): Promise<{ ok: boolean; text?: string; error?: string; fallbackToBrowser?: boolean; rateLimited?: boolean }>;
+  transcribeAudio(base64Audio: string, mimeType?: string, language?: string, hint?: string): Promise<{ ok: boolean; text?: string; error?: string; fallbackToBrowser?: boolean; rateLimited?: boolean; scriptWarning?: boolean }>;
   playAudio(dataUri: string): Promise<{ ok: boolean; error?: string }>;
   clearMessages(): Promise<void>;
   quit(): Promise<void>;
