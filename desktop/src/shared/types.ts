@@ -87,6 +87,21 @@ export interface AIState {
   cloud: CloudConfig;
 }
 export interface ActionResult { ok: boolean; error?: string; notice?: string }
+export type ToolRisk = 'read' | 'write' | 'command' | 'open';
+/** An action Sudo-chan wants to take that needs the user's click. */
+export interface ToolApprovalRequest {
+  id: string;
+  tool: string;
+  risk: ToolRisk;
+  title: string;
+  detail: string;
+  /** Red warning (sudo, outside the home folder, ...). */
+  elevated?: boolean;
+  /** Offer "Allow for this chat" (only for open_url). */
+  allowForChat?: boolean;
+  expiresInMs: number;
+}
+export type ToolApprovalEvent = { type: 'request'; request: ToolApprovalRequest } | { type: 'close'; id: string };
 export interface DesktopAPI {
   getState(): Promise<AppState>;
   onState(callback: (state: AppState) => void): () => void;
@@ -121,6 +136,10 @@ export interface DesktopAPI {
   playAudio(dataUri: string): Promise<{ ok: boolean; error?: string }>;
   clearMessages(): Promise<void>;
   quit(): Promise<void>;
+  onToolApproval(callback: (event: ToolApprovalEvent) => void): () => void;
+  getToolApprovals(): Promise<ToolApprovalRequest[]>;
+  respondToolApproval(id: string, decision: 'allow' | 'allow-chat' | 'deny'): Promise<ActionResult>;
+  stopAllTools(): Promise<void>;
 }
 export const CHANNELS = {
   state: 'companion:state', getState: 'companion:get-state',
@@ -142,4 +161,8 @@ export const CHANNELS = {
   playAudio: 'companion:play-audio',
   speechEvent: 'companion:speech-event',
   speechBroadcast: 'companion:speech-broadcast',
+  toolApproval: 'companion:tool-approval',
+  toolApprovals: 'companion:tool-approvals',
+  toolApprovalReply: 'companion:tool-approval-reply',
+  toolsStopAll: 'companion:tools-stop-all',
 } as const;

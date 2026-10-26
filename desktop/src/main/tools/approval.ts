@@ -9,6 +9,8 @@ export interface ApprovalDeps {
   newId?: () => string;
   setTimer?: (fn: () => void, ms: number) => unknown;
   clearTimer?: (handle: unknown) => void;
+  /** Called when a card is finished for any reason (answer, timeout, stop) so the UI can remove it. */
+  onClose?: (id: string, decision: ApprovalDecision) => void;
 }
 
 interface Pending {
@@ -36,6 +38,11 @@ export class ApprovalManager {
 
   get pendingCount(): number {
     return this.pending.size;
+  }
+
+  /** Cards still waiting (a freshly opened chat window pulls these). */
+  list(): ToolApprovalRequest[] {
+    return [...this.pending.values()].map(entry => entry.request);
   }
 
   isAllowedForChat(tool: string): boolean {
@@ -88,6 +95,7 @@ export class ApprovalManager {
     this.pending.delete(id);
     const clear = this.deps.clearTimer ?? ((handle: unknown) => clearTimeout(handle as ReturnType<typeof setTimeout>));
     clear(entry.timer);
+    try { this.deps.onClose?.(id, decision); } catch { /* UI problems must not block the decision */ }
     entry.resolve(decision);
     return true;
   }

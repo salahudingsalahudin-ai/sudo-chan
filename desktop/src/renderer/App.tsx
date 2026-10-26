@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { FormEvent, ReactNode } from 'react';
-import type { AIState, AppState, BotSize, ChatState, Settings, VoiceLanguage } from '../shared/types';
+import type { AIState, AppState, BotSize, ChatState, Settings, ToolApprovalRequest, VoiceLanguage } from '../shared/types';
 import { DEFAULT_SETTINGS, MAX_MESSAGE_LENGTH } from '../shared/validation';
 import { Bot } from './Bot';
 import { SonicOrb } from './SonicOrb';
@@ -84,6 +84,36 @@ function handleBargeIn(info?: BargeInInfo) {
   const detectToStoppedMs = Math.round(stoppedAt - detectedAt);
   console.info(`[barge-in] speech→detect ${speechToDetectMs}ms, detect→stopped ${detectToStoppedMs}ms`);
   (window.__bargeInLatency ??= []).push({ speechToDetectMs, detectToStoppedMs });
+}
+/** One approval card per risky action. Only a click on these buttons approves; speech never does. */
+function ToolApprovalCards({ approvals, busy }: { approvals: ToolApprovalRequest[]; busy: boolean }) {
+  const [now, setNow] = useState(() => Date.now());
+  const seen = useRef(new Map<string, number>());
+  for (const request of approvals) if (!seen.current.has(request.id)) seen.current.set(request.id, Date.now());
+  useEffect(() => {
+    if (!approvals.length) return;
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [approvals.length]);
+  if (!approvals.length && !busy) return null;
+  const answer = (id: string, decision: 'allow' | 'allow-chat' | 'deny') => { void api?.respondToolApproval(id, decision); };
+  return <div className="tool-cards" role="region" aria-label="Actions waiting for your approval">
+    {approvals.map(request => {
+      const left = Math.max(0, Math.ceil((request.expiresInMs - (now - (seen.current.get(request.id) ?? now))) / 1000));
+      return <article key={request.id} className={`tool-card ${request.elevated ? 'is-elevated' : ''}`} role="alertdialog" aria-label={request.title}>
+        <h3>{request.elevated ? '⚠ ' : ''}Sudo-chan wants to: {request.title}</h3>
+        <pre className="tool-detail">{request.detail}</pre>
+        <div className="tool-actions">
+          <button type="button" className="primary-button" onClick={() => answer(request.id, 'allow')}>Allow once</button>
+          {request.allowForChat && <button type="button" className="soft-button" onClick={() => answer(request.id, 'allow-chat')}>Allow for this chat</button>}
+          <button type="button" className="soft-button" onClick={() => answer(request.id, 'deny')}>Deny</button>
+          <span className="tool-timer">Auto-denies in {left}s</span>
+        </div>
+        <p className="tool-note">Approve with a click only. Saying "yes" out loud does not approve anything.</p>
+      </article>;
+    })}
+    <button type="button" className="text-button tool-stop" onClick={() => void api?.stopAllTools()}>⛔ Stop all actions</button>
+  </div>;
 }
 function Overlay({ state }: { state: AppState }) {
   const [arriving, setArriving] = useState(false);
@@ -316,6 +346,7 @@ function Chat({ state }: { state: AppState }) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [confirmHeavy, setConfirmHeavy] = useState<string | null>(null);
+  const [toolApprovals, setToolApprovals] = useState<ToolApprovalRequest[]>([]);
   const viewport = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLTextAreaElement>(null);
   const alive = useRef(true);
@@ -446,6 +477,13 @@ function Chat({ state }: { state: AppState }) {
     const update = (next: ChatState) => { if (alive.current) setConversation(previous => next.revision >= previous.revision ? next : previous); };
     const unsubscribeChat = api.onChat(update);
     const unsubscribeAI = api.onAI(next => { if (alive.current) setAI(next); });
+    const unsubscribeTools = api.onToolApproval(event => {
+      if (!alive.current) return;
+      setToolApprovals(previous => event.type === 'request'
+        ? [...previous.filter(request => request.id !== event.request.id), event.request]
+        : previous.filter(request => request.id !== event.id));
+    });
+    void api.getToolApprovals().then(list => { if (alive.current) setToolApprovals(list); }).catch(() => {});
     void api.getMessages().then(update).catch(() => setError('Your conversation could not be opened.'));
     const refreshAI = () => { void api.getAI().then(next => { if (alive.current) setAI(next); }).catch(() => {}); };
     const focus = () => { input.current?.focus(); refreshAI(); };
@@ -455,6 +493,7 @@ function Chat({ state }: { state: AppState }) {
       alive.current = false;
       unsubscribeChat();
       unsubscribeAI();
+      unsubscribeTools();
       window.removeEventListener('focus', focus);
     };
   }, []);
@@ -772,6 +811,7 @@ function Chat({ state }: { state: AppState }) {
             </div>
           )}
         </div>
+        <ToolApprovalCards approvals={toolApprovals} busy={Boolean(state.settings.toolsEnabled) && sending} />
         <div className="composer-area">
           {(error || conversation.error) && (
             <div className="chat-error">
@@ -976,6 +1016,7 @@ function SettingsView({ state }: { state: AppState }) {
     JSON.stringify(settings.wakeAliases) !== JSON.stringify(state.settings.wakeAliases) ||
     settings.voiceVisualizerMode !== state.settings.voiceVisualizerMode ||
     settings.glassesEnabled !== state.settings.glassesEnabled ||
+    settings.toolsEnabled !== state.settings.toolsEnabled ||
     settings.bargeInSensitivity !== state.settings.bargeInSensitivity ||
     settings.ttsProvider !== state.settings.ttsProvider ||
     settings.ttsGeminiVoice !== state.settings.ttsGeminiVoice ||
@@ -993,6 +1034,7 @@ function SettingsView({ state }: { state: AppState }) {
     JSON.stringify(state.settings.wakeAliases),
     state.settings.voiceVisualizerMode,
     state.settings.glassesEnabled,
+    state.settings.toolsEnabled,
     state.settings.bargeInSensitivity,
     state.settings.ttsProvider,
     state.settings.ttsGeminiVoice,
@@ -1049,6 +1091,12 @@ function SettingsView({ state }: { state: AppState }) {
         </section>
         <section id="rhythm" className="settings-card scroll-reveal"><div className="card-heading"><span className="section-icon lilac"><Icon name="pause"/></span><div><span className="eyebrow">02 / AT YOUR OWN PACE</span><h2>Your rhythm</h2></div></div>
           <SettingRow title="One shortcut away" description="Open your chat from anywhere. Use modifier + key."><label className="shortcut-label"><span className="sr-only">Chat shortcut</span><input aria-describedby="shortcut-help" value={settings.shortcut} onChange={event => setSettings({ ...settings, shortcut: event.target.value })} spellCheck={false}/></label></SettingRow><p id="shortcut-help" className={`field-hint ${!state.shortcutAvailable ? 'warning' : ''}`}>{state.shortcutAvailable ? 'Current shortcut is ready. Example: Control+Shift+Space' : 'The current shortcut is unavailable. Choose another, or open chat from the tray.'}</p>
+          <SettingRow title="Let Sudo-chan use tools" description="Off by default. When on, she can read files in your home folder, and ask to write files, run one program, or open links. Every risky action shows a card and waits for your click (auto-denied after 60 s). Voice never approves. Secrets (.ssh, .env, browser data) are blocked. Every call is logged on this device. Works with cloud models only.">
+            <div className="switch-control"><span>{settings.toolsEnabled ? 'On' : 'Off'}</span><button className="switch" type="button" role="switch" aria-label="Let Sudo-chan use tools" aria-checked={Boolean(settings.toolsEnabled)} onClick={() => setSettings({ ...settings, toolsEnabled: !settings.toolsEnabled })}><span/></button></div>
+          </SettingRow>
+          <SettingRow title="Stop all actions" description="Cancels anything waiting for approval or still running, right now.">
+            <button type="button" className="soft-button" onClick={() => void api?.stopAllTools()}>⛔ Stop all actions</button>
+          </SettingRow>
           <SettingRow title="Start the day together" description={state.loginSupported ? 'Open Sudo-chan when you sign in.' : 'Available after installing the desktop app.'}><div className="switch-control"><span>{settings.launchAtLogin ? 'On' : 'Off'}</span><button className="switch" type="button" role="switch" aria-label="Launch at login" aria-checked={settings.launchAtLogin} disabled={!state.loginSupported} onClick={() => setSettings({ ...settings, launchAtLogin: !settings.launchAtLogin })}><span/></button></div></SettingRow>
           <SettingRow title="Focus Reminder (Pomodoro)" description="Remind you to rest your eyes and drink water after focused work.">
             <div className="switch-control">

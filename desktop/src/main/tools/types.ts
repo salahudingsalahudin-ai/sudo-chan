@@ -1,23 +1,10 @@
-export type ToolRisk = 'read' | 'write' | 'command' | 'open';
+import type { ToolApprovalRequest, ToolRisk } from '../../shared/types.js';
+export type { ToolApprovalRequest, ToolRisk };
 
 /** OpenAI-compatible function tool definition. */
 export interface ToolDefinition {
   type: 'function';
   function: { name: string; description: string; parameters: Record<string, unknown> };
-}
-
-/** What the user sees on an approval card. */
-export interface ToolApprovalRequest {
-  id: string;
-  tool: string;
-  risk: ToolRisk;
-  title: string;
-  detail: string;
-  /** Red warning (sudo, outside the home folder, ...). */
-  elevated?: boolean;
-  /** Offer "Allow for this chat" (only for open_url). */
-  allowForChat?: boolean;
-  expiresInMs: number;
 }
 
 export type ApprovalDecision = 'allow' | 'allow-chat' | 'deny' | 'timeout' | 'stopped';

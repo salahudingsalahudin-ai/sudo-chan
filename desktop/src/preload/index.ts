@@ -1,7 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import { CHANNELS } from '../shared/types.js';
 import type { SpeechEvent } from '../shared/speech-events.js';
-import type { AIState, AppState, ChatState, DesktopAPI } from '../shared/types.js';
+import type { AIState, AppState, ChatState, DesktopAPI, ToolApprovalEvent } from '../shared/types.js';
 
 const api: DesktopAPI = {
   getState: () => ipcRenderer.invoke(CHANNELS.getState),
@@ -53,5 +53,13 @@ const api: DesktopAPI = {
   playAudio: dataUri => ipcRenderer.invoke(CHANNELS.playAudio, dataUri),
   clearMessages: () => ipcRenderer.invoke(CHANNELS.clear),
   quit: () => ipcRenderer.invoke(CHANNELS.quit),
+  onToolApproval: callback => {
+    const listener = (_event: Electron.IpcRendererEvent, event: ToolApprovalEvent) => callback(event);
+    ipcRenderer.on(CHANNELS.toolApproval, listener);
+    return () => ipcRenderer.removeListener(CHANNELS.toolApproval, listener);
+  },
+  getToolApprovals: () => ipcRenderer.invoke(CHANNELS.toolApprovals),
+  respondToolApproval: (id, decision) => ipcRenderer.invoke(CHANNELS.toolApprovalReply, { id, decision }),
+  stopAllTools: () => ipcRenderer.invoke(CHANNELS.toolsStopAll),
 };
 contextBridge.exposeInMainWorld('companion', api);
