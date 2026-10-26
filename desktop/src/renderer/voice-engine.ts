@@ -130,7 +130,13 @@ export async function recordVoiceSample(
   durationMs = 5000,
   onProgress?: (secondsRemaining: number) => void
 ): Promise<{ profile: VoiceProfile; dataUri: string }> {
-  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  const stream = await navigator.mediaDevices.getUserMedia({
+    audio: {
+      echoCancellation: true,
+      noiseSuppression: true,
+      autoGainControl: true,
+    },
+  });
   const audioContext = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
   const source = audioContext.createMediaStreamSource(stream);
   const analyser = audioContext.createAnalyser();
@@ -317,10 +323,12 @@ export function checkWakeIntent(
 
 export interface VoiceSessionCallbacks {
   isSpeaking?: () => boolean;
+  language?: string;
   onInterim?: (text: string) => void;
   onFinal?: (text: string, features?: { pitch?: number; centroid?: number }) => void;
   onAudioLevel?: (level: number) => void;
   onError?: (error: string) => void;
+  onBargeIn?: () => void;
 }
 
 /**
@@ -481,7 +489,7 @@ export class VoiceSession {
         const dataUri = reader.result as string;
         if (typeof window !== 'undefined' && window.companion?.transcribeAudio) {
           callbacks.onInterim?.('✨ Samajh rahi hoon...');
-          const result = await window.companion.transcribeAudio(dataUri, 'audio/wav');
+          const result = await window.companion.transcribeAudio(dataUri, 'audio/wav', callbacks.language);
           if (result.ok && result.text) {
             callbacks.onFinal?.(result.text, { pitch: burstPitch });
           } else {

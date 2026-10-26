@@ -1,4 +1,4 @@
-import { cleanTextForSpeech } from '../shared/speech';
+import { cleanTextForSpeech, detectSentenceLanguage, splitIntoSentences } from '../shared/speech';
 
 const STORAGE_KEY = 'sudo_chan_tts_muted';
 
@@ -73,8 +73,11 @@ export function findBestVoice(): SpeechSynthesisVoice | undefined {
 
 let currentAudio: HTMLAudioElement | null = null;
 let currentUtterance: SpeechSynthesisUtterance | null = null;
+let currentPlaybackId = 0;
+let abortPlayback = false;
 
 export function stopAudioPlayback(): void {
+  abortPlayback = true;
   if (currentAudio) {
     try {
       currentAudio.pause();
@@ -91,6 +94,7 @@ export function stopAudioPlayback(): void {
 }
 
 export function stopSpeech(): void {
+  abortPlayback = true;
   try {
     if (typeof window !== 'undefined' && window.companion?.setIsSpeaking) {
       void window.companion.setIsSpeaking(false);
@@ -127,7 +131,6 @@ export async function speakVoiceStudio(text: string): Promise<boolean> {
     if (!res.ok) return false;
     const blob = await res.blob();
     const url = URL.createObjectURL(blob);
-    stopSpeech();
     const audio = new Audio(url);
     currentAudio = audio;
     return await new Promise<boolean>(resolve => {
@@ -148,13 +151,13 @@ export async function speakVoiceStudio(text: string): Promise<boolean> {
   }
 }
 
-export async function speakOnlineStream(text: string): Promise<boolean> {
+export async function speakOnlineStream(text: string, lang = 'ur'): Promise<boolean> {
   try {
-    const chunk = text.slice(0, 240).trim();
-    if (!chunk) return false;
-    // High-quality natural voice audio stream
-    const url = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(chunk)}&tl=ur&client=tw-ob`;
-    stopSpeech();
+    if (abortPlayback) return false;
+    const clean = text.trim();
+    if (!clean) return false;
+    // High-quality natural voice audio stream without truncation
+    const url = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(clean)}&tl=${lang}&client=tw-ob`;
     const audio = new Audio(url);
     currentAudio = audio;
     return await new Promise<boolean>(resolve => {
@@ -173,14 +176,86 @@ export async function speakOnlineStream(text: string): Promise<boolean> {
   }
 }
 
+async function playSingleSentence(sentence: string): Promise<boolean> {
+  if (abortPlayback) return false;
+  const lang = detectSentenceLanguage(sentence);
+
+  // 1. Direct hardware PulseAudio/PipeWire playback via Main Process
+  if (typeof window !== 'undefined' && window.companion?.playSpeech) {
+    try {
+      const result = await window.companion.playSpeech({ text: sentence, lang });
+      if (result.ok) {
+        if (result.dataUri) {
+          return await new Promise<boolean>(resolve => {
+            if (abortPlayback) return resolve(false);
+            const audio = new Audio(result.dataUri);
+            currentAudio = audio;
+            audio.onended = () => {
+              if (currentAudio === audio) currentAudio = null;
+              resolve(true);
+            };
+            audio.onerror = () => {
+              if (currentAudio === audio) currentAudio = null;
+              resolve(false);
+            };
+            audio.play().catch(() => resolve(false));
+          });
+        }
+        return true;
+      }
+    } catch {}
+  }
+
+  // 2. High-quality natural voice audio stream (works instantly on Linux & all platforms)
+  const streamSpoken = await speakOnlineStream(sentence, lang).catch(() => false);
+  if (streamSpoken) return true;
+
+  // 3. Fallback to browser speech synthesis
+  if (!isSpeechSupported()) return false;
+
+  return await new Promise<boolean>(resolve => {
+    try {
+      if (abortPlayback) return resolve(false);
+      const utterance = new SpeechSynthesisUtterance(sentence);
+      currentUtterance = utterance;
+
+      const voice = findBestVoice();
+      if (voice) utterance.voice = voice;
+
+      utterance.pitch = 1.08;
+      utterance.rate = 1.0;
+
+      utterance.onend = () => {
+        currentUtterance = null;
+        resolve(true);
+      };
+
+      utterance.onerror = () => {
+        currentUtterance = null;
+        resolve(false);
+      };
+
+      window.speechSynthesis.speak(utterance);
+    } catch {
+      currentUtterance = null;
+      resolve(false);
+    }
+  });
+}
+
 export async function speak(
   rawText: string,
   callbacks?: { onEnd?: () => void; onError?: () => void }
 ): Promise<void> {
   if (getMutedPreference()) return;
 
-  const textToSpeak = cleanTextForSpeech(rawText);
-  if (!textToSpeak) return;
+  const sentences = splitIntoSentences(rawText, 180);
+  if (!sentences.length) return;
+
+  // Stop any active previous speech and increment sequence ID
+  stopSpeech();
+  abortPlayback = false;
+  const playbackId = ++currentPlaybackId;
 
   try {
     if (typeof window !== 'undefined' && window.companion?.setIsSpeaking) {
@@ -188,89 +263,29 @@ export async function speak(
     }
   } catch {}
 
-  const handleEnd = () => {
+  let hadSuccess = false;
+
+  for (const sentence of sentences) {
+    if (abortPlayback || currentPlaybackId !== playbackId) {
+      break;
+    }
+    const ok = await playSingleSentence(sentence);
+    if (ok) hadSuccess = true;
+    if (abortPlayback || currentPlaybackId !== playbackId) {
+      break;
+    }
+  }
+
+  if (currentPlaybackId === playbackId) {
     try {
       if (typeof window !== 'undefined' && window.companion?.setIsSpeaking) {
         void window.companion.setIsSpeaking(false);
       }
     } catch {}
-    callbacks?.onEnd?.();
-  };
-
-  const handleError = () => {
-    try {
-      if (typeof window !== 'undefined' && window.companion?.setIsSpeaking) {
-        void window.companion.setIsSpeaking(false);
-      }
-    } catch {}
-    callbacks?.onError?.();
-  };
-
-  // 1. Try local VoiceStudio cloned voice engine first (if running)
-  const vsSpoken = await speakVoiceStudio(textToSpeak).catch(() => false);
-  if (vsSpoken) {
-    handleEnd();
-    return;
-  }
-
-  // 2. Direct hardware PulseAudio playback via Main Process
-  if (typeof window !== 'undefined' && window.companion?.playSpeech) {
-    try {
-      const result = await window.companion.playSpeech(textToSpeak);
-      if (result.ok) {
-        if (result.dataUri) {
-          stopAudioPlayback();
-          const audio = new Audio(result.dataUri);
-          currentAudio = audio;
-          audio.onended = () => { if (currentAudio === audio) currentAudio = null; handleEnd(); };
-          audio.onerror = () => { if (currentAudio === audio) currentAudio = null; handleError(); };
-          audio.play().catch(() => handleEnd());
-        } else {
-          handleEnd();
-        }
-        return;
-      }
-    } catch {}
-  }
-
-  // 3. High-quality natural voice audio stream (works instantly on Linux & all platforms)
-  const streamSpoken = await speakOnlineStream(textToSpeak).catch(() => false);
-  if (streamSpoken) {
-    handleEnd();
-    return;
-  }
-
-  // 4. Fallback to browser speech synthesis
-  if (!isSpeechSupported()) {
-    handleEnd();
-    return;
-  }
-
-  stopSpeech();
-
-  try {
-    const utterance = new SpeechSynthesisUtterance(textToSpeak);
-    currentUtterance = utterance;
-
-    const voice = findBestVoice();
-    if (voice) utterance.voice = voice;
-
-    utterance.pitch = 1.08;
-    utterance.rate = 1.0;
-
-    utterance.onend = () => {
-      currentUtterance = null;
-      handleEnd();
-    };
-
-    utterance.onerror = () => {
-      currentUtterance = null;
-      handleError();
-    };
-
-    window.speechSynthesis.speak(utterance);
-  } catch {
-    currentUtterance = null;
-    handleError();
+    if (hadSuccess) {
+      callbacks?.onEnd?.();
+    } else {
+      callbacks?.onError?.();
+    }
   }
 }

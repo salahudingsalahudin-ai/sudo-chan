@@ -102,10 +102,10 @@ export interface DesktopAPI {
   detectProvider(apiKey: string): Promise<{ ok: boolean; provider?: CloudProviderId }>;
   testCloud(config: CloudConfigInput): Promise<ActionResult>;
   testFeature(feature: 'break' | 'heavy'): Promise<ActionResult>;
-  playSpeech(text: string): Promise<{ ok: boolean; dataUri?: string }>;
+  playSpeech(payload: string | { text: string; lang?: string }): Promise<{ ok: boolean; dataUri?: string }>;
   setVoiceActive(active: boolean, target?: 'overlay' | 'chat'): Promise<ActionResult>;
   setIsSpeaking(speaking: boolean): Promise<ActionResult>;
-  transcribeAudio(base64Audio: string, mimeType?: string): Promise<{ ok: boolean; text?: string; error?: string }>;
+  transcribeAudio(base64Audio: string, mimeType?: string, language?: string): Promise<{ ok: boolean; text?: string; error?: string; fallbackToBrowser?: boolean }>;
   playAudio(dataUri: string): Promise<{ ok: boolean; error?: string }>;
   clearMessages(): Promise<void>;
   quit(): Promise<void>;

@@ -652,19 +652,37 @@ function setupIPC() {
   });
   handle(CHANNELS.transcribeAudio, async (_event: IpcMainInvokeEvent, payload: unknown) => {
     if (!payload || typeof payload !== 'object') return { ok: false, error: 'No audio provided' };
-    const { base64Audio, mimeType } = payload as { base64Audio?: string; mimeType?: string };
+    const { base64Audio, mimeType, language } = payload as { base64Audio?: string; mimeType?: string; language?: string };
     if (typeof base64Audio !== 'string' || !base64Audio) return { ok: false, error: 'No audio provided' };
     const base64 = base64Audio.includes('base64,') ? base64Audio.split('base64,')[1] : base64Audio;
     const buffer = Buffer.from(base64, 'base64');
     const audioMime = typeof mimeType === 'string' ? mimeType : 'audio/wav';
 
+    // Normalize target STT language: 'en' | 'ur' | undefined (for auto)
+    const targetLang = language === 'en' || language === 'ur' ? language : undefined;
+
     const savedCloud = store.get('cloud');
     const apiKey = decryptApiKey(savedCloud);
+
+    const WHISPER_HALLUCINATIONS = /^(thank you|thank you\.|thanks for watching|thank you for watching|thank you very much|thanks\.|you|bye\.|subtitles by|amara\.org|watching!|please subscribe|subscribe)[.!? ]*$/i;
+
+    const isValidTranscription = (text: string) => {
+      const trimmed = text.trim();
+      if (!trimmed) return false;
+      if (WHISPER_HALLUCINATIONS.test(trimmed)) return false;
+      const words = trimmed.split(/\s+/).filter(Boolean);
+      if (words.length < 2) {
+        const validShort = /^(sid|sudo|ji|haan|suno|kaho|bye|hello|hi|yes|no|theek|kya)$/i;
+        if (!validShort.test(trimmed)) return false;
+      }
+      return true;
+    };
 
     // 1. Google Gemini Audio STT (Ultra-fast, native Roman Urdu understanding)
     if (apiKey && (savedCloud?.provider === 'gemini' || apiKey.startsWith('AIza'))) {
       try {
         const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+        const langHint = targetLang === 'ur' ? 'in Urdu or Pakistani Roman Urdu' : targetLang === 'en' ? 'in English' : 'in Pakistani Roman Urdu or English';
         const response = await fetch(url, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -673,7 +691,7 @@ function setupIPC() {
               {
                 parts: [
                   {
-                    text: 'Transcribe the spoken words in this audio exactly as heard in Pakistani Roman Urdu or English. If the user calls Sudo or Sid, write Sid or Sudo. Return ONLY the transcribed text verbatim with no markdown, quotes, or explanations. If there is no speech, reply with an empty string.',
+                    text: `Transcribe the spoken words in this audio exactly as heard ${langHint}. If the user calls Sudo or Sid, write Sid or Sudo. Return ONLY the transcribed text verbatim with no markdown, quotes, or explanations. If there is no speech, reply with an empty string.`,
                   },
                   {
                     inlineData: {
@@ -695,11 +713,8 @@ function setupIPC() {
         if (response.ok) {
           const result = await response.json() as { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> };
           const rawText = result.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ?? '';
-          if (rawText) {
-            const WHISPER_HALLUCINATIONS = /^(thank you|thank you\.|thanks for watching|thank you for watching|thank you very much|thanks\.|you|bye\.|subtitles by|amara\.org)[.!? ]*$/i;
-            if (!WHISPER_HALLUCINATIONS.test(rawText)) {
-              return { ok: true, text: rawText };
-            }
+          if (isValidTranscription(rawText)) {
+            return { ok: true, text: rawText };
           }
         }
       } catch (e) {
@@ -707,7 +722,7 @@ function setupIPC() {
       }
     }
 
-    // 2. Groq Whisper (High accuracy whisper-large-v3 with turbo fallback)
+    // 2. Groq Whisper (High accuracy whisper-large-v3 with turbo fallback, language parameter and prompt hint)
     if (apiKey && (savedCloud?.provider === 'groq' || apiKey.startsWith('gsk_'))) {
       try {
         const ext = audioMime.includes('webm') ? 'webm' : 'wav';
@@ -715,7 +730,10 @@ function setupIPC() {
           const formData = new FormData();
           formData.append('file', new Blob([buffer], { type: audioMime }), `speech.${ext}`);
           formData.append('model', model);
-          formData.append('prompt', 'Sudo-chan, Sid, suno, ji, kya haal hai, kaise ho, theek ho, computer, kaam, baat, Roman Urdu');
+          if (targetLang) {
+            formData.append('language', targetLang);
+          }
+          formData.append('prompt', 'Conversation in English, Urdu and Roman Urdu. Sudo-chan, Sid, suno, ji, kya haal hai, kaise ho, theek ho, computer, kaam, baat.');
           formData.append('temperature', '0');
 
           return fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
@@ -738,11 +756,8 @@ function setupIPC() {
         if (res && res.ok) {
           const data = await res.json() as { text?: string };
           const rawText = data.text?.trim() ?? '';
-          if (rawText) {
-            const WHISPER_HALLUCINATIONS = /^(thank you|thank you\.|thanks for watching|thank you for watching|thank you very much|thanks\.|you|bye\.|subtitles by|amara\.org)[.!? ]*$/i;
-            if (!WHISPER_HALLUCINATIONS.test(rawText)) {
-              return { ok: true, text: rawText };
-            }
+          if (isValidTranscription(rawText)) {
+            return { ok: true, text: rawText };
           }
         }
       } catch (e) {
@@ -757,7 +772,10 @@ function setupIPC() {
         const formData = new FormData();
         formData.append('file', new Blob([buffer], { type: audioMime }), `speech.${ext}`);
         formData.append('model', 'whisper-1');
-        formData.append('prompt', 'Sudo-chan, Sid, suno, ji, kya haal hai, kaise ho, Roman Urdu');
+        if (targetLang) {
+          formData.append('language', targetLang);
+        }
+        formData.append('prompt', 'Conversation in English, Urdu and Roman Urdu. Sudo-chan, Sid, suno, ji, kya haal hai, kaise ho.');
         formData.append('temperature', '0');
 
         const res = await fetch('https://api.openai.com/v1/audio/transcriptions', {
@@ -769,14 +787,16 @@ function setupIPC() {
         if (res.ok) {
           const data = await res.json() as { text?: string };
           const rawText = data.text?.trim() ?? '';
-          if (rawText) return { ok: true, text: rawText };
+          if (isValidTranscription(rawText)) {
+            return { ok: true, text: rawText };
+          }
         }
       } catch (e) {
         console.warn('OpenAI whisper failed:', e);
       }
     }
 
-    return { ok: false, error: 'Could not transcribe speech.' };
+    return { ok: false, error: 'Could not transcribe speech.', fallbackToBrowser: true };
   });
   handle(CHANNELS.playAudio, async (_event, dataUri: unknown) => {
     if (typeof dataUri !== 'string' || !dataUri) return { ok: false, error: 'Invalid audio' };

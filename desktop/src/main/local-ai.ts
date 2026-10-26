@@ -480,7 +480,14 @@ export class LocalAI {
           const chunk = JSON.parse(data);
           const chunkError = extractErrorMessage(chunk);
           if (chunkError) throw new LocalAIError(chunkError);
-          const choices = (chunk as { choices?: { delta?: { content?: unknown }; message?: { content?: unknown } }[] })?.choices;
+          const choices = (chunk as { choices?: { delta?: { content?: unknown }; message?: { content?: unknown }; finish_reason?: string }[] })?.choices;
+          const finishReason = choices?.[0]?.finish_reason;
+          if (finishReason) {
+            console.log(`[Cloud AI] Stream finish_reason: "${finishReason}"`);
+            if (finishReason === 'length') {
+              console.warn('[Cloud AI] Note: reply reached max_tokens length limit.');
+            }
+          }
           const text = choices?.[0]?.delta?.content ?? choices?.[0]?.message?.content;
           if (typeof text === 'string' && text) {
             length += text.length;
