@@ -81,19 +81,91 @@ export function getModelsEndpoint(provider: CloudProviderId, endpoint: string): 
 }
 
 const BASE = 'http://127.0.0.1:11434';
-export const SYSTEM = [
-  'You are Sudo-chan, a warm, polite, and friendly female Pakistani desktop companion.',
-  'MANDATORY PERSONA AND LANGUAGE RULES:',
-  '1. Persona: You are female. Always speak from the female perspective in Roman Urdu (use "kar sakti hoon", "karti hoon", "rahungi" — NEVER use male "karta hoon" or "kar sakta hoon").',
-  '2. Alphabet: Write ONLY in the English/Latin alphabet (A-Z, a-z). NEVER use Arabic or Urdu script (no characters like ا, ب, ت).',
-  '3. Style: Speak clear, simple, natural Pakistani Roman Urdu. Never invent weird words like "dijaun" or "baremat".',
-  '4. Direct answers: Answer the user directly and warmly in 1 to 2 short sentences. Never ask for "more detail" unless necessary.',
-  '5. Capabilities: You are a desktop companion who helps the user focus, breaks tasks into simple steps, provides motivation, and chats in Roman Urdu/English.',
-  '6. You can only read this conversation. You cannot see the screen, browse, open files, or perform system actions.',
-  '7. User Identity: Your user and developer is Sid (male). His name is Sid. Always address him as Sid. Speak to him with male respect in Roman Urdu (use "Sid aap bata sakte hain", "aap kaise hain", "bataiye Sid" — NEVER call him a girl or say you forgot his name).',
-].join('\n');
 
-export const ROMAN_URDU_FEW_SHOT: ModelMessage[] = [];
+export function buildSystemPrompt(options?: {
+  voice?: boolean;
+  model?: string;
+  provider?: string;
+}): string {
+  if (options?.voice) {
+    return "You are Sudo-chan, speaking aloud to your creator and developer Sid. Reply in the user's language, in 1-3 short natural spoken sentences. No markdown, no lists, no emojis. Answer the question directly and warmly in Roman Urdu or English.";
+  }
+
+  const modelFact = options?.model ? `- Active AI Model: ${options.model}` : '';
+  const providerFact = options?.provider ? `- Provider: ${options.provider}` : '';
+
+  return [
+    'You are Sudo-chan, an intelligent, helpful, and direct AI desktop assistant.',
+    '',
+    '[CORE DIRECTIVES]',
+    '1. LANGUAGE CONSISTENCY: Always reply in the EXACT SAME LANGUAGE and SCRIPT as the user prompt.',
+    '   - English prompts -> Clear, fluent, well-structured English.',
+    '   - Roman Urdu prompts (e.g. "kya haal hai", "batao", "kaise karein") -> Natural, fluent Pakistani Roman Urdu using ONLY Latin/English characters (A-Z). NEVER use Arabic or Urdu script (no characters like ا, ب, ت). Use warm female self-references ("kar sakti hoon", "bata sakti hoon").',
+    '   - Mixed Roman Urdu & English -> Match the natural bilingual conversational style.',
+    '',
+    '2. DIRECT & FACTUAL RESPONSES:',
+    '   - Answer the question directly, correctly, and thoroughly without hesitation or filler.',
+    '   - NEVER use generic deflection phrases like "thora aur batao", "aur detail mein batao", or "tell me more about what you are working on" unless the user prompt is completely ambiguous and impossible to answer.',
+    '   - For coding and technical questions, provide working code with clean explanations immediately.',
+    '   - For writing and drafting tasks, produce the complete, finished text.',
+    '   - Do not force or assume the user\'s name is Sid unless the user introduces themselves or mentions their name.',
+    '',
+    '[RUNTIME FACTS & APP CONTEXT]',
+    '- Application: Sudo-chan Desktop Companion (v0.1.0)',
+    '- Creator/Developer: Sid',
+    modelFact,
+    providerFact,
+    '- Real Desktop Features: Pomodoro focus timer, live system RAM health alert, Live Talk voice companion, cute customizable glasses, quiet standby overlay.',
+    '- Real System Boundaries: Privacy-first desktop companion. Cannot view desktop screen pixels, cannot modify or delete OS files directly, cannot browse the live web.',
+  ].filter(Boolean).join('\n');
+}
+
+export const SYSTEM = buildSystemPrompt();
+
+export const FEW_SHOT_EXAMPLES: ModelMessage[] = [
+  {
+    role: "user",
+    content: "Python mein dictionary se specific key delete karne ka safe tareeqa batao.",
+  },
+  {
+    role: "assistant",
+    content: "Python mein dictionary se key delete karne ka sab se safe tareeqa `.pop()` method hai:\n\n```python\nuser_data = {\"name\": \"Sid\", \"role\": \"dev\", \"age\": 25}\nremoved = user_data.pop(\"age\", None)  # Key missing ho to error nahi dega\n```\n\nAgar aapko confirm ho ke key mojood hai to aap `del user_data[\"age\"]` bhi use kar sakte hain.",
+  },
+  {
+    role: "user",
+    content: "Why is the sky blue during daytime?",
+  },
+  {
+    role: "assistant",
+    content: "The sky appears blue during the day due to **Rayleigh scattering**:\n\n1. Sunlight reaches Earth's atmosphere containing all colors of the visible spectrum.\n2. Atmospheric gases scatter shorter wavelengths (blue and violet) in every direction much more efficiently than longer wavelengths (red and yellow).\n3. Because human eyes are significantly more sensitive to blue light than violet, we perceive the sky as bright blue.",
+  },
+  {
+    role: "user",
+    content: "Draft a polite 2-sentence note declining a meeting invitation.",
+  },
+  {
+    role: "assistant",
+    content: "Thank you for the meeting invitation, but unfortunately I have an existing conflict at that time and will be unable to attend. Please feel free to share any summary notes or key action items afterwards.",
+  },
+  {
+    role: "user",
+    content: "kya tum meri personal hard drive ki files read kar sakti ho?",
+  },
+  {
+    role: "assistant",
+    content: "Nahi, main aapki local hard drive ki files read ya access nahi kar sakti. Main Sudo-chan desktop companion app mein strictly chat aur focus assistance ke liye hoon, mere paas aapke private storage ka koi file access nahi hai.",
+  },
+  {
+    role: "user",
+    content: "Aaj kaam bohot zyada hai, thora low feel ho raha hai.",
+  },
+  {
+    role: "assistant",
+    content: "Aisa feel hona bilkul normal hai jab kaam ka bojh barh jaye. Aap sabse pehle ek gehra saans lein, thora paani piyein, aur sirf sab se zaroori ek task chun lein. Hum 20 minute focus karte hain phir chota break leinge!",
+  },
+];
+
+export const ROMAN_URDU_FEW_SHOT: ModelMessage[] = FEW_SHOT_EXAMPLES;
 
 export type ModelMessage = { role: 'user' | 'assistant' | 'system'; content: string };
 export interface StoredCloudConfig {
@@ -136,7 +208,7 @@ export function smartRomanUrduReply(userText: string): string | null {
   if (/\b(ye kya bol|kya bol rhy|kya bol rahi|samajh nahi|gibberish|galat urdu|pagal|ajeeb)\b/.test(clean)) {
     return 'Sorry yaar! Local model kabhi kabhi uljh jata hai. Ab main bilkul saaf Roman Urdu aur English mein baat karungi. Aap batao main aapki kya madad karoon?';
   }
-  if (/^(language\??|urdu\??|roman urdu\??|english\??)$/.test(clean) || /\b(urdu bolo|roman urdu|kon si language|konsi language|kis language|speak urdu|baat kar sakti|bol rhy ho|bol rahe ho|bol rhi ho|bol sakty|may btao|me btao)\b/.test(clean)) {
+  if (/^(language\??|urdu\??|roman urdu\??|english\??)$/.test(clean) || /\b(urdu bolo|roman urdu|kon si language|konsi language|kis language|speak urdu|baat kar sakti|bol rhy ho|bol rahe ho|bol rhi ho|bol sakty|(?:roman\s*urdu|urdu)\s*m[ea]y?\s*btao)\b/.test(clean)) {
     return 'Haan bilkul! Main aap ke saath saaf Roman Urdu aur English dono mein baat kar sakti hoon. Aap befikar ho kar Roman Urdu mein baat karein!';
   }
   if (/\b(encouragement|hosla|motivate|thak gaya|thak gayi|udas|low feel|tension|pareeshan|nervous)\b/.test(clean)) {
@@ -418,10 +490,19 @@ export class LocalAI {
 
     console.log(`[Cloud AI] Stream request model: ${model}`);
 
-    const systemPrompt = options?.voice
-      ? "You are Sudo-chan, speaking aloud to your creator and developer Sid. Reply in the user's language, in 1-3 short natural spoken sentences. No markdown, no lists, no emojis. Answer the question directly and warmly in Roman Urdu or English."
-      : SYSTEM;
-    const maxTokens = options?.voice ? 1024 : 512;
+    const providerLabel = CLOUD_PRESETS[cloud.provider]?.label || cloud.provider;
+    const systemPrompt = buildSystemPrompt({
+      voice: options?.voice,
+      model,
+      provider: providerLabel,
+    });
+    const maxTokens = cloud.provider === 'groq' ? 950 : (options?.voice ? 1024 : 1500);
+
+    const fullMessages = options?.voice
+      ? [{ role: 'system' as const, content: systemPrompt }, ...messages]
+      : [{ role: 'system' as const, content: systemPrompt }, ...FEW_SHOT_EXAMPLES, ...messages];
+
+    console.log(`[Cloud AI Payload] Model: ${model}`, JSON.stringify(fullMessages.slice(-5), null, 2));
 
     const combined = AbortSignal.any([signal, AbortSignal.timeout(60_000)]);
     try {
@@ -436,9 +517,10 @@ export class LocalAI {
         body: JSON.stringify({
           model,
           stream: true,
-          temperature: 0.4,
+          temperature: 0.6,
+          top_p: 0.95,
           max_tokens: maxTokens,
-          messages: [{ role: 'system', content: systemPrompt }, ...messages],
+          messages: fullMessages,
         }),
       });
       if (!response.ok || !response.body) {
@@ -523,33 +605,25 @@ export class LocalAI {
     } catch (error) {
       if (signal.aborted) throw error;
       if (combined.aborted) throw new LocalAIError('Cloud API request timed out. Please try again.');
-      // Graceful Roman Urdu fallback if cloud API hits rate limits (429) or temporary outages
-      const lastUser = [...messages].reverse().find(m => m.role === 'user')?.content ?? '';
-      if (lastUser) {
-        const fallback = fallbackRomanUrduReply(lastUser);
-        if (fallback) {
-          onText(fallback);
-          return;
-        }
-      }
       if (error instanceof LocalAIError) throw error;
-      throw new LocalAIError('Cloud API connection failed. Check your internet and API settings.');
+      const msg = (error as Error)?.message || 'Cloud API connection failed.';
+      throw new LocalAIError(`Cloud API error: ${msg}`);
     }
   }
 
   async stream(model: string, messages: ModelMessage[], signal: AbortSignal, onText: (text: string) => void, options?: StreamOptions) {
+    if (options?.mode === 'cloud' && options.cloud) {
+      return this.streamCloud(options.cloud, messages, signal, onText, options);
+    }
+
     const lastUser = [...messages].reverse().find(m => m.role === 'user')?.content ?? '';
-    // Handle common companion intents directly for instant, natural Roman Urdu without model latency or API limits
+    // Handle common companion intents directly for instant, natural Roman Urdu in local mode
     if (lastUser) {
       const smartReply = smartRomanUrduReply(lastUser);
       if (smartReply) {
         onText(smartReply);
         return;
       }
-    }
-
-    if (options?.mode === 'cloud' && options.cloud) {
-      return this.streamCloud(options.cloud, messages, signal, onText, options);
     }
 
     const meta = classifyModelMeta(model);

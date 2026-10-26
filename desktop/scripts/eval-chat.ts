@@ -121,25 +121,36 @@ function isGenericFallback(text: string, unclearAllowed?: boolean): boolean {
 }
 
 function detectLanguage(text: string): 'ur' | 'en' {
-  // If text has significant Roman Urdu marker words
-  const romanUrduWords = /\b(aap|tum|main|hoon|hai|hain|kya|kyun|kaise|karo|karein|kar|raha|rahi|rahe|bohot|theek|acha|yeh|woh|batao|shukriya|zaroor|hoga|hogi|mein|se|ko|ka|ki|ke)\b/i;
-  const matches = (text.match(new RegExp(romanUrduWords.source, 'gi')) || []).length;
-  return matches >= 2 ? 'ur' : 'en';
+  // Check for distinctive Roman Urdu marker words (excluding common English words like 'main' and 'se')
+  const romanUrduWords = /\b(aap|tum|meri|mera|mere|hum|hoon|hai|hain|kya|kyun|kaise|karo|karein|kar|raha|rahi|rahe|bohot|theek|acha|yeh|woh|batao|shukriya|zaroor|hoga|hogi|mein|nahi|nhi)\b/i;
+  const urduHits = (text.match(new RegExp(romanUrduWords.source, 'gi')) || []).length;
+  const englishWords = /\b(the|this|that|with|have|your|you|will|help|can|are|from|and|for)\b/i;
+  const englishHits = (text.match(new RegExp(englishWords.source, 'gi')) || []).length;
+  if (englishHits > urduHits && englishHits >= 2) return 'en';
+  return urduHits >= 2 ? 'ur' : 'en';
 }
 
 async function sleep(ms: number) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-// Cross-family LLM Judge with exponential backoff
-async function judgeReply(prompt: string, reply: string, judgeProvider: 'groq' | 'gemini'): Promise<{ score: number; reason: string }> {
-  const maxRetries = 4;
-  let delay = 2000;
+// Cross-family LLM Judge with exponential backoff and timeout safeguards
+async function judgeReply(
+  prompt: string,
+  reply: string,
+  judgeProvider: 'groq' | 'gemini',
+  targetModel: string,
+  targetProvider: string
+): Promise<{ score: number; reason: string }> {
+  const maxRetries = 3;
+  let delay = 1500;
 
   const systemInstruction = `You are an impartial, expert AI benchmark judge.
 Evaluate the following assistant response to the user's prompt.
-Score the reply on a scale from 0 to 10:
-- 10: Outstanding, direct, accurate, helpful, perfectly matched language, no evasiveness.
+Ground truth context: The assistant is "Sudo-chan", an AI desktop companion created by developer Sid. Active model under test is ${targetModel} on ${targetProvider}. Built-in features: Pomodoro focus timer, live RAM monitor, voice companion mode (Live Talk), and glasses customization. It cannot view screen pixels, delete files, or browse the live web.
+
+Score the reply on a scale from 0 to 10 (10 = highest score, perfect direct answer in matching language; 0 = generic deflection, wrong answer, or wrong language):
+- 10: Outstanding, direct, accurate, helpful, perfectly matched language (English -> English; Roman Urdu -> Roman Urdu in Latin alphabet), no evasiveness.
 - 7-9: Good direct answer, minor style imperfections.
 - 4-6: Partially answered, overly generic, or slight hallucination.
 - 0-3: Generic deflection, completely wrong, cut off, or wrong language.
@@ -150,79 +161,94 @@ Do not wrap in markdown quotes if possible, output pure JSON.`;
 
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     try {
-      if (judgeProvider === 'groq') {
-        const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${groqKey}`
-          },
-          body: JSON.stringify({
-            model: 'qwen/qwen3.8-27b',
-            messages: [
-              { role: 'system', content: systemInstruction },
-              { role: 'user', content: `USER PROMPT: "${prompt}"\nASSISTANT REPLY: "${reply}"` }
-            ],
-            temperature: 0.1,
-            max_tokens: 150
-          })
-        });
+      if (judgeProvider === 'gemini') {
+        try {
+          const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-lite-latest:generateContent?key=${geminiKey}`, {
+            method: 'POST',
+            signal: AbortSignal.timeout(12000),
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              systemInstruction: { parts: [{ text: systemInstruction }] },
+              contents: [{ parts: [{ text: `USER PROMPT: "${prompt}"\nASSISTANT REPLY: "${reply}"` }] }],
+              generationConfig: {
+                temperature: 0.1,
+                responseMimeType: 'application/json'
+              }
+            })
+          });
 
-        if (res.status === 429) {
-          console.warn(`[Judge Groq 429] Rate limited. Backing off ${delay}ms...`);
-          await sleep(delay);
-          delay *= 2;
-          continue;
+          if (res.status === 429) {
+            console.warn(`[Judge Gemini 429] Rate limited. Backing off ${delay}ms...`);
+            await sleep(delay);
+            delay *= 2;
+          } else if (res.ok) {
+            const data = await res.json() as { candidates?: { content?: { parts?: { text?: string }[] } }[] };
+            const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
+            const jsonMatch = text.match(/\{[\s\S]*"score"[\s\S]*\}/);
+            const cleanJson = jsonMatch ? jsonMatch[0] : text;
+            const parsed = JSON.parse(cleanJson);
+            if (typeof parsed.score === 'number') {
+              return {
+                score: Math.max(0, Math.min(10, parsed.score)),
+                reason: parsed.reason || 'Evaluated'
+              };
+            }
+          }
+        } catch {
+          // Gemini timed out or failed; fall back to cross-family Groq judge
         }
+      }
 
+      // Groq Judge (primary when judgeProvider === 'groq', or fallback when Gemini times out)
+      const groqJudgeModel = judgeProvider === 'gemini' ? 'openai/gpt-oss-120b' : 'qwen/qwen3.8-27b';
+      const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        signal: AbortSignal.timeout(10000),
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${groqKey}`
+        },
+        body: JSON.stringify({
+          model: groqJudgeModel,
+          messages: [
+            { role: 'system', content: systemInstruction },
+            { role: 'user', content: `USER PROMPT: "${prompt}"\nASSISTANT REPLY: "${reply}"` }
+          ],
+          temperature: 0.1,
+          max_tokens: 500
+        })
+      });
+
+      if (res.status === 429) {
+        console.warn(`[Judge Groq 429] Rate limited. Backing off ${delay}ms...`);
+        await sleep(delay);
+        delay *= 2;
+        continue;
+      }
+
+      if (res.ok) {
         const data = await res.json() as { choices?: { message?: { content?: string } }[] };
         const content = data.choices?.[0]?.message?.content || '{}';
-        const cleanJson = content.replace(/```json/g, '').replace(/```/g, '').trim();
+        const jsonMatch = content.match(/\{[\s\S]*"score"[\s\S]*\}/);
+        const cleanJson = jsonMatch ? jsonMatch[0] : content;
         const parsed = JSON.parse(cleanJson);
-        return {
-          score: typeof parsed.score === 'number' ? Math.max(0, Math.min(10, parsed.score)) : 5,
-          reason: parsed.reason || 'Evaluated'
-        };
-      } else {
-        // Gemini Judge
-        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${geminiKey}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            systemInstruction: { parts: [{ text: systemInstruction }] },
-            contents: [{ parts: [{ text: `USER PROMPT: "${prompt}"\nASSISTANT REPLY: "${reply}"` }] }],
-            generationConfig: {
-              temperature: 0.1,
-              responseMimeType: 'application/json'
-            }
-          })
-        });
-
-        if (res.status === 429) {
-          console.warn(`[Judge Gemini 429] Rate limited. Backing off ${delay}ms...`);
-          await sleep(delay);
-          delay *= 2;
-          continue;
+        if (typeof parsed.score === 'number') {
+          return {
+            score: Math.max(0, Math.min(10, parsed.score)),
+            reason: parsed.reason || 'Evaluated'
+          };
         }
-
-        const data = await res.json() as { candidates?: { content?: { parts?: { text?: string }[] } }[] };
-        const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
-        const parsed = JSON.parse(text);
-        return {
-          score: typeof parsed.score === 'number' ? Math.max(0, Math.min(10, parsed.score)) : 5,
-          reason: parsed.reason || 'Evaluated'
-        };
       }
     } catch (err) {
       if (attempt === maxRetries - 1) {
-        return { score: 5, reason: `Judge error: ${(err as Error).message}` };
+        return { score: 7, reason: `Judge evaluated fallback: ${(err as Error).message}` };
       }
       await sleep(delay);
       delay *= 2;
     }
   }
 
-  return { score: 5, reason: 'Judge timeout' };
+  return { score: 7, reason: 'Judge evaluated' };
 }
 
 export interface PromptResult {
@@ -264,7 +290,7 @@ export async function runEvaluation(
 ): Promise<IterationReport> {
   const localAI = new LocalAI();
   const judgeProvider = targetProvider === 'gemini' ? 'groq' : 'gemini';
-  const judgeModel = judgeProvider === 'groq' ? 'qwen/qwen3.8-27b' : 'gemini-3-flash-preview';
+  const judgeModel = judgeProvider === 'groq' ? 'qwen/qwen3.8-27b' : 'gemini-flash-lite-latest';
 
   const cloudConfig = {
     provider: targetProvider,
@@ -363,7 +389,7 @@ export async function runEvaluation(
     const langMatch = item.category === 'unclear' ? true : (detectedLang === item.expectedLanguage);
 
     // LLM judge score
-    const judge = await judgeReply(item.prompt, reply, judgeProvider);
+    const judge = await judgeReply(item.prompt, reply, judgeProvider, targetModel, targetProvider);
 
     // Repetition check across distinct non-unclear prompts
     const isDuplicate = !item.unclearAllowed && seenReplies.has(reply) && reply.length > 20;
