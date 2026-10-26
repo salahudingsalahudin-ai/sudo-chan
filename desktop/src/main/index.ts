@@ -619,6 +619,7 @@ function setupIPC() {
       voice: state.settings.ttsGeminiVoice,
       speed: state.settings.ttsSpeed,
     });
+    console.info(`[TTS] synthesize lang=${lang} chars=${clean.length} ok=${result.ok}${result.ok ? '' : ` status=${result.status ?? '-'}`}`);
     return result.ok ? { ok: true, dataUri: result.dataUri } : { ok: false };
   });
   handle(CHANNELS.setVoiceActive, (event, payload: unknown) => {
@@ -657,6 +658,7 @@ function setupIPC() {
     authorize(event, ['overlay', 'chat']);
     const evt = parseSpeechEvent(payload);
     if (!evt) return;
+    if (evt.type !== 'level') console.info(`[TTS] speech:${evt.type}${evt.type === 'stop' ? ` reason=${evt.reason}` : ''}`);
     const senderId = event.sender.id;
     if (evt.type === 'start') {
       activeSpeech = { id: evt.id, senderId };
