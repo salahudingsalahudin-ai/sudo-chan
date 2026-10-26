@@ -15,10 +15,27 @@ export interface SttProvider {
   transcribe(audio: { base64Audio: string; mimeType?: string; language?: VoiceLanguage }): Promise<string>;
 }
 
+export interface TtsRequest {
+  text: string;
+  lang: 'ur' | 'en' | 'hi';
+  /** Natural-language style instruction (from the sentence's emotion tag). */
+  style?: string;
+  voice?: string;
+  speed?: number;
+}
+
+export interface TtsResult {
+  ok: boolean;
+  dataUri?: string;
+  error?: string;
+  status?: number;
+  provider?: TtsProviderId;
+}
+
 export interface TtsProvider {
   id: TtsProviderId;
   name: string;
-  synthesize(text: string, options?: { voice?: string; speed?: number; language?: VoiceLanguage }): Promise<{ ok: boolean; dataUri?: string; error?: string }>;
+  synthesize(req: TtsRequest): Promise<TtsResult>;
 }
 
 export interface LlmProvider {

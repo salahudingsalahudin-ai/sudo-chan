@@ -1,4 +1,5 @@
 import type { ActionResult, ChatMessage, ChatState } from '../shared/types.js';
+import { stripEmotionTags } from '../shared/speech.js';
 import { MAX_MESSAGE_LENGTH } from '../shared/validation.js';
 import { LocalAI, LocalAIError } from './local-ai.js';
 import type { StreamOptions } from './local-ai.js';
@@ -38,7 +39,8 @@ export class ChatSession {
     this.publish();
     void this.ai.stream(model, context, request.controller.signal, text => {
       if (this.active !== request) return;
-      reply.text += text; this.publish();
+      reply.spoken = (reply.spoken ?? '') + text;
+      reply.text = stripEmotionTags(reply.spoken); this.publish();
     }, options).then(() => {
       if (this.active === request) reply.status = 'complete';
     }).catch(error => {

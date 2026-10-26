@@ -182,7 +182,7 @@ function Overlay({ state }: { state: AppState }) {
       if (last && last.role === 'assistant' && last.status === 'complete' && last.text) {
         if (lastSpokenOverlayId.current !== last.id) {
           lastSpokenOverlayId.current = last.id;
-          void speak(last.text);
+          void speak(last.spoken ?? last.text);
         }
       }
     });
@@ -393,7 +393,7 @@ function Chat({ state }: { state: AppState }) {
     if (lastMsg && lastMsg.role === 'assistant' && lastMsg.status === 'complete' && lastMsg.text) {
       if (lastSpokenId.current !== lastMsg.id) {
         lastSpokenId.current = lastMsg.id;
-        void speak(lastMsg.text);
+        void speak(lastMsg.spoken ?? lastMsg.text);
       }
     }
   }, [conversation.messages, muted, state.voiceActiveTarget]);
@@ -932,7 +932,10 @@ function SettingsView({ state }: { state: AppState }) {
     settings.customWakeWord !== state.settings.customWakeWord ||
     settings.voiceVisualizerMode !== state.settings.voiceVisualizerMode ||
     settings.glassesEnabled !== state.settings.glassesEnabled ||
-    settings.bargeInSensitivity !== state.settings.bargeInSensitivity;
+    settings.bargeInSensitivity !== state.settings.bargeInSensitivity ||
+    settings.ttsProvider !== state.settings.ttsProvider ||
+    settings.ttsGeminiVoice !== state.settings.ttsGeminiVoice ||
+    settings.ttsSpeed !== state.settings.ttsSpeed;
   useEffect(() => setSettings(state.settings), [
     state.settings.botSize,
     state.settings.shortcut,
@@ -991,6 +994,9 @@ function SettingsView({ state }: { state: AppState }) {
                 <span/>
               </button>
             </div>
+    state.settings.ttsProvider,
+    state.settings.ttsGeminiVoice,
+    state.settings.ttsSpeed,
           </SettingRow>
           <SettingRow title="Back to a familiar place" description="Move her to the bottom-right of your main screen."><button className="soft-button" type="button" onClick={() => void api?.resetPosition()}><Icon name="reset" size={15}/>Reset position</button></SettingRow>
           <div className="gentle-note"><Icon name="chat" size={16}/><p>Drag the three little dots above her head. Click her to say hello; double-click to chat.</p></div>
@@ -1188,3 +1194,17 @@ export default function App() {
   if (kind === 'chat') return <Chat state={state}/>;
   return <SettingsView state={state}/>;
 }
+          <SettingRow title="Voice engine" description="Gemini gives a more natural, expressive voice (needs your Gemini key; about 4-6 s per sentence on the free tier). Google is faster but flatter. Falls back to Google automatically if Gemini fails.">
+            <select className="wake-word-input" aria-label="Voice engine" value={settings.ttsProvider ?? 'gemini'} onChange={event => setSettings({ ...settings, ttsProvider: event.target.value as Settings['ttsProvider'] })}>
+              <option value="gemini">Gemini (expressive)</option>
+              <option value="google">Google (fast)</option>
+            </select>
+          </SettingRow>
+          <SettingRow title="Gemini voice" description="Voice used by the Gemini engine.">
+            <select className="wake-word-input" aria-label="Gemini voice" value={settings.ttsGeminiVoice ?? 'Kore'} onChange={event => setSettings({ ...settings, ttsGeminiVoice: event.target.value })}>
+              {['Kore', 'Puck', 'Zephyr', 'Aoede', 'Leda', 'Charon', 'Fenrir'].map(voice => <option key={voice} value={voice}>{voice}</option>)}
+            </select>
+          </SettingRow>
+          <SettingRow title="Speaking speed" description={`Gemini voice pace (${(settings.ttsSpeed ?? 1).toFixed(1)}x). Not applied to the Google engine.`}>
+            <label className="shortcut-label"><span className="sr-only">Speaking speed</span><input type="range" min={0.7} max={1.4} step={0.1} value={settings.ttsSpeed ?? 1} onChange={event => setSettings({ ...settings, ttsSpeed: Number(event.target.value) })}/></label>
+          </SettingRow>

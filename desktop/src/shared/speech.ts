@@ -1,7 +1,69 @@
+export const EMOTIONS = ['neutral', 'warm', 'excited', 'calm', 'curious', 'soft', 'happy'] as const;
+export type Emotion = typeof EMOTIONS[number];
+
+const TAG_ALIASES: Record<string, Emotion> = {
+  neutral: 'neutral', warm: 'warm', friendly: 'warm', excited: 'excited', calm: 'calm', curious: 'curious',
+  soft: 'soft', apologetic: 'soft', sorry: 'soft', sad: 'soft', happy: 'happy', cheerful: 'happy', greeting: 'happy',
+};
+const TAG_PATTERN = /\[\s*(neutral|warm|friendly|excited|calm|curious|soft|apologetic|sorry|sad|happy|cheerful|greeting)\s*\]/gi;
+
+/** Removes [warm]-style emotion tags, including a half-typed tag at the end of a streaming reply. */
+export function stripEmotionTags(text: string): string {
+  if (!text) return '';
+  return text.replace(TAG_PATTERN, '').replace(/\[[a-z]{0,10}$/i, '').replace(/[ \t]{2,}/g, ' ').replace(/^[ \t]+/gm, '');
+}
+
+export interface EmotionSegment { text: string; emotion: Emotion }
+
+/** Splits raw LLM text on emotion tags. A tag applies to the text that follows it; untagged text is neutral. */
+export function parseEmotionTags(text: string): EmotionSegment[] {
+  if (!text) return [];
+  const segments: EmotionSegment[] = [];
+  let emotion: Emotion = 'neutral';
+  let last = 0;
+  const push = (chunk: string) => {
+    const t = chunk.trim();
+    if (t) segments.push({ text: t, emotion });
+  };
+  for (const match of text.matchAll(TAG_PATTERN)) {
+    push(text.slice(last, match.index));
+    emotion = TAG_ALIASES[match[1].toLowerCase()] ?? 'neutral';
+    last = (match.index ?? 0) + match[0].length;
+  }
+  push(text.slice(last));
+  return segments;
+}
+
+/** Natural-language style instruction handed to the TTS model together with the sentence. */
+export function emotionStyle(emotion: Emotion, lang: 'ur' | 'en' | 'hi' = 'en'): string {
+  const base: Record<Emotion, string> = {
+    neutral: 'in a natural, conversational tone with small pauses',
+    warm: 'warmly and kindly, at a natural conversational pace, with small pauses',
+    excited: 'with bright, excited energy, slightly faster, with a smile in the voice',
+    calm: 'calmly and gently, a little slower, with soft pauses',
+    curious: 'with curious, rising intonation as if genuinely interested',
+    soft: 'softly and apologetically, gentle and low in volume',
+    happy: 'cheerfully, like a happy greeting to a friend',
+  };
+  const accent = lang === 'en' ? '' : ' Pronounce it as a native Pakistani Urdu speaker would.';
+  return `Say the following ${base[emotion]}.${accent}`;
+}
+
+export interface SpokenSentence { text: string; emotion: Emotion }
+
+/** Tag-aware sentence queue for TTS: emotion per sentence, markdown/emoji/URL/code already removed. */
+export function splitIntoSpokenSentences(raw: string, maxLen = 180): SpokenSentence[] {
+  const out: SpokenSentence[] = [];
+  for (const segment of parseEmotionTags(raw)) {
+    for (const sentence of splitIntoSentences(segment.text, maxLen)) out.push({ text: sentence, emotion: segment.emotion });
+  }
+  return out;
+}
+
 export function cleanTextForSpeech(text: string): string {
   if (!text || typeof text !== 'string') return '';
 
-  let cleaned = text;
+  let cleaned = stripEmotionTags(text);
 
   // 1. Remove fenced code blocks (``` ... ```)
   cleaned = cleaned.replace(/```[\s\S]*?```/g, ' ');

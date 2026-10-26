@@ -9,7 +9,9 @@ import { tmpdir } from 'node:os';
 import { CHANNELS } from '../shared/types.js';
 import type { AIMode, AIState, AppState, CloudConfigInput, CloudProviderId, Settings, WindowKind } from '../shared/types.js';
 import { BOT_DIMENSIONS, clampPosition, CLOUD_PRESETS, DEFAULT_SETTINGS, maskApiKey, validCloudConfig, validPosition, validSettings } from '../shared/validation.js';
-import { cleanTextForSpeech, detectSentenceLanguage } from '../shared/speech.js';
+import { cleanTextForSpeech, detectSentenceLanguage, emotionStyle, EMOTIONS } from '../shared/speech.js';
+import type { Emotion } from '../shared/speech.js';
+import { TtsRouter } from './tts-provider.js';
 import { displayBackend } from '../shared/display-backend.js';
 import type { SpeechEvent, StopReason } from '../shared/speech-events.js';
 import { overlayShape } from '../shared/overlay-shape.js';
@@ -81,6 +83,18 @@ function encryptApiKey(key: string): { encryptedKey?: string; rawKey?: string } 
   return { rawKey: Buffer.from(key, 'utf-8').toString('base64') };
 }
 
+let router: TtsRouter | undefined;
+function geminiKey(): string {
+  const active = store.get('cloud');
+  const activeKey = decryptApiKey(active);
+  if (activeKey && (active?.provider === 'gemini' || activeKey.startsWith('AIza'))) return activeKey;
+  const providers = store.get('providers') as Record<string, StoredCloud | undefined> | undefined;
+  return decryptApiKey(providers?.gemini);
+}
+function ttsRouter(): TtsRouter {
+  router ??= new TtsRouter({ getKey: geminiKey, getPreferred: () => state.settings.ttsProvider });
+  return router;
+}
 function decryptApiKey(stored?: StoredCloud): string {
   if (!stored) return '';
   if (stored.encryptedKey && safeStorage && safeStorage.isEncryptionAvailable()) {
@@ -563,38 +577,30 @@ function setupIPC() {
   handle(CHANNELS.playSpeech, async (_event, payload: unknown) => {
     let rawText = '';
     let requestedLang: 'ur' | 'en' | 'hi' | undefined;
+    let emotion: Emotion = 'neutral';
 
     if (typeof payload === 'string') {
       rawText = payload;
     } else if (payload && typeof payload === 'object') {
-      const p = payload as { text?: string; lang?: string };
+      const p = payload as { text?: string; lang?: string; emotion?: string };
       rawText = p.text || '';
-      if (p.lang === 'ur' || p.lang === 'en' || p.lang === 'hi') {
-        requestedLang = p.lang;
-      }
+      if (p.lang === 'ur' || p.lang === 'en' || p.lang === 'hi') requestedLang = p.lang;
+      if (typeof p.emotion === 'string' && (EMOTIONS as readonly string[]).includes(p.emotion)) emotion = p.emotion as Emotion;
     }
 
     const clean = cleanTextForSpeech(rawText);
     if (!clean) return { ok: false };
 
-    const detectedLang = requestedLang || detectSentenceLanguage(clean);
-
-    try {
-      const url = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(clean)}&tl=${detectedLang}&client=tw-ob`;
-      const res = await fetch(url, {
-        headers: { 'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64)' },
-        signal: AbortSignal.timeout(7000),
-      });
-      if (res.ok) {
-        // Synthesis only. Playback, stop and the output level live in ONE place: the renderer's tts-player.
-        const buffer = Buffer.from(await res.arrayBuffer());
-        return { ok: true, dataUri: `data:audio/mp3;base64,${buffer.toString('base64')}` };
-      }
-    } catch {
-      // fall through to { ok: false }
-    }
-
-    return { ok: false };
+    const lang = requestedLang || detectSentenceLanguage(clean);
+    // Synthesis only (all provider calls and keys stay here). Playback, stop and the output level live in the renderer's tts-player.
+    const result = await ttsRouter().synthesize({
+      text: clean,
+      lang,
+      style: emotionStyle(emotion, lang),
+      voice: state.settings.ttsGeminiVoice,
+      speed: state.settings.ttsSpeed,
+    });
+    return result.ok ? { ok: true, dataUri: result.dataUri } : { ok: false };
   });
   handle(CHANNELS.setVoiceActive, (event, payload: unknown) => {
     let active = false;

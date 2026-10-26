@@ -12,10 +12,11 @@ export const DEFAULT_SETTINGS: Settings = {
   voiceVisualizerMode: 'bot',
   sttProvider: 'whisper',
   sttLanguage: 'auto',
-  ttsProvider: 'google',
+  ttsProvider: 'gemini',
   ttsVoice: 'default',
   ttsSpeed: 1.0,
   voiceLanguage: 'auto',
+  ttsGeminiVoice: 'Kore',
   micDeviceId: 'default',
   vadSensitivity: 'medium',
   pushToTalk: false,
@@ -77,6 +78,7 @@ export function validSettings(value: unknown): value is Settings {
   if (s.voiceLanguage !== undefined && !['auto', 'ur-PK', 'en', 'ur'].includes(s.voiceLanguage)) return false;
   if (s.micDeviceId !== undefined && typeof s.micDeviceId !== 'string') return false;
   if (s.glassesEnabled !== undefined && typeof s.glassesEnabled !== 'boolean') return false;
+  if (s.ttsGeminiVoice !== undefined && (typeof s.ttsGeminiVoice !== 'string' || !/^[A-Za-z]{2,30}$/.test(s.ttsGeminiVoice))) return false;
   if (s.bargeInSensitivity !== undefined && (typeof s.bargeInSensitivity !== 'number' || !Number.isFinite(s.bargeInSensitivity) || s.bargeInSensitivity < 0 || s.bargeInSensitivity > 1)) return false;
   return true;
 }

@@ -25,6 +25,7 @@ export interface Settings {
   ttsVoice?: string;
   ttsSpeed?: number;
   voiceLanguage?: VoiceLanguage;
+  ttsGeminiVoice?: string;
   micDeviceId?: string;
   vadSensitivity?: VadSensitivity;
   pushToTalk?: boolean;
@@ -68,7 +69,7 @@ export interface CloudConfigInput {
   model: string;
   apiKey?: string;
 }
-export interface ChatMessage { id: string; role: 'user' | 'assistant'; text: string; status?: 'streaming' | 'complete' | 'stopped' | 'error'; isVoice?: boolean; }
+export interface ChatMessage { id: string; role: 'user' | 'assistant'; text: string; spoken?: string; status?: 'streaming' | 'complete' | 'stopped' | 'error'; isVoice?: boolean; }
 export interface ChatState { messages: ChatMessage[]; busy: boolean; error: string; revision: number }
 export interface AIState {
   mode: AIMode;
@@ -105,7 +106,7 @@ export interface DesktopAPI {
   detectProvider(apiKey: string): Promise<{ ok: boolean; provider?: CloudProviderId }>;
   testCloud(config: CloudConfigInput): Promise<ActionResult>;
   testFeature(feature: 'break' | 'heavy'): Promise<ActionResult>;
-  playSpeech(payload: string | { text: string; lang?: string }): Promise<{ ok: boolean; dataUri?: string }>;
+  playSpeech(payload: string | { text: string; lang?: string; emotion?: string }): Promise<{ ok: boolean; dataUri?: string }>;
   setVoiceActive(active: boolean, target?: 'overlay' | 'chat'): Promise<ActionResult>;
   setIsSpeaking(speaking: boolean): Promise<ActionResult>;
   emitSpeechEvent(event: SpeechEvent): void;

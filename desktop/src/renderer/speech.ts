@@ -1,4 +1,5 @@
-import { detectSentenceLanguage, splitIntoSentences } from '../shared/speech';
+import { detectSentenceLanguage, splitIntoSpokenSentences } from '../shared/speech';
+import type { Emotion } from '../shared/speech';
 import { beginPlayback, currentGeneration, decodeDataUri, finishPlayback, markSpeechStart, playBuffer, stopSpeaking } from './tts-player';
 
 const STORAGE_KEY = 'sudo_chan_tts_muted';
@@ -78,10 +79,10 @@ export function stopSpeech(): void {
 }
 
 /** Synthesis happens in the main process (API keys / network); playback happens only in tts-player. */
-async function synthesize(sentence: string): Promise<AudioBuffer | null> {
+async function synthesize(sentence: string, emotion: Emotion): Promise<AudioBuffer | null> {
   const lang = detectSentenceLanguage(sentence);
   try {
-    const result = await window.companion?.playSpeech({ text: sentence, lang });
+    const result = await window.companion?.playSpeech({ text: sentence, lang, emotion });
     if (result?.ok && result.dataUri) return await decodeDataUri(result.dataUri);
   } catch {}
   return null;
@@ -113,21 +114,21 @@ export async function speak(
 ): Promise<void> {
   if (getMutedPreference()) return;
 
-  const sentences = splitIntoSentences(rawText, 180);
+  const sentences = splitIntoSpokenSentences(rawText, 180);
   if (!sentences.length) return;
 
   const generation = beginPlayback();
   let hadSuccess = false;
 
   // Synthesize sentence N+1 while sentence N plays so there are no audible gaps.
-  let pending = synthesize(sentences[0]);
+  let pending = synthesize(sentences[0].text, sentences[0].emotion);
   for (let i = 0; i < sentences.length; i++) {
     const buffer = await pending;
     if (generation !== currentGeneration()) return;
-    if (i + 1 < sentences.length) pending = synthesize(sentences[i + 1]);
+    if (i + 1 < sentences.length) pending = synthesize(sentences[i + 1].text, sentences[i + 1].emotion);
     const ok = buffer
       ? await playBuffer(buffer, generation)
-      : await speakWithBrowserVoice(sentences[i], generation);
+      : await speakWithBrowserVoice(sentences[i].text, generation);
     if (generation !== currentGeneration()) return;
     if (ok) hadSuccess = true;
   }
