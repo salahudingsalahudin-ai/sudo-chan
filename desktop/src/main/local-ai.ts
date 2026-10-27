@@ -3,6 +3,8 @@ import type { AIMode, CloudProviderId, ModelMeta } from '../shared/types.js';
 import { CLOUD_PRESETS } from '../shared/validation.js';
 import { runToolLoop, ToolLoopHttpError, ToolsUnsupportedError } from './tools/agent-loop.js';
 import type { ToolRuntimeLike } from './tools/types.js';
+import type { VisionTarget } from '../shared/screen-assist.ts';
+import { runVisionChat, VisionError } from './vision-chat.ts';
 
 export function normalizeCloudModel(provider: CloudProviderId, model: string): string {
   let clean = model.trim();
@@ -95,7 +97,7 @@ export const TOOLS_PROMPT = [
   '- need the user to click Allow on screen every time: write_file, append_file, run_command (one program, no pipes), open_url, open_app',
   'Rules: use a tool only when the request needs it. Before a risky action say in one short sentence what you are about to do; the user approves with a button on screen, NOT by voice or by saying "yes".',
   'If a tool result says blocked, denied, timed out or NOT done, tell the user plainly and do not pretend otherwise. NEVER claim you read, wrote, ran or opened anything unless a tool result confirms it.',
-  'You cannot see the screen or browse the web, and secrets (.ssh, .env, passwords, browser data) are off limits.',
+  'You cannot see the screen on a turn with tools (a screenshot turn has no tools) and you cannot browse the web; secrets (.ssh, .env, passwords, browser data) are off limits.',
 ].join('\n');
 
 export function buildSystemPrompt(options?: {
@@ -103,6 +105,8 @@ export function buildSystemPrompt(options?: {
   model?: string;
   provider?: string;
   tools?: boolean;
+  /** Tools are enabled but this turn carries a screenshot, which is answered without tools. */
+  toolsPaused?: boolean;
 }): string {
   if (options?.voice) {
     return [
@@ -145,8 +149,9 @@ export function buildSystemPrompt(options?: {
     providerFact,
     '- Real Desktop Features: Pomodoro focus timer, live system RAM health alert, Live Talk voice companion, cute customizable glasses, quiet standby overlay.',
     options?.tools
-      ? '- Real System Boundaries: Privacy-first desktop companion. Cannot view desktop screen pixels or browse the live web. Files and commands are only possible through the tools below, with the user\'s approval.'
-      : '- Real System Boundaries: Privacy-first desktop companion. Cannot view desktop screen pixels, cannot modify or delete OS files directly, cannot browse the live web.',
+      ? '- Real System Boundaries: Privacy-first desktop companion. You can see the screen ONLY on a turn where a screenshot is attached by screen assist; this is NOT such a turn, so you cannot see the screen and must say so instead of guessing. You cannot browse the live web. Files and commands are only possible through the tools below, with the user\'s approval.'
+      : '- Real System Boundaries: Privacy-first desktop companion. Can see the screen of the user ONLY on a turn where a screenshot is attached to the message (when the user enabled screen assist and said your name or pressed the eye button); on every other turn you cannot see the screen and must say so instead of guessing; you cannot modify or delete OS files directly, cannot browse the live web.',
+    options?.toolsPaused ? '- Tools (files, commands, links) are ON in settings but are NOT available on this screenshot turn. If the user wants an action done, tell them to ask again without the screenshot (say your name or type it again); never claim you did something.' : '',
     options?.tools ? `\n${TOOLS_PROMPT}` : '',
   ].filter(Boolean).join('\n');
 }
@@ -220,6 +225,8 @@ export interface StreamOptions {
   voice?: boolean;
   /** Present only when the user enabled "Let Sudo-chan use tools". */
   tools?: ToolRuntimeLike;
+  /** One screenshot turn: the image goes only to the vision targets, never into history or logs. */
+  vision?: { dataUri: string; thumbnail?: string; targets: VisionTarget[]; fallbackText: string };
 }
 type Fetch = typeof fetch;
 export class LocalAIError extends Error {}
@@ -709,6 +716,24 @@ export class LocalAI {
   }
 
   async stream(model: string, messages: ModelMessage[], signal: AbortSignal, onText: (text: string) => void, options?: StreamOptions) {
+    if (options?.vision) {
+      try {
+        const result = await runVisionChat({
+          targets: options.vision.targets,
+          system: buildSystemPrompt({ voice: options.voice, provider: 'cloud vision', toolsPaused: Boolean(options.tools) }),
+          history: messages,
+          fallbackText: options.vision.fallbackText,
+          imageDataUri: options.vision.dataUri,
+          signal,
+          log: line => console.info(line),
+        });
+        onText(result.text);
+        return;
+      } catch (error) {
+        if (error instanceof VisionError) throw new LocalAIError(error.message);
+        throw error;
+      }
+    }
     if (options?.mode === 'cloud' && options.cloud) {
       return this.streamCloud(options.cloud, messages, signal, onText, options);
     }

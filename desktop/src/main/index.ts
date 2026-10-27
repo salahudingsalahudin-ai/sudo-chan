@@ -1,4 +1,4 @@
-import { app, BrowserWindow, globalShortcut, ipcMain, Menu, nativeImage, safeStorage, screen, session, Tray } from 'electron';
+import { app, BrowserWindow, dialog, globalShortcut, ipcMain, Menu, nativeImage, safeStorage, screen, session, Tray } from 'electron';
 import type { IpcMainInvokeEvent } from 'electron';
 import Store from 'electron-store';
 import { setLaunchAtLogin } from './autostart.js';
@@ -29,6 +29,10 @@ import { createRegistry, nodeOpenDetached, nodeRunProgram, toDefinitions } from 
 import { ToolRuntime } from './tools/runtime.js';
 import { PomodoroTimer } from './pomodoro.js';
 import { SystemHealthMonitor } from './system-health.js';
+import { captureScreen } from './screen-capture.ts';
+import { decideCapture, DEFAULT_SCREEN_PROMPT, pickVisionTargets, VISION_DEFAULT_MODELS } from '../shared/screen-assist.ts';
+import type { VisionProviderInfo, VisionTarget } from '../shared/screen-assist.ts';
+import type { StreamOptions } from './local-ai.js';
 
 interface StoredCloud {
   provider: CloudProviderId;
@@ -53,6 +57,8 @@ interface StoreSchema {
   position: { x: number; y: number } | null;
   cloud?: StoredCloud;
   providers?: Record<string, StoredProvider | undefined>;
+  /** The user has read and accepted that screenshots are sent to their cloud AI provider. */
+  screenAssistConsent?: boolean;
 }
 
 const smokeTest = process.argv.includes('--smoke-test');
@@ -424,8 +430,123 @@ function updateTray() {
 function registerShortcut(shortcut: string) {
   try { return globalShortcut.register(shortcut, openChat); } catch { return false; }
 }
+// ---- Screen assist: capture only on wake word / explicit button, only with setting + consent, never stored ----
+let screenJob: { cancelled: boolean } | null = null;
+let lastScreenCaptureAt: number | null = null;
+let screenStatusTimer: ReturnType<typeof setTimeout> | undefined;
+function setScreenStatus(status: 'capturing' | 'sent' | null, clearAfterMs = 0) {
+  clearTimeout(screenStatusTimer);
+  state.screenStatus = status;
+  publish();
+  if (status && clearAfterMs > 0) screenStatusTimer = setTimeout(() => { state.screenStatus = null; publish(); }, clearAfterMs);
+}
+async function ensureScreenConsent(): Promise<boolean> {
+  if (store.get('screenAssistConsent')) return true;
+  const { response } = await dialog.showMessageBox({
+    type: 'question',
+    title: 'Let Sudo-chan look at your screen?',
+    message: 'Allow Sudo-chan to look at your screen when you ask?',
+    detail: 'Only when you say her name (with "Listen for my name" on) or press the eye button, she takes ONE screenshot and sends it over the internet to your cloud AI provider (Groq or Gemini) so she can explain what you are working on. Nothing is captured in the background, screenshots are not saved, and you can turn this off any time in Settings. Windows with passwords or banking can be visible in a screenshot, so close them first.',
+    buttons: ['Allow', 'Not now'],
+    defaultId: 1,
+    cancelId: 1,
+    noLink: true,
+  });
+  if (response !== 0) return false;
+  store.set('screenAssistConsent', true);
+  return true;
+}
+function visionTargets(): VisionTarget[] {
+  const active = aiState.mode === 'cloud'
+    ? { provider: aiState.cloud.provider, endpoint: aiState.cloud.endpoint, model: aiState.cloud.model, apiKey: getProviderKey(aiState.cloud.provider) }
+    : null;
+  const others: Record<string, VisionProviderInfo> = {};
+  for (const id of ['groq', 'gemini'] as const) {
+    const apiKey = getProviderKey(id);
+    if (apiKey) others[id] = { endpoint: CLOUD_PRESETS[id].endpoint, model: VISION_DEFAULT_MODELS[id], apiKey };
+  }
+  return pickVisionTargets(active, others);
+}
+function captureErrorMessage(reason: string): string {
+  if (reason === 'no-python-gi' || reason === 'no-python3') return 'Screen capture ke liye python3-gi chahiye (sudo apt install python3-gi).';
+  if (reason === 'portal-denied') return 'Screenshot ki permission nahi mili.';
+  if (reason === 'blank-frame') return 'Screen khaali (black) aayi, dobara try karein.';
+  return 'Screen capture nahi ho saka.';
+}
+function sendChat(text: string, isVoice: boolean, vision?: StreamOptions['vision']) {
+  const effectiveCloud = aiState.mode === 'cloud' ? {
+    provider: aiState.cloud.provider,
+    endpoint: aiState.cloud.endpoint,
+    model: aiState.cloud.model,
+    apiKey: decryptApiKey(store.get('cloud')),
+  } : undefined;
+  const result = conversation.send(text, aiState.model, {
+    mode: aiState.mode,
+    heavy: aiState.modelSizes[aiState.model]?.heavy,
+    cloud: effectiveCloud,
+    voice: isVoice,
+    vision,
+    tools: state.settings.toolsEnabled === true && effectiveCloud ? tools() : undefined,
+  });
+  if (result.ok && !state.voiceCallActive) setHappy('Thinking with you.');
+  return result;
+}
+async function sendWithScreen(value: unknown) {
+  const v = (value && typeof value === 'object' ? value : {}) as { text?: unknown; voice?: unknown; source?: unknown };
+  const text = typeof v.text === 'string' ? v.text.trim() : '';
+  const isVoice = typeof v.voice === 'boolean' ? v.voice : Boolean(state.voiceCallActive);
+  if (v.source !== 'wake' && v.source !== 'button') return { ok: false, error: 'Unknown screen request.' };
+  const source = v.source;
+  if (conversation.snapshot().busy) return { ok: false, error: 'Wait for this reply, or press Stop first.' };
+  if (aiState.mode !== 'cloud') return { ok: false, error: 'Screen assist needs Cloud mode (Settings → AI): the image is only sent to your cloud provider.' };
+  let consented = Boolean(store.get('screenAssistConsent'));
+  const enabled = Boolean(state.settings.screenAssistEnabled);
+  if (enabled && !consented) consented = await ensureScreenConsent();
+  const decision = decideCapture({ enabled, consented, source, now: Date.now(), lastCaptureAt: lastScreenCaptureAt, busy: Boolean(screenJob) });
+  if (!decision.capture) {
+    // Name said again within the cooldown: still answer the words, just without a new screenshot.
+    if ((decision.reason === 'cooldown' || decision.reason === 'busy') && text) return sendChat(text, isVoice);
+    const reasons = { disabled: 'Screen assist is off. Turn it on in Settings.', 'no-consent': 'Screen assist needs your permission first.', busy: 'Already looking at the screen.', cooldown: 'Abhi abhi screen dekhi hai, thori der baad dobara bolein.' };
+    return { ok: false, error: reasons[decision.reason] };
+  }
+  const targets = visionTargets();
+  if (!targets.length) return { ok: false, error: 'Screen dekhne ke liye Groq ya Gemini ki key chahiye (Settings → AI).' };
+
+  const job = { cancelled: false };
+  screenJob = job;
+  setScreenStatus('capturing');
+  // Hide our own panels so the screenshot shows the user's work. The small overlay bot stays visible (it carries the indicator).
+  const hidden = [chat, settingsWindow].filter((w): w is BrowserWindow => Boolean(w && !w.isDestroyed() && w.isVisible()));
+  for (const win of hidden) win.hide();
+  if (hidden.length) await new Promise(resolve => setTimeout(resolve, 350));
+  let shot: Awaited<ReturnType<typeof captureScreen>>;
+  try {
+    shot = await captureScreen();
+  } finally {
+    for (const win of hidden) if (!win.isDestroyed()) win.showInactive();
+    lastScreenCaptureAt = Date.now();
+    screenJob = null;
+  }
+  if (job.cancelled) { setScreenStatus(null); return { ok: false, error: 'Screen capture cancelled.' }; }
+  if (!shot.ok) {
+    setScreenStatus(null);
+    const error = captureErrorMessage(shot.reason);
+    if (source === 'wake') setHappy(error, 4000);
+    return { ok: false, error };
+  }
+  const prompt = text || DEFAULT_SCREEN_PROMPT;
+  const result = sendChat(prompt, isVoice, { dataUri: shot.dataUri, thumbnail: shot.thumbnail, targets, fallbackText: prompt });
+  setScreenStatus(result.ok ? 'sent' : null, 3500);
+  if (result.ok && source === 'wake' && !state.voiceCallActive) openChat();
+  return result;
+}
+function cancelScreenCapture() {
+  if (screenJob) screenJob.cancelled = true;
+  setScreenStatus(null);
+}
 async function saveSettings(candidate: unknown) {
   if (!validSettings(candidate)) return { ok: false, error: 'Choose a valid shortcut and companion size.' };
+  if (candidate.screenAssistEnabled && !state.settings.screenAssistEnabled && !store.get('screenAssistConsent') && !(await ensureScreenConsent())) candidate.screenAssistEnabled = false;
   if (candidate.launchAtLogin && !state.loginSupported) return { ok: false, error: 'Install the app before enabling launch at login.' };
   const previous = state.settings;
   const changed = candidate.shortcut !== previous.shortcut;
@@ -484,30 +605,18 @@ function setupIPC() {
       if (typeof v.voice === 'boolean') isVoice = v.voice;
     }
 
-    const effectiveCloud = aiState.mode === 'cloud' ? {
-      provider: aiState.cloud.provider,
-      endpoint: aiState.cloud.endpoint,
-      model: aiState.cloud.model,
-      apiKey: decryptApiKey(store.get('cloud')),
-    } : undefined;
-    const result = conversation.send(text, aiState.model, {
-      mode: aiState.mode,
-      heavy: aiState.modelSizes[aiState.model]?.heavy,
-      cloud: effectiveCloud,
-      voice: isVoice,
-      tools: state.settings.toolsEnabled === true && effectiveCloud ? tools() : undefined,
-    });
-    if (result.ok && !state.voiceCallActive) setHappy('Thinking with you.');
-    return result;
+    return sendChat(text, isVoice);
   }, ['chat', 'overlay']);
-  handle(CHANNELS.stop, () => { conversation.stop(); stopAllTools(); }, 'chat');
+  handle(CHANNELS.sendScreen, (_e, value) => sendWithScreen(value), ['chat', 'overlay']);
+  handle(CHANNELS.cancelScreen, () => cancelScreenCapture(), ['chat', 'overlay']);
+  handle(CHANNELS.stop, () => { cancelScreenCapture(); conversation.stop(); stopAllTools(); }, 'chat');
   handle(CHANNELS.toolApprovals, () => toolApprovals.list(), 'chat');
   handle(CHANNELS.toolApprovalReply, (_e, value) => {
     const v = value as { id?: unknown; decision?: unknown } | null;
     if (!v || typeof v.id !== 'string' || (v.decision !== 'allow' && v.decision !== 'allow-chat' && v.decision !== 'deny')) return { ok: false, error: 'Invalid answer.' };
     return toolApprovals.respond(v.id, v.decision) ? { ok: true } : { ok: false, error: 'That request already ended.' };
   }, 'chat');
-  handle(CHANNELS.toolsStopAll, () => { conversation.stop(); stopAllTools(); }, ['chat', 'overlay', 'settings']);
+  handle(CHANNELS.toolsStopAll, () => { cancelScreenCapture(); conversation.stop(); stopAllTools(); }, ['chat', 'overlay', 'settings']);
   handle(CHANNELS.ai, () => structuredClone(aiState));
   handle(CHANNELS.checkAI, () => checkAI());
   handle(CHANNELS.model, async (_e, value) => {

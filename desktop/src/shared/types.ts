@@ -38,6 +38,7 @@ export interface Settings {
   glassesEnabled?: boolean;
   /** "Let Sudo-chan use tools" (files, commands, links) with per-action approval. Off by default. */
   toolsEnabled?: boolean;
+  screenAssistEnabled?: boolean;
   /** 0..1, how easily the user can interrupt the bot while it speaks. */
   bargeInSensitivity?: number;
 }
@@ -56,6 +57,8 @@ export interface AppState {
   voiceCallActive?: boolean;
   voiceActiveTarget?: 'overlay' | 'chat' | null;
   isSpeaking?: boolean;
+  /** Shown on the overlay while a screenshot is taken / just sent. */
+  screenStatus?: 'capturing' | 'sent' | null;
 }
 export interface ModelMeta {
   sizeMB: number;
@@ -79,7 +82,8 @@ export interface CloudConfigInput {
   /** Make this provider the active chat provider. A Gemini key saved while another provider is active is otherwise kept for voice only. */
   makeActive?: boolean;
 }
-export interface ChatMessage { id: string; role: 'user' | 'assistant'; text: string; spoken?: string; status?: 'streaming' | 'complete' | 'stopped' | 'error'; isVoice?: boolean; }
+export interface ChatAttachment { kind: 'screen'; thumbnail: string }
+export interface ChatMessage { id: string; role: 'user' | 'assistant'; text: string; attachment?: ChatAttachment; spoken?: string; status?: 'streaming' | 'complete' | 'stopped' | 'error'; isVoice?: boolean; }
 export interface ChatState { messages: ChatMessage[]; busy: boolean; error: string; revision: number }
 export interface AIState {
   mode: AIMode;
@@ -142,6 +146,8 @@ export interface DesktopAPI {
   getAzure(): Promise<AzureStatus>;
   saveAzure(config: { apiKey?: string; region: string }): Promise<ActionResult>;
   testAzure(sample: 'en' | 'roman'): Promise<{ ok: boolean; error?: string; dataUri?: string; voice?: string }>;
+  sendScreen(payload: { text?: string; voice?: boolean; source: 'wake' | 'button' }): Promise<ActionResult>;
+  cancelScreen(): Promise<void>;
   clearMessages(): Promise<void>;
   quit(): Promise<void>;
   onToolApproval(callback: (event: ToolApprovalEvent) => void): () => void;
@@ -176,4 +182,6 @@ export const CHANNELS = {
   toolApprovals: 'companion:tool-approvals',
   toolApprovalReply: 'companion:tool-approval-reply',
   toolsStopAll: 'companion:tools-stop-all',
+  sendScreen: 'companion:send-screen',
+  cancelScreen: 'companion:cancel-screen',
 } as const;

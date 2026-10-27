@@ -201,7 +201,11 @@ function Overlay({ state }: { state: AppState }) {
           wakeWindow.current.open(performance.now());
           void api?.welcome();
           void api?.setVoiceActive(true, 'overlay');
-          if (match.rest) void api?.sendMessage(match.rest);
+          if (currentSettings.screenAssistEnabled) {
+            // If the screenshot cannot be taken (Local mode, cooldown...), still answer what was said.
+            void api?.sendScreen({ text: match.rest, source: 'wake' }).then(result => { if (!result.ok && match.rest) void api?.sendMessage(match.rest); });
+          }
+          else if (match.rest) void api?.sendMessage(match.rest);
         } else {
           // In Live Talk: respond to whatever is spoken, and keep the wake window alive.
           wakeWindow.current.touch(performance.now());
@@ -271,6 +275,16 @@ function Overlay({ state }: { state: AppState }) {
     return () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerleave', leave); };
   }, []);
   return <main className="overlay-room" aria-label="Sudo-chan desktop companion">
+    {state.screenStatus && (
+      <button
+        className={`screen-badge ${state.screenStatus === 'sent' ? 'is-sent' : ''}`}
+        data-interactive
+        onClick={() => void api?.cancelScreen()}
+        title={state.screenStatus === 'capturing' ? 'Click to cancel' : 'Screenshot was sent to your AI provider'}
+      >
+        {state.screenStatus === 'capturing' ? '👀 Dekh rahi hoon... ✕' : '📸 Screen bheji gayi'}
+      </button>
+    )}
     {state.speech && !isOverlayVoiceActive && <div className="overlay-speech" role="status" data-interactive>{state.speech}</div>}
 
     <div className="overlay-grip" data-interactive title="Drag to make yourself at home" aria-label="Drag companion"><span/><span/><span/></div>
@@ -624,6 +638,24 @@ function Chat({ state }: { state: AppState }) {
         <Icon name="spark" size={15} />
       </button>
 
+      {state.settings.screenAssistEnabled && (
+        <button
+          type="button"
+          className="icon-button chat-voice-btn"
+          aria-label="Look at my screen"
+          title="👀 Meri screen dekho (screenshot AI ko bheja jata hai)"
+          disabled={sending}
+          onClick={() => {
+            void api?.sendScreen({ text: draft.trim(), source: 'button' }).then(result => {
+              if (result.ok) setDraft('');
+              else setError(result.error ?? 'Screen capture failed.');
+            });
+          }}
+        >
+          <span aria-hidden="true">👀</span>
+        </button>
+      )}
+
       <button
         type="button"
         className={`icon-button chat-voice-btn ${muted ? 'is-muted' : ''}`}
@@ -794,6 +826,12 @@ function Chat({ state }: { state: AppState }) {
                     {message.status === 'stopped' && <span>STOPPED</span>}
                     {message.status === 'error' && <span>INCOMPLETE</span>}
                   </span>
+                  {message.attachment && (
+                    <figure className="message-shot">
+                      <img src={message.attachment.thumbnail} alt="Screenshot sent to the AI" />
+                      <figcaption>📸 Ye screen AI provider ko bheji gayi</figcaption>
+                    </figure>
+                  )}
                   {message.text ? (
                     <p>{message.text}</p>
                   ) : message.status === 'streaming' ? (
@@ -1016,6 +1054,7 @@ function SettingsView({ state }: { state: AppState }) {
     settings.registeredVoiceSample !== state.settings.registeredVoiceSample ||
     settings.customWakeWord !== state.settings.customWakeWord ||
     settings.wakeWordEnabled !== state.settings.wakeWordEnabled ||
+    settings.screenAssistEnabled !== state.settings.screenAssistEnabled ||
     JSON.stringify(settings.wakeAliases) !== JSON.stringify(state.settings.wakeAliases) ||
     settings.voiceVisualizerMode !== state.settings.voiceVisualizerMode ||
     settings.glassesEnabled !== state.settings.glassesEnabled ||
@@ -1036,6 +1075,7 @@ function SettingsView({ state }: { state: AppState }) {
     state.settings.registeredVoiceSample,
     state.settings.customWakeWord,
     state.settings.wakeWordEnabled,
+    state.settings.screenAssistEnabled,
     JSON.stringify(state.settings.wakeAliases),
     state.settings.voiceVisualizerMode,
     state.settings.glassesEnabled,
@@ -1210,6 +1250,9 @@ function SettingsView({ state }: { state: AppState }) {
           </SettingRow>
           <SettingRow title="Listen for my name" description="Off by default. When on, the mic listens locally and only short clips with speech are sent to speech-to-text. Pause any time from the bot's indicator.">
             <div className="switch-control"><span>{settings.wakeWordEnabled ? 'On' : 'Off'}</span><button className="switch" type="button" role="switch" aria-label="Listen for my name" aria-checked={Boolean(settings.wakeWordEnabled)} onClick={() => setSettings({ ...settings, wakeWordEnabled: !settings.wakeWordEnabled })}><span/></button></div>
+          </SettingRow>
+          <SettingRow title="Let Sudo-chan look at my screen" description="Off by default. When on, saying her name (or pressing the eye button in chat) takes ONE screenshot and sends it to your cloud AI provider so she can explain what you are working on. Never on a timer, never saved. Close password or banking windows first.">
+            <div className="switch-control"><span>{settings.screenAssistEnabled ? 'On' : 'Off'}</span><button className="switch" type="button" role="switch" aria-label="Let Sudo-chan look at my screen" aria-checked={Boolean(settings.screenAssistEnabled)} onClick={() => setSettings({ ...settings, screenAssistEnabled: !settings.screenAssistEnabled })}><span/></button></div>
           </SettingRow>
           <SettingRow
             title="Assistant name"
