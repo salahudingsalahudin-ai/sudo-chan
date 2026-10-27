@@ -338,7 +338,7 @@ export function checkWakeIntent(
   return { isWake, isQuestionOrHelp: isWake };
 }
 
-import { BargeInDetector, DEFAULT_BARGE_IN_SENSITIVITY } from '../shared/barge-in.ts';
+import { BargeInDetector, DEFAULT_BARGE_IN_SENSITIVITY, clipIsEcho } from '../shared/barge-in.ts';
 
 export interface BargeInInfo {
   /** performance.now() when the user's interrupting speech began */
@@ -387,6 +387,11 @@ export class VoiceSession {
   private burstPitches: number[] = [];
   /** Milliseconds of actual speech (above threshold) in the current utterance, excluding pre-roll and trailing silence. */
   private voicedMs = 0;
+  /** Echo bookkeeping for the current clip: did it overlap the bot's playback (or its echo tail), and how loud was it there? */
+  private clipOverlap = false;
+  private clipBargeFired = false;
+  private clipOverlapPeak = 0;
+  private clipEchoEnvelope = 0;
   private silenceTimer: any = null;
   private isProcessingTranscribe = false;
   private callbacks: VoiceSessionCallbacks = {};
@@ -465,6 +470,7 @@ export class VoiceSession {
             const maxChunks = Math.ceil(400 / frameMs);
             while (this.preRollChunks.length > maxChunks) this.preRollChunks.shift();
           }
+          if (this.isSpeakingSpeech) this.noteOverlap(rms);
           if (this.bargeInDetector.feed(rms, frameMs, now)) {
             const speechStartedAt = this.bargeInDetector.speechStartedAt ?? now;
             this.isSpeakingSpeech = true;
@@ -472,22 +478,34 @@ export class VoiceSession {
             this.preRollChunks = [];
             this.burstPitches = [];
             this.voicedMs = Math.max(0, now - speechStartedAt);
+            this.clipOverlap = true;
+            this.clipBargeFired = true;
+            this.clipOverlapPeak = rms;
+            this.clipEchoEnvelope = this.bargeInDetector.echoEnvelope;
             this.callbacks.onBargeIn?.({ speechStartedAt, detectedAt: now });
             this.callbacks.onInterim?.('🎙️ Sun rahi hoon...');
           }
           // After barge-in the bot is stopped; until isSpeaking() flips we just keep recording below
           if (!this.isSpeakingSpeech) return;
         } else {
-          this.bargeInDetector.reset();
+          this.bargeInDetector.idle(performance.now());
         }
 
         // Sensitive vocal threshold calibrated for natural laptop distance (covers quiet speech 50-70cm from laptop)
         const speechThreshold = 0.009;
+        // Right after a reply the room still rings with the bot's own voice: starting a clip then needs to beat the echo envelope.
+        const nowMs = performance.now();
+        const tail = !this.callbacks.isSpeaking?.() && this.bargeInDetector.inEchoTail(nowMs);
+        const startThreshold = this.bargeInDetector.idleSpeechThreshold(speechThreshold, nowMs);
 
-        if (rms > speechThreshold) {
+        if (this.isSpeakingSpeech ? rms > speechThreshold : rms > startThreshold) {
           // User is actively speaking
           if (!this.isSpeakingSpeech) {
             this.isSpeakingSpeech = true;
+            this.clipOverlap = tail;
+            this.clipBargeFired = false;
+            this.clipOverlapPeak = tail ? rms : 0;
+            this.clipEchoEnvelope = tail ? this.bargeInDetector.echoEnvelope : 0;
             // Prepend pre-roll audio (~250ms) so first consonants (like "S" in Sudo/Sid) are NEVER clipped
             this.speechChunks = [...this.preRollChunks, new Float32Array(inputData)];
             this.preRollChunks = [];
@@ -504,6 +522,7 @@ export class VoiceSession {
           }
 
           this.voicedMs += frameMs;
+          if (tail) this.noteOverlap(rms);
 
           // Sample pitch during speech burst (covers human voices from 70Hz to 450Hz)
           const pitch = autoCorrelate(pcmBuffer, sampleRate);
@@ -522,6 +541,18 @@ export class VoiceSession {
               // Clicks, coughs and fan noise produce tiny bursts; every clip sent to the cloud costs ~2 s and
               // blocks real speech while it is processed, so require a minimum of actual voiced audio.
               if (this.voicedMs < MIN_VOICED_MS) {
+                this.speechChunks = [];
+                this.burstPitches = [];
+                this.voicedMs = 0;
+              } else if (clipIsEcho({
+                overlappedPlayback: this.clipOverlap,
+                bargeInFired: this.clipBargeFired,
+                overlapPeakRms: this.clipOverlapPeak,
+                echoEnvelope: this.clipEchoEnvelope,
+                sensitivity: this.callbacks.getBargeInSensitivity?.() ?? DEFAULT_BARGE_IN_SENSITIVITY,
+              })) {
+                // The bot heard itself: never send this to speech-to-text as a user turn.
+                console.info('[barge-in] clip overlapped bot playback at echo level -> dropped, not sent to STT');
                 this.speechChunks = [];
                 this.burstPitches = [];
                 this.voicedMs = 0;
@@ -544,6 +575,12 @@ export class VoiceSession {
     }).catch(err => {
       this.callbacks.onError?.('Microphone access denied: ' + (err as Error).message);
     });
+  }
+
+  private noteOverlap(rms: number) {
+    this.clipOverlap = true;
+    if (rms > this.clipOverlapPeak) this.clipOverlapPeak = rms;
+    this.clipEchoEnvelope = Math.max(this.clipEchoEnvelope, this.bargeInDetector.echoEnvelope);
   }
 
   private async dispatchTranscription(sampleRate: number, callbacks: VoiceSessionCallbacks, burstPitch?: number) {
