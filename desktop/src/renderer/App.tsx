@@ -10,6 +10,7 @@ import { UsageSettings } from './UsageSettings';
 import { useLipSync } from './lipsync';
 import { escapeAction, panelPlan } from '../shared/overlay-panels.ts';
 import { ConversationWindow, DEFAULT_WAKE_ALIASES, WakeGate, buildWakeHint, matchWakeWord } from '../shared/wake-word.ts';
+import { ClipGate, WAKE_TRIM_MS, formatGateLine } from '../shared/clip-gate.ts';
 import { approvalHeadline, approvalSecondsLeft, approvalSpokenLine, mergeApprovals, reduceApprovals } from '../shared/approval-ui.ts';
 import { clearInterruptedSpeech, getLastBotSpeech, getMutedPreference, hasInterruptedSpeech, resumeInterruptedSpeech, setMutedPreference, speak, stopSpeech } from './speech';
 import { isStopCommand, unclearAction } from '../shared/stop-intent.ts';
@@ -257,8 +258,15 @@ function Overlay({ state }: { state: AppState }) {
   // Privacy first: the mic is only open when "Listen for my name" is ON (and not paused) or Live Talk is active.
   const wakeEnabled = state.settings.wakeWordEnabled ?? true;
   const wakeGate = useRef(new WakeGate(2000));
+  // Quota saver: decides locally whether a wake-mode clip is worth a cloud request (never consulted during Live Talk).
+  const clipGate = useRef(new ClipGate());
   const wakeWindow = useRef(new ConversationWindow());
   const wakeOpened = useRef(false);
+  // One log line per decision class a minute, counts only: `[gate] skipped=N sent=M reason=...`.
+  useEffect(() => {
+    const timer = setInterval(() => { for (const line of clipGate.current.flushStats(performance.now())) console.info(formatGateLine(line)); }, 60_000);
+    return () => clearInterval(timer);
+  }, []);
   const shouldListen = isOverlayVoiceActive || wakeEnabled;
   // The mic dot: turning the mic OFF takes two clicks within 3 s (the first one only arms it), see shared/mic-control.ts.
   const [micArmedAt, setMicArmedAt] = useState<number | null>(null);
@@ -296,27 +304,47 @@ function Overlay({ state }: { state: AppState }) {
       isSpeaking: () => Boolean(stateRef.current.isSpeaking),
       language: stateRef.current.settings.voiceLanguage,
       // Standby only needs the name: short clips, rate-limited, hinted with the name and aliases.
-      maxClipMs: isOverlayVoiceActive ? undefined : 4000,
+      maxClipMs: isOverlayVoiceActive ? undefined : WAKE_TRIM_MS,
       sttHint: isOverlayVoiceActive ? undefined : buildWakeHint(stateRef.current.settings.customWakeWord, stateRef.current.settings.wakeAliases),
-      shouldTranscribe: () => isOverlayVoiceActiveRef.current || wakeGate.current.allow(performance.now()),
-      onTranscribeResult: outcome => {
+      decideClip: features => {
+        const now = performance.now();
+        const live = isOverlayVoiceActiveRef.current;
+        const decision = clipGate.current.decide(features, { now, live });
+        if (!decision.send) return { send: false };
+        // The old 2 s minimum interval and error back-off still apply in wake mode; a refused clip gives its token back.
+        if (!live && !wakeGate.current.allow(now)) {
+          clipGate.current.refund(decision);
+          return { send: false };
+        }
+        return { send: true, trimMs: live ? undefined : decision.trimMs };
+      },
+      onTranscribeResult: (outcome, info) => {
         if (!isOverlayVoiceActiveRef.current) wakeGate.current.report(performance.now(), outcome);
+        if (info?.quotaPressure !== undefined) clipGate.current.setQuotaPressure(info.quotaPressure);
       },
       onAudioLevel: level => {
         setOverlayAudioLevel(level);
       },
       getBargeInSensitivity: () => stateRef.current.settings.bargeInSensitivity ?? DEFAULT_BARGE_IN_SENSITIVITY,
       onBargeIn: handleBargeIn,
-      onUnclear: handleUnclear,
+      onUnclear: info => {
+        if (!isOverlayVoiceActiveRef.current) clipGate.current.noteResult(false);
+        handleUnclear(info);
+      },
       onFinal: (text, features) => {
         if (!text.trim()) return;
         const currentLive = isOverlayVoiceActiveRef.current;
         const currentSettings = stateRef.current.settings;
-        if (isPhantomOrSelfEcho(text, currentSettings)) return;
+        if (isPhantomOrSelfEcho(text, currentSettings)) {
+          if (!currentLive) clipGate.current.noteResult(false);
+          return;
+        }
 
         if (!currentLive) {
           // Standby: fuzzy-match the assistant's name or aliases; ignore everything else.
           const match = matchWakeWord(text, currentSettings.customWakeWord, currentSettings.wakeAliases);
+          // The hit rate tunes the quota saver: a run of clips without the name makes it stricter, a hit loosens it.
+          clipGate.current.noteResult(match.matched);
           if (!match.matched) return;
 
           // If personal voice lock is enabled, additionally verify the speaker is Sid

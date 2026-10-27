@@ -339,6 +339,8 @@ export function checkWakeIntent(
 }
 
 import { BargeInDetector, DEFAULT_BARGE_IN_SENSITIVITY, clipIsEcho } from '../shared/barge-in.ts';
+import { ClipFeatureAccumulator, frameStats } from '../shared/clip-gate.ts';
+import type { ClipFeatures } from '../shared/clip-gate.ts';
 
 export interface BargeInInfo {
   /** performance.now() when the user's interrupting speech began */
@@ -358,11 +360,16 @@ export interface VoiceSessionCallbacks {
   onBargeIn?: (info?: BargeInInfo) => void;
   /** Return false to drop a finished speech clip without sending it to the cloud (wake-word rate limiting). */
   shouldTranscribe?: () => boolean;
+  /**
+   * Wake-mode quota saver (src/shared/clip-gate.ts). Called with cheap measurements of a finished clip instead of `shouldTranscribe`
+   * when provided. `send: false` drops the clip locally; `trimMs` caps how much of it is uploaded. Live Talk should answer `{ send: true }`.
+   */
+  decideClip?: (features: ClipFeatures) => { send: boolean; trimMs?: number };
   /** Only the first N ms of a clip is sent. Wake-word listening needs just the name, not a monologue. */
   maxClipMs?: number;
   /** Vocabulary hint for the speech-to-text provider (e.g. the assistant's name and aliases). */
   sttHint?: string;
-  onTranscribeResult?: (outcome: 'ok' | 'rate-limited' | 'error') => void;
+  onTranscribeResult?: (outcome: 'ok' | 'rate-limited' | 'error', info?: { quotaPressure?: number }) => void;
   /** A finished speech clip produced no usable transcript (not called for clips dropped by shouldTranscribe). */
   onUnclear?: (info: { clipMs: number }) => void;
 }
@@ -392,6 +399,8 @@ export class VoiceSession {
   private clipBargeFired = false;
   private clipOverlapPeak = 0;
   private clipEchoEnvelope = 0;
+  /** Cheap per-clip measurements (level shape, zero crossings, pauses) for the wake-mode quota gate. */
+  private features = new ClipFeatureAccumulator();
   private silenceTimer: any = null;
   private isProcessingTranscribe = false;
   private callbacks: VoiceSessionCallbacks = {};
@@ -482,6 +491,7 @@ export class VoiceSession {
             this.clipBargeFired = true;
             this.clipOverlapPeak = rms;
             this.clipEchoEnvelope = this.bargeInDetector.echoEnvelope;
+            this.features.reset();
             this.callbacks.onBargeIn?.({ speechStartedAt, detectedAt: now });
             this.callbacks.onInterim?.('🎙️ Sun rahi hoon...');
           }
@@ -511,6 +521,7 @@ export class VoiceSession {
             this.preRollChunks = [];
             this.burstPitches = [];
             this.voicedMs = 0;
+            this.features.reset();
             this.callbacks.onInterim?.('🎙️ Sun rahi hoon...');
           } else {
             this.speechChunks.push(new Float32Array(inputData));
@@ -522,6 +533,8 @@ export class VoiceSession {
           }
 
           this.voicedMs += frameMs;
+          const stats = frameStats(inputData, sampleRate);
+          this.features.push({ rms, peak: stats.peak, zcrPerSec: stats.zcrPerSec, frameMs, voiced: true });
           if (tail) this.noteOverlap(rms);
 
           // Sample pitch during speech burst (covers human voices from 70Hz to 450Hz)
@@ -532,6 +545,7 @@ export class VoiceSession {
         } else if (this.isSpeakingSpeech) {
           // Brief pause after speech started
           this.speechChunks.push(new Float32Array(inputData));
+          this.features.push({ rms, peak: 0, zcrPerSec: 0, frameMs, voiced: false });
 
           if (!this.silenceTimer) {
             // Conversational silence timeout (500ms keeps replies snappy while still allowing short natural pauses)
@@ -599,12 +613,22 @@ export class VoiceSession {
       this.speechChunks = [];
       this.burstPitches = [];
 
-      if (callbacks.shouldTranscribe && !callbacks.shouldTranscribe()) {
+      let trimMs = callbacks.maxClipMs ?? 0;
+      if (callbacks.decideClip) {
+        const features = this.features.finish({ durationMs: (merged.length / sampleRate) * 1000, overlappedPlayback: this.clipOverlap, bargeInFired: this.clipBargeFired });
+        const decision = callbacks.decideClip(features);
+        if (!decision.send) {
+          callbacks.onInterim?.('');
+          this.isProcessingTranscribe = false;
+          return;
+        }
+        if (decision.trimMs && decision.trimMs > 0) trimMs = trimMs > 0 ? Math.min(trimMs, decision.trimMs) : decision.trimMs;
+      } else if (callbacks.shouldTranscribe && !callbacks.shouldTranscribe()) {
         callbacks.onInterim?.('');
         this.isProcessingTranscribe = false;
         return;
       }
-      const maxSamples = callbacks.maxClipMs ? Math.floor((callbacks.maxClipMs / 1000) * sampleRate) : 0;
+      const maxSamples = trimMs > 0 ? Math.floor((trimMs / 1000) * sampleRate) : 0;
       const clip = maxSamples > 0 && merged.length > maxSamples ? merged.subarray(0, maxSamples) : merged;
 
       // Length of the actual speech, not of the padded clip: a one-word command is short even with pre-roll and trailing silence.
@@ -617,7 +641,7 @@ export class VoiceSession {
           if (typeof window !== 'undefined' && window.companion?.transcribeAudio) {
             callbacks.onInterim?.('✨ Samajh rahi hoon...');
             const result = await window.companion.transcribeAudio(dataUri, 'audio/wav', callbacks.language, callbacks.sttHint);
-            callbacks.onTranscribeResult?.(result.rateLimited ? 'rate-limited' : result.ok || result.error === 'Could not transcribe speech.' ? 'ok' : 'error');
+            callbacks.onTranscribeResult?.(result.rateLimited ? 'rate-limited' : result.ok || result.error === 'Could not transcribe speech.' ? 'ok' : 'error', { quotaPressure: result.quotaPressure });
             if (result.ok && result.text) {
               callbacks.onFinal?.(result.text, { pitch: burstPitch });
             } else {

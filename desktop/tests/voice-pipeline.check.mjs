@@ -225,3 +225,32 @@ test('optional (needs network): a Google TTS mp3 survives the data-URI round tri
   const sync = decoded[0] === 0xff && (decoded[1] & 0xe0) === 0xe0; // MPEG frame sync
   assert.ok(head || sync, 'looks like an MP3');
 });
+
+test('quota saver: decideClip sees real clip measurements, can drop the clip locally, and can trim the upload', async () => {
+  const seen = [];
+  const results = [];
+  transcribeImpl = async () => ({ ok: true, text: 'sudo', quotaPressure: 0.6 });
+  let send = false;
+  const session = await newSession({
+    decideClip: features => { seen.push(features); return send ? { send: true, trimMs: 400 } : { send: false }; },
+    onTranscribeResult: (outcome, info) => results.push([outcome, info?.quotaPressure]),
+    onUnclear: () => assert.fail('a locally dropped clip is not an unclear interruption'),
+  });
+  speak(900);
+  await tick(900);
+  assert.equal(transcribeCalls.length, 0, 'gate said no: nothing leaves the machine');
+  assert.equal(seen.length, 1);
+  const f = seen[0];
+  assert.ok(f.voicedMs > 700 && f.voicedMs < 1100, `voicedMs ${f.voicedMs}`);
+  assert.ok(f.durationMs >= f.voicedMs, 'clip includes pre-roll and the trailing silence');
+  assert.ok(f.rms > 0.02 && f.peak > f.rms && f.peak <= 0.25, `rms ${f.rms} peak ${f.peak}`);
+  assert.ok(f.zcrPerSec > 100 && f.zcrPerSec < 4000, `harmonic voice, zcr ${f.zcrPerSec}`);
+  assert.ok(f.runs >= 1 && f.bargeInFired === false && f.overlappedPlayback === false);
+  send = true;
+  speak(900);
+  await tick(900);
+  assert.equal(transcribeCalls.length, 1, 'the session recovered after a gated clip');
+  assert.ok(wavInfo(transcribeCalls[0][0]).samples <= 0.4 * 16000 + 4, 'upload trimmed to the gate\'s 400 ms');
+  assert.deepEqual(results, [['ok', 0.6]], 'the main process\' quota pressure reaches the caller');
+  session.stop();
+});

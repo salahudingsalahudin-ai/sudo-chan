@@ -10,6 +10,7 @@ import {
   GATE_FLOOR_MS, WAKE_TRIM_MS,
 } from '../src/shared/clip-gate.ts';
 import { WakeGate } from '../src/shared/wake-word.ts';
+import { UsageTracker } from '../src/shared/usage.ts';
 
 // ------------------------------------------------------------------------------------------ synthetic clips
 function rngFrom(seed) {
@@ -296,6 +297,22 @@ test('stat lines are counts only and follow the documented format', () => {
   assert.ok(lines.length >= 2);
   for (const line of lines) assert.match(line, /^\[gate\] skipped=\d+ sent=\d+ reason=[a-z-]+$/);
   assert.deepEqual(gate.flushStats(90000, 60000), [], 'flushed');
+});
+
+test('usage meter feeds the pressure: Groq headers in, one number out; stale or renewed snapshots count as no pressure', () => {
+  let now = Date.parse('2026-10-27T10:00:00');
+  const tracker = new UsageTracker({ now: () => now });
+  assert.equal(tracker.sttQuotaPressure(), 0, 'nothing known yet');
+  const headers = new Map([['x-ratelimit-limit-requests', '2000'], ['x-ratelimit-remaining-requests', '431'], ['x-ratelimit-reset-requests', '6h0m0s']]);
+  tracker.groqStt(3, { get: name => headers.get(name) ?? null }, true);
+  assert.ok(Math.abs(tracker.sttQuotaPressure() - 0.569) < 0.01, `${tracker.sttQuotaPressure()}`);
+  now += 7 * 3600_000;
+  assert.equal(tracker.sttQuotaPressure(), 0, 'the allowance renewed');
+  headers.set('x-ratelimit-reset-requests', '40h');
+  now = Date.parse('2026-10-27T10:00:00');
+  tracker.groqStt(3, { get: name => headers.get(name) ?? null }, true);
+  now += 25 * 3600_000;
+  assert.equal(tracker.sttQuotaPressure(), 0, 'a snapshot older than a day is ignored');
 });
 
 // ------------------------------------------------------------------------------------------ simulations
