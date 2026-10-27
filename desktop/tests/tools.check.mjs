@@ -223,7 +223,7 @@ function makeRuntime(options = {}) {
   return { runtime, ran, cards, audit, approval };
 }
 const live = new AbortController().signal;
-const tick = () => new Promise(r => setTimeout(r, 25));
+const tick = () => new Promise(r => setTimeout(r, 120));
 
 test('tools: definitions are valid OpenAI function schemas', () => {
   const { runtime } = makeRuntime();

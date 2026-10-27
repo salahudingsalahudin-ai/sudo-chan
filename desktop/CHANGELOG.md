@@ -1,5 +1,16 @@
 # Changelog (desktop)
 
+## installer-e2e (on top of first-run-wizard): the Linux installers built and tested end to end
+
+Full journey table, evidence and the list of things only a human can check in `INSTALLER-E2E.md`. Version stays 0.1.0; the files are release candidates, not published.
+
+- **Window class fixed.** Packaged windows were named `sudo-chan-desktop` (the npm package name) while the menu entry said `StartupWMClass=Sudo-chan`, so a desktop could not link the running window to its menu entry / icon.
+  `package.json` now has `desktopName: "sudo-chan.desktop"` and `StartupWMClass=sudo-chan` (measured on the running packaged app with `xprop`).
+- **Icons at eight sizes** (`assets/linux-icons/16x16.png` ... `512x512.png`) instead of one 1024 px file in the deb and the AppImage.
+- **.deb dependencies:** added `libgbm1` and `libasound2 | libasound2t64` (Electron links them), `Section: utils`.
+- **Tests / tools:** `tests/installer-config.check.mjs` (5), `scripts/packaged-first-run.mjs` (first launch of a packaged binary with a fresh userData: wizard on, mic / tools / screen off, modes 700/600, second launch without wizard, exit 0),
+  `scripts/onboarding-shots.mjs --app=<app.asar>` (wizard screenshots from the packaged code). The flaky `edit_file` and `write_file` unit tests (a 25 ms wait for the approval card) now wait 120 ms.
+
 ## first-run-wizard (on top of live-talk-flow): a calm seven-screen setup for a fresh install
 
 Details, copy, states and how to look at it in `ONBOARDING.md`.
