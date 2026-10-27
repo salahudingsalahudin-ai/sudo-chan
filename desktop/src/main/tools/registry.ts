@@ -44,6 +44,12 @@ export interface ToolSpec {
 }
 
 const MAX_WRITE_BYTES = 200 * 1024;
+/** One read_file answer is at most this big (it is re-sent on every following step, so it must stay small). */
+export const READ_PAGE_BYTES = 6 * 1024;
+/** read_file never looks at more than this much of a file (ranges are counted inside this window). */
+const READ_SCAN_BYTES = 1024 * 1024;
+const MAX_EDIT_FILE_BYTES = 2 * 1024 * 1024;
+const MAX_DIFF_LINES = 8;
 const MAX_DIR_ENTRIES = 200;
 const MAX_SEARCH_RESULTS = 50;
 const SKIP_DIRS = new Set(['node_modules', '.git', '.cache', '.next', 'dist', 'build', '__pycache__', '.venv', 'venv', '.npm', '.pub-cache']);
@@ -103,39 +109,122 @@ function preview(text: string, lines = 12): string {
   return parts.length > lines ? `${shown}\n… (${parts.length - lines} more lines)` : shown;
 }
 
+/** Exactly-matching positions of `needle` in `text` (non-overlapping). */
+function matchOffsets(text: string, needle: string): number[] {
+  const found: number[] = [];
+  if (!needle) return found;
+  for (let at = text.indexOf(needle); at >= 0; at = text.indexOf(needle, at + needle.length)) found.push(at);
+  return found;
+}
+
+function lineNumberAt(text: string, offset: number): number {
+  let line = 1;
+  for (let i = text.indexOf('\n'); i >= 0 && i < offset; i = text.indexOf('\n', i + 1)) line++;
+  return line;
+}
+
+/** Compact before/after of an edit: only the changed lines ("- old" / "+ new"), long blocks shortened. Never the rest of the file. */
+export function editDiffText(oldText: string, newText: string, startLine: number): { text: string; added: number; removed: number; firstLine: number } {
+  const oldLines = oldText.split('\n');
+  const newLines = newText.split('\n');
+  let head = 0;
+  while (head < oldLines.length && head < newLines.length && oldLines[head] === newLines[head]) head++;
+  let tail = 0;
+  while (tail < oldLines.length - head && tail < newLines.length - head && oldLines[oldLines.length - 1 - tail] === newLines[newLines.length - 1 - tail]) tail++;
+  const removedLines = oldLines.slice(head, oldLines.length - tail);
+  const addedLines = newLines.slice(head, newLines.length - tail);
+  const render = (lines: string[], mark: string) => {
+    const shown = lines.slice(0, MAX_DIFF_LINES).map(line => `${mark} ${line.length > 110 ? line.slice(0, 110) + '…' : line}`);
+    if (lines.length > MAX_DIFF_LINES) shown.push(`${mark} … (${lines.length - MAX_DIFF_LINES} more lines)`);
+    return shown;
+  };
+  const body = [...render(removedLines, '-'), ...render(addedLines, '+')];
+  return { text: body.join('\n') || '(no visible line change)', added: addedLines.length, removed: removedLines.length, firstLine: startLine + head };
+}
+
 export function createRegistry(policy: PolicyApi, deps: RegistryDeps): ToolSpec[] {
   const pathProblem = (check: { verdict: string; reason?: string }) => (check.verdict === 'deny' ? { error: check.reason ?? 'Path not allowed.' } : null);
 
   const readFile: ToolSpec = {
     name: 'read_file',
-    description: 'Read a text file from the user\'s computer (home folder). Returns up to ~20 KB.',
+    description: `Read a text file from the user's computer (home folder). Returns at most ~${READ_PAGE_BYTES / 1024} KB per call; for bigger files pass start_line / end_line (1-based, inclusive) and follow the "call again with start_line=N" footer.`,
     risk: 'read',
-    parameters: { type: 'object', properties: { path: { type: 'string', description: 'File path, e.g. ~/notes.txt' } }, required: ['path'] },
+    parameters: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: 'File path, e.g. ~/notes.txt' },
+        start_line: { type: 'integer', description: 'First line to return (1-based). Optional.' },
+        end_line: { type: 'integer', description: 'Last line to return (inclusive). Optional.' },
+      },
+      required: ['path'],
+    },
     async prepare(args) {
       const path = str(args.path);
       if (!path) return { error: 'path is required.' };
+      const lineArg = (value: unknown, name: string): number | undefined | { error: string } => {
+        if (value === undefined || value === null) return undefined;
+        const n = typeof value === 'string' && /^\d+$/.test(value.trim()) ? Number(value) : value;
+        if (typeof n !== 'number' || !Number.isInteger(n) || n < 1) return { error: `${name} must be a whole number of 1 or more.` };
+        return n;
+      };
+      const startArg = lineArg(args.start_line, 'start_line');
+      if (typeof startArg === 'object') return startArg;
+      const endArg = lineArg(args.end_line, 'end_line');
+      if (typeof endArg === 'object') return endArg;
+      if (startArg !== undefined && endArg !== undefined && endArg < startArg) return { error: 'end_line must not be smaller than start_line.' };
       const check = policy.checkPath(path, { home: deps.home });
       const bad = pathProblem(check);
       if (bad) return bad;
+      const ranged = startArg !== undefined || endArg !== undefined;
       return {
         verdict: check,
         title: 'Read a file',
         detail: check.path,
-        summary: `read ${check.path}`,
+        summary: `read ${check.path}${ranged ? ` lines ${startArg ?? 1}-${endArg ?? 'end'}` : ''}`,
         async run() {
           const stat = await fsp.stat(check.path);
           if (stat.isDirectory()) return 'Error: that is a folder. Use list_dir.';
           const handle = await fsp.open(check.path, 'r');
+          let text: string;
           try {
-            const buffer = Buffer.alloc(Math.min(stat.size, policy.MAX_READ_BYTES + 4));
+            const buffer = Buffer.alloc(Math.min(stat.size, READ_SCAN_BYTES + 4));
             const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
             const data = buffer.subarray(0, bytesRead);
             if (data.subarray(0, 1024).includes(0)) return 'Error: this looks like a binary file; not shown.';
-            const text = data.toString('utf8');
-            return policy.truncate(stat.size > bytesRead ? `${text}\n[... file is ${stat.size} bytes, showing the start]` : text, policy.MAX_READ_BYTES);
+            text = data.toString('utf8');
           } finally {
             await handle.close();
           }
+          const scanned = stat.size > READ_SCAN_BYTES;
+          // Small file, no range: exactly the old behaviour (the whole text, no footer).
+          if (!ranged && !scanned && Buffer.byteLength(text) <= READ_PAGE_BYTES) return text;
+          const lines = text.split('\n');
+          if (lines.length > 1 && lines[lines.length - 1] === '') lines.pop();
+          const total = lines.length;
+          const first = startArg ?? 1;
+          if (first > total) return `Error: the file has only ${total} line(s)${scanned ? ' in its first 1 MB' : ''}; start_line=${first} is past the end.`;
+          const last = Math.min(endArg ?? total, total);
+          const out: string[] = [];
+          let used = 0;
+          let n = first;
+          for (; n <= last; n++) {
+            const line = lines[n - 1];
+            const cost = Buffer.byteLength(line) + 1;
+            if (out.length > 0 && used + cost > READ_PAGE_BYTES) break;
+            // A single huge line is cut so one call can never exceed the page size.
+            out.push(cost > READ_PAGE_BYTES ? policy.truncate(line, READ_PAGE_BYTES) : line);
+            used += Math.min(cost, READ_PAGE_BYTES);
+          }
+          const shownLast = n - 1;
+          const body = out.join('\n');
+          if (shownLast < last) {
+            return `${body}\n[truncated: showed lines ${first}-${shownLast} of ${total}${scanned ? '+' : ''}. Call read_file again with start_line=${shownLast + 1} to continue.]`;
+          }
+          if (shownLast < total || scanned) {
+            const more = shownLast < total ? ` Call read_file again with start_line=${shownLast + 1} for more.` : ' The rest of this large file is not shown.';
+            return `${body}\n[showed lines ${first}-${shownLast} of ${total}${scanned ? '+' : ''}.${more}]`;
+          }
+          return first > 1 ? `${body}\n[showed lines ${first}-${shownLast} of ${total}; end of file.]` : body;
         },
       };
     },
@@ -234,7 +323,7 @@ export function createRegistry(policy: PolicyApi, deps: RegistryDeps): ToolSpec[
   const writeLike = (name: 'write_file' | 'append_file'): ToolSpec => ({
     name,
     description: name === 'write_file'
-      ? 'Create or overwrite a text file in the home folder. The user must approve each write.'
+      ? 'Create a NEW text file (or fully replace one) in the home folder; for a small change to an existing file use edit_file instead. Keep content under ~2500 characters per call (use append_file for the rest). The user must approve each write.'
       : 'Append text to a file in the home folder (created if missing). The user must approve each append.',
     risk: 'write',
     parameters: {
@@ -282,6 +371,95 @@ export function createRegistry(policy: PolicyApi, deps: RegistryDeps): ToolSpec[
       };
     },
   });
+
+  const editFile: ToolSpec = {
+    name: 'edit_file',
+    description: 'Change an existing text file: replace old_text with new_text. old_text must appear EXACTLY ONCE in the file (copy it exactly, include enough neighbouring lines to be unique). Preferred for any small change. The user must approve each edit and sees the before/after lines.',
+    risk: 'write',
+    parameters: {
+      type: 'object',
+      properties: {
+        path: { type: 'string' },
+        old_text: { type: 'string', description: 'Exact text to replace; must match exactly one place.' },
+        new_text: { type: 'string', description: 'Replacement text (may be empty to delete old_text).' },
+      },
+      required: ['path', 'old_text', 'new_text'],
+    },
+    async prepare(args) {
+      const path = str(args.path);
+      const oldText = str(args.old_text);
+      const newText = str(args.new_text);
+      if (!path || oldText === undefined || newText === undefined) return { error: 'path, old_text and new_text are required.' };
+      if (!oldText) return { error: 'old_text must not be empty. To create a file use write_file; to add at the end use append_file.' };
+      if (oldText === newText) return { error: 'old_text and new_text are identical; nothing to change.' };
+      if (Buffer.byteLength(oldText) > MAX_WRITE_BYTES || Buffer.byteLength(newText) > MAX_WRITE_BYTES) return { error: `old_text/new_text are too large (max ${MAX_WRITE_BYTES / 1024} KB).` };
+      const check = policy.checkPath(path, { home: deps.home, write: true });
+      const bad = pathProblem(check);
+      if (bad) return bad;
+
+      /** Finds the single match; returns the problem text for the model otherwise. */
+      const locate = (content: string): { error: string } | { at: number; from: string; to: string } => {
+        let from = oldText;
+        let to = newText;
+        let hits = matchOffsets(content, from);
+        // A CRLF file edited with LF-only text: match with CRLF line endings instead.
+        if (!hits.length && content.includes('\r\n') && !from.includes('\r\n') && from.includes('\n')) {
+          from = from.replace(/\n/g, '\r\n');
+          to = to.replace(/\r?\n/g, '\r\n');
+          hits = matchOffsets(content, from);
+        }
+        if (hits.length === 0) {
+          return { error: 'old_text was not found in the file, so nothing was changed. Call read_file (with start_line/end_line) to see the exact current text, then retry with old_text copied exactly, including spaces and indentation.' };
+        }
+        if (hits.length > 1) {
+          const where = hits.slice(0, 5).map(at => lineNumberAt(content, at)).join(', ');
+          return { error: `old_text matches ${hits.length} places (lines ${where}${hits.length > 5 ? ', ...' : ''}), so nothing was changed. Call edit_file again with old_text extended by neighbouring lines so it matches exactly one place.` };
+        }
+        return { at: hits[0], from, to };
+      };
+
+      let content: string;
+      try {
+        const stat = await fsp.stat(check.path);
+        if (stat.isDirectory()) return { error: 'That path is a folder.' };
+        if (stat.size > MAX_EDIT_FILE_BYTES) return { error: `The file is too large to edit (${Math.round(stat.size / 1024)} KB, max ${MAX_EDIT_FILE_BYTES / 1024} KB).` };
+        const buffer = await fsp.readFile(check.path);
+        if (buffer.subarray(0, 1024).includes(0)) return { error: 'This looks like a binary file; it cannot be edited.' };
+        content = buffer.toString('utf8');
+      } catch {
+        return { error: 'The file does not exist or cannot be read. To create a new file use write_file.' };
+      }
+      const found = locate(content);
+      if ('error' in found) return found;
+      const startLine = lineNumberAt(content, found.at);
+      const diff = editDiffText(found.from, found.to, startLine);
+      return {
+        verdict: { verdict: 'confirm' },
+        title: 'Edit a file',
+        detail: `${check.path}\nline ${diff.firstLine} · -${diff.removed} / +${diff.added} lines\n${diff.text}`,
+        summary: `edit_file ${check.path} (line ${diff.firstLine}, -${diff.removed}/+${diff.added} lines)`,
+        async run() {
+          // The file may have changed while the card was open: check again before touching it.
+          const target = await fsp.realpath(check.path);
+          const stat = await fsp.stat(target);
+          const now = (await fsp.readFile(target)).toString('utf8');
+          const again = locate(now);
+          if ('error' in again) return `Error: the file changed while waiting for approval. ${again.error}`;
+          const updated = now.slice(0, again.at) + again.to + now.slice(again.at + again.from.length);
+          const temp = join(dirname(target), `.${basename(target)}.sudo-tmp-${process.pid}-${Date.now().toString(36)}`);
+          try {
+            await fsp.writeFile(temp, updated, { encoding: 'utf8', mode: stat.mode & 0o7777, flag: 'wx' });
+            await fsp.chmod(temp, stat.mode & 0o7777);
+            await fsp.rename(temp, target);
+          } catch (error) {
+            await fsp.rm(temp, { force: true }).catch(() => undefined);
+            throw error;
+          }
+          return `OK: edited ${check.path} (line ${diff.firstLine}, -${diff.removed} / +${diff.added} lines)`;
+        },
+      };
+    },
+  };
 
   const runCommand: ToolSpec = {
     name: 'run_command',
@@ -417,7 +595,7 @@ export function createRegistry(policy: PolicyApi, deps: RegistryDeps): ToolSpec[
     },
   };
 
-  return [readFile, listDir, searchFiles, writeLike('write_file'), writeLike('append_file'), runCommand, openUrl, openApp, systemInfo];
+  return [readFile, listDir, searchFiles, writeLike('write_file'), writeLike('append_file'), editFile, runCommand, openUrl, openApp, systemInfo];
 }
 
 export function toDefinitions(specs: ToolSpec[]): ToolDefinition[] {
