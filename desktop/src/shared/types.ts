@@ -5,7 +5,7 @@ export type BotSize = 'small' | 'medium' | 'large';
 export type AIMode = 'local' | 'cloud';
 export type CloudProviderId = 'gemini' | 'groq' | 'openai' | 'openrouter' | 'custom';
 export type SttProviderId = 'auto' | 'browser' | 'whisper' | 'gemini';
-export type TtsProviderId = 'google' | 'gemini' | 'azure' | 'elevenlabs';
+export type TtsProviderId = 'auto' | 'google' | 'gemini' | 'azure' | 'elevenlabs';
 export type VoiceLanguage = 'auto' | 'ur-PK' | 'en' | 'ur';
 export type SttLanguage = 'auto' | 'ur' | 'en' | 'ur-PK';
 export type VadSensitivity = 'low' | 'medium' | 'high';
@@ -26,6 +26,10 @@ export interface Settings {
   ttsProvider?: TtsProviderId;
   ttsVoice?: string;
   ttsGeminiVoice?: string;
+  /** 'auto' (by language) or an Azure neural voice id. */
+  ttsAzureVoice?: string;
+  /** Voice family used for Roman Urdu (Latin script) text on Azure. */
+  ttsAzureRomanUrdu?: 'hi' | 'ur';
   ttsSpeed?: number;
   voiceLanguage?: VoiceLanguage;
   micDeviceId?: string;
@@ -85,6 +89,7 @@ export interface AIState {
   cloud: CloudConfig;
 }
 export interface ActionResult { ok: boolean; error?: string; notice?: string }
+export interface AzureStatus { keySet: boolean; maskedKey: string; region: string; charsUsed: number; lastError: string; backoffSeconds: number }
 export interface DesktopAPI {
   getState(): Promise<AppState>;
   onState(callback: (state: AppState) => void): () => void;
@@ -117,6 +122,9 @@ export interface DesktopAPI {
   onSpeechEvent(callback: (event: SpeechEvent) => void): () => void;
   transcribeAudio(base64Audio: string, mimeType?: string, language?: string, hint?: string): Promise<{ ok: boolean; text?: string; error?: string; fallbackToBrowser?: boolean; rateLimited?: boolean; scriptWarning?: boolean }>;
   playAudio(dataUri: string): Promise<{ ok: boolean; error?: string }>;
+  getAzure(): Promise<AzureStatus>;
+  saveAzure(config: { apiKey?: string; region: string }): Promise<ActionResult>;
+  testAzure(sample: 'en' | 'roman'): Promise<{ ok: boolean; error?: string; dataUri?: string; voice?: string }>;
   clearMessages(): Promise<void>;
   quit(): Promise<void>;
 }
@@ -140,4 +148,7 @@ export const CHANNELS = {
   playAudio: 'companion:play-audio',
   speechEvent: 'companion:speech-event',
   speechBroadcast: 'companion:speech-broadcast',
+  azureGet: 'companion:azure-get',
+  azureSave: 'companion:azure-save',
+  azureTest: 'companion:azure-test',
 } as const;

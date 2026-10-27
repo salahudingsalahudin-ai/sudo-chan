@@ -1,4 +1,5 @@
 import type { CloudConfigInput, CloudProviderId, Settings } from './types.js';
+import { isAzureVoice } from './azure-tts.ts';
 
 export const DEFAULT_SETTINGS: Settings = {
   shortcut: 'Control+Space',
@@ -14,9 +15,11 @@ export const DEFAULT_SETTINGS: Settings = {
   voiceVisualizerMode: 'bot',
   sttProvider: 'whisper',
   sttLanguage: 'auto',
-  ttsProvider: 'gemini',
+  ttsProvider: 'auto',
   ttsVoice: 'default',
   ttsGeminiVoice: 'Kore',
+  ttsAzureVoice: 'auto',
+  ttsAzureRomanUrdu: 'hi',
   ttsSpeed: 1.0,
   voiceLanguage: 'auto',
   micDeviceId: 'default',
@@ -76,9 +79,11 @@ export function validSettings(value: unknown): value is Settings {
   if (s.wakeAliases !== undefined && (!Array.isArray(s.wakeAliases) || s.wakeAliases.length > 20 || s.wakeAliases.some(a => typeof a !== 'string' || a.length > 40))) return false;
   if (s.voiceVisualizerMode !== undefined && s.voiceVisualizerMode !== 'bot' && s.voiceVisualizerMode !== 'orb') return false;
   if (s.sttProvider !== undefined && !['auto', 'browser', 'whisper', 'gemini'].includes(s.sttProvider)) return false;
-  if (s.ttsProvider !== undefined && !['google', 'gemini', 'azure', 'elevenlabs'].includes(s.ttsProvider)) return false;
+  if (s.ttsProvider !== undefined && !['auto', 'google', 'gemini', 'azure', 'elevenlabs'].includes(s.ttsProvider)) return false;
   if (s.ttsVoice !== undefined && typeof s.ttsVoice !== 'string') return false;
   if (s.ttsGeminiVoice !== undefined && (typeof s.ttsGeminiVoice !== 'string' || !/^[A-Za-z]{2,30}$/.test(s.ttsGeminiVoice))) return false;
+  if (s.ttsAzureVoice !== undefined && s.ttsAzureVoice !== 'auto' && !isAzureVoice(s.ttsAzureVoice)) return false;
+  if (s.ttsAzureRomanUrdu !== undefined && s.ttsAzureRomanUrdu !== 'hi' && s.ttsAzureRomanUrdu !== 'ur') return false;
   if (s.ttsSpeed !== undefined && (typeof s.ttsSpeed !== 'number' || s.ttsSpeed < 0.5 || s.ttsSpeed > 2.0)) return false;
   if (s.voiceLanguage !== undefined && !['auto', 'ur-PK', 'en', 'ur'].includes(s.voiceLanguage)) return false;
   if (s.micDeviceId !== undefined && typeof s.micDeviceId !== 'string') return false;

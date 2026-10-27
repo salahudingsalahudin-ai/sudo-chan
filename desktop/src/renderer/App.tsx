@@ -5,6 +5,7 @@ import { DEFAULT_SETTINGS, MAX_MESSAGE_LENGTH } from '../shared/validation';
 import { Bot } from './Bot';
 import { SonicOrb } from './SonicOrb';
 import { AISettings } from './AISettings';
+import { AzureVoiceSettings } from './AzureVoiceSettings';
 import { useLipSync } from './lipsync';
 import { ConversationWindow, DEFAULT_ASSISTANT_NAME, DEFAULT_WAKE_ALIASES, WakeGate, buildWakeHint, matchWakeWord } from '../shared/wake-word.ts';
 import { getMutedPreference, setMutedPreference, speak, stopSpeech } from './speech';
@@ -981,6 +982,8 @@ function SettingsView({ state }: { state: AppState }) {
     settings.bargeInSensitivity !== state.settings.bargeInSensitivity ||
     settings.ttsProvider !== state.settings.ttsProvider ||
     settings.ttsGeminiVoice !== state.settings.ttsGeminiVoice ||
+    settings.ttsAzureVoice !== state.settings.ttsAzureVoice ||
+    settings.ttsAzureRomanUrdu !== state.settings.ttsAzureRomanUrdu ||
     settings.ttsSpeed !== state.settings.ttsSpeed;
   useEffect(() => setSettings(state.settings), [
     state.settings.botSize,
@@ -998,6 +1001,8 @@ function SettingsView({ state }: { state: AppState }) {
     state.settings.bargeInSensitivity,
     state.settings.ttsProvider,
     state.settings.ttsGeminiVoice,
+    state.settings.ttsAzureVoice,
+    state.settings.ttsAzureRomanUrdu,
     state.settings.ttsSpeed,
   ]);
   useEffect(() => {
@@ -1205,10 +1210,12 @@ function SettingsView({ state }: { state: AppState }) {
               🔊 Test Voice Sound
             </button>
           </SettingRow>
-          <SettingRow title="Voice engine" description="Gemini gives a more natural, expressive voice but its free tier allows only about 10 requests a day, so it runs out quickly (each reply uses 1-2). Google is unlimited but flatter. When Gemini is out of quota the app switches to Google by itself and tries Gemini again later.">
-            <select className="wake-word-input" aria-label="Voice engine" value={settings.ttsProvider ?? 'gemini'} onChange={event => setSettings({ ...settings, ttsProvider: event.target.value as Settings['ttsProvider'] })}>
-              <option value="gemini">Gemini (expressive)</option>
-              <option value="google">Google (fast)</option>
+          <SettingRow title="Voice engine" description="Auto tries Gemini first (very natural, but its free tier is only about 10 requests a day), then Azure Speech if you added a key below, then Google (unlimited but flat). A forced engine still falls back to Google if it fails.">
+            <select className="wake-word-input" aria-label="Voice engine" value={settings.ttsProvider ?? 'auto'} onChange={event => setSettings({ ...settings, ttsProvider: event.target.value as Settings['ttsProvider'] })}>
+              <option value="auto">Auto (Gemini, Azure, Google)</option>
+              <option value="gemini">Gemini only</option>
+              <option value="azure">Azure Speech only</option>
+              <option value="google">Google only</option>
             </select>
           </SettingRow>
           <SettingRow title="Gemini voice" description="Voice used by the Gemini engine.">
@@ -1216,7 +1223,8 @@ function SettingsView({ state }: { state: AppState }) {
               {['Kore', 'Puck', 'Zephyr', 'Aoede', 'Leda', 'Charon', 'Fenrir'].map(voice => <option key={voice} value={voice}>{voice}</option>)}
             </select>
           </SettingRow>
-          <SettingRow title="Speaking speed" description={`Gemini voice pace (${(settings.ttsSpeed ?? 1).toFixed(1)}x). Not applied to the Google engine.`}>
+          <AzureVoiceSettings settings={settings} setSettings={setSettings}/>
+          <SettingRow title="Speaking speed" description={`Gemini and Azure voice pace (${(settings.ttsSpeed ?? 1).toFixed(1)}x). Not applied to the Google engine.`}>
             <label className="shortcut-label"><span className="sr-only">Speaking speed</span><input type="range" min={0.7} max={1.4} step={0.1} value={settings.ttsSpeed ?? 1} onChange={event => setSettings({ ...settings, ttsSpeed: Number(event.target.value) })}/></label>
           </SettingRow>
           <SettingRow title="Barge-in sensitivity" description={`How easily you can interrupt Sudo-chan while she speaks (${Math.round((settings.bargeInSensitivity ?? DEFAULT_BARGE_IN_SENSITIVITY) * 100)}%). Raise it for headphones, lower it on speakers.`}>

@@ -1,5 +1,7 @@
 import type { TtsProvider, TtsRequest, TtsResult } from '../shared/voice-interfaces.js';
 import { chunkForGoogle, normalizeForSpeech, worthGemini } from '../shared/speech.ts';
+import { pickAzureVoice } from '../shared/azure-tts.ts';
+import type { AzureTtsProvider } from './azure-provider.ts';
 
 type FetchFn = typeof fetch;
 
@@ -192,30 +194,35 @@ export class GeminiTtsProvider implements TtsProvider {
 
 export interface RouterOptions {
   getKey: () => string;
-  /** 'gemini' (default) or 'google'. */
+  /** 'auto' (default: Gemini, then Azure, then Google), 'gemini', 'azure' or 'google'. */
   getPreferred: () => string | undefined;
+  /** Optional Azure Speech provider (official REST API). */
+  azure?: AzureTtsProvider;
   fetchFn?: FetchFn;
   now?: () => number;
 }
 
-export interface RouterStats { geminiCalls: number; googleRequests: number; cacheHits: number; skippedShort: number }
+export interface RouterStats { geminiCalls: number; azureCalls: number; googleRequests: number; cacheHits: number; skippedShort: number }
 
 /**
- * Gemini first (when a key exists, the engine is not forced to Google, the text is worth a call and the
- * quota is not in back-off), silent fallback to Google. Identical requests come from an in-memory cache.
+ * Auto chain: Gemini (key, text worth a call, not in quota back-off) -> Azure Speech (key + region, not in
+ * back-off) -> Google Translate. A forced engine skips the others. Identical requests come from an in-memory cache.
  */
 export class TtsRouter {
   private gemini: GeminiTtsProvider;
   private google: GoogleTranslateTtsProvider;
+  private azure: AzureTtsProvider | undefined;
   private getPreferred: () => string | undefined;
   private now: () => number;
   private geminiDownUntil = 0;
+  private azureDownUntil = 0;
   private cache = new AudioCache();
-  readonly stats: RouterStats = { geminiCalls: 0, googleRequests: 0, cacheHits: 0, skippedShort: 0 };
+  readonly stats: RouterStats = { geminiCalls: 0, azureCalls: 0, googleRequests: 0, cacheHits: 0, skippedShort: 0 };
 
   constructor(options: RouterOptions) {
     this.gemini = new GeminiTtsProvider({ getKey: options.getKey, fetchFn: options.fetchFn });
     this.google = new GoogleTranslateTtsProvider(options.fetchFn);
+    this.azure = options.azure;
     this.getPreferred = options.getPreferred;
     this.now = options.now ?? Date.now;
   }
@@ -227,10 +234,22 @@ export class TtsRouter {
   /** Forget any quota back-off (e.g. the user just saved a different key or switched plan). */
   resetBackoff() {
     this.geminiDownUntil = 0;
+    this.azureDownUntil = 0;
+  }
+
+  /** Why Azure is being skipped right now, for the settings screen (empty when it is usable). */
+  azureBackoffRemainingMs(): number {
+    return Math.max(0, this.azureDownUntil - this.now());
+  }
+
+  private azureKey(req: TtsRequest): string {
+    return ['azure', this.azure?.voiceFor(req) ?? '', req.emotion ?? '', req.speed ?? '', req.text].join('\u0001');
   }
 
   async synthesize(req: TtsRequest): Promise<TtsResult> {
-    const wantGemini = (this.getPreferred() ?? 'gemini') === 'gemini' && this.gemini.hasKey();
+    const preferred = this.getPreferred() ?? 'auto';
+    const wantGemini = (preferred === 'auto' || preferred === 'gemini') && this.gemini.hasKey();
+    const wantAzure = (preferred === 'auto' || preferred === 'azure') && Boolean(this.azure?.hasKey());
     const worth = worthGemini(req.text);
     if (wantGemini && !worth) this.stats.skippedShort++;
 
@@ -246,6 +265,20 @@ export class TtsRouter {
           return result;
         }
         this.geminiDownUntil = this.now() + (result.retryAfterMs ?? (result.status === 429 ? MINUTE : 30_000));
+      }
+    }
+
+    if (wantAzure && this.azure) {
+      const cachedAzure = this.cache.get(this.azureKey(req));
+      if (cachedAzure) { this.stats.cacheHits++; return { ok: true, dataUri: cachedAzure, provider: 'azure', cached: true, voice: this.azure.voiceFor(req) }; }
+      if (this.now() >= this.azureDownUntil) {
+        this.stats.azureCalls++;
+        const result = await this.azure.synthesize(req);
+        if (result.ok) {
+          if (result.dataUri) this.cache.set(this.azureKey(req), result.dataUri);
+          return result;
+        }
+        this.azureDownUntil = this.now() + (result.retryAfterMs ?? 20_000);
       }
     }
 

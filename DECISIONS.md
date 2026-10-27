@@ -64,3 +64,12 @@
 
 ## Lip-sync target
 - Only the bot the user is talking to lip-syncs: the overlay follows speech events only when `voiceActiveTarget === 'overlay'`, the chat widget only when it is `'chat'`. Earlier both used `voiceCallActive`, so the overlay mirrored chat Live Talk (user report).
+
+## Azure Speech TTS decisions
+- Official REST API only, no new dependencies. Router order for "Auto": Gemini -> Azure -> Google. Gemini stays first only because it is more expressive when it has quota; when it is out (429) Azure becomes the effective engine.
+- Key storage: `providers.azure = { provider, region, rawKey }` (base64, like the other voice keys). Not encrypted with safeStorage because `isEncryptionAvailable()` can block on this machine; the key never reaches the renderer (Settings only gets a masked copy). Real encryption stays on the to-do list.
+- Dedicated IPC (`azureGet/azureSave/azureTest`, settings window only) instead of the chat-provider save path, because Azure is not a chat provider and needs a region. Region must match `^[a-z][a-z0-9]{2,29}$`; keys are letters/digits only.
+- Voice choice: an explicit voice is used only for text it can speak (Urdu/Hindi voices for Urdu and Roman Urdu, English voices for English), otherwise the language default, so picking "Asad" never makes English sound broken. SSML never contains unescaped text and the voice name is checked against the catalog (no injection).
+- Roman Urdu route is a setting (default Hindi voice). Assumption: Hindi neural voices cope better with Latin-script text than ur-PK voices. Unmeasured (no key at build time).
+- The cache key includes the resolved Azure voice, so changing the voice never replays an old clip. A cached Azure clip is served even during back-off.
+- 401/403 backs off 10 minutes (bad key/region should not be hammered); a successful "Test Azure voice" or saving the key resets all back-offs.

@@ -1119,3 +1119,7 @@ body[data-window=overlay]{overflow:hidden}.overlay-room{position:relative;width:
 /* Wake-word indicator under the companion pill */
 .wake-indicator{margin-top:6px;border:1px solid rgba(149,220,228,.45);background:rgba(16,29,37,.82);color:#cfe9ee;font:600 11px/1 inherit;padding:5px 10px;border-radius:999px;cursor:pointer}
 .wake-indicator.is-paused{opacity:.7;border-style:dashed}
+
+/* Azure voice settings */
+.azure-fields{display:flex;flex-direction:column;gap:8px;min-width:200px}
+.azure-fields.azure-error{outline:1px solid rgba(255,120,120,.55);border-radius:10px;padding:4px}

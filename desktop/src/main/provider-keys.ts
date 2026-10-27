@@ -9,6 +9,8 @@ export interface StoredKey {
   model?: string;
   encryptedKey?: string;
   rawKey?: string;
+  /** Azure Speech resource region (eastus, uaenorth, ...). */
+  region?: string;
 }
 export type ProviderMap = Record<string, StoredKey | undefined>;
 export interface KeyCodec {
@@ -56,7 +58,7 @@ export function migrateProviders(active: StoredKey | undefined, providers: Provi
         const plain = codec.decrypt(entry);
         const encrypted = plain ? codec.encrypt(plain) : {};
         if (encrypted.encryptedKey) {
-          next[id] = { provider: entry.provider, endpoint: entry.endpoint, model: entry.model, encryptedKey: encrypted.encryptedKey };
+          next[id] = { provider: entry.provider, endpoint: entry.endpoint, model: entry.model, region: entry.region, encryptedKey: encrypted.encryptedKey };
           changed = true;
         }
       }

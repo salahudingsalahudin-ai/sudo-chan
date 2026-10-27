@@ -12,6 +12,8 @@ import { BOT_DIMENSIONS, clampPosition, CLOUD_PRESETS, DEFAULT_SETTINGS, maskApi
 import { cleanTextForSpeech, detectSentenceLanguage, emotionStyle, EMOTIONS } from '../shared/speech.js';
 import type { Emotion } from '../shared/speech.js';
 import { TtsRouter } from './tts-provider.js';
+import { AzureTtsProvider } from './azure-provider.js';
+import { validAzureKey, validAzureRegion } from '../shared/azure-tts.js';
 import { displayBackend } from '../shared/display-backend.js';
 import { migrateProviders, resolveProviderKey, shouldActivate, withProviderEntry } from './provider-keys.js';
 import type { KeyCodec, ProviderMap } from './provider-keys.js';
@@ -30,13 +32,22 @@ interface StoredCloud {
   encryptedKey?: string;
   rawKey?: string;
 }
+/** One entry per provider in `providers`; Azure Speech is voice-only and carries a region instead of a chat endpoint. */
+interface StoredProvider {
+  provider: string;
+  endpoint?: string;
+  model?: string;
+  region?: string;
+  encryptedKey?: string;
+  rawKey?: string;
+}
 interface StoreSchema {
   settings: Settings;
   mode: AIMode;
   model: string;
   position: { x: number; y: number } | null;
   cloud?: StoredCloud;
-  providers?: Record<string, StoredCloud | undefined>;
+  providers?: Record<string, StoredProvider | undefined>;
 }
 
 const smokeTest = process.argv.includes('--smoke-test');
@@ -88,12 +99,12 @@ function encryptApiKey(key: string): { encryptedKey?: string; rawKey?: string } 
 }
 
 let router: TtsRouter | undefined;
-const keyCodec: KeyCodec = { encrypt: encryptApiKey, decrypt: stored => decryptApiKey(stored as StoredCloud | undefined) };
+const keyCodec: KeyCodec = { encrypt: encryptApiKey, decrypt: stored => decryptApiKey(stored) };
 function canEncryptKeys(): boolean {
   try { return Boolean(safeStorage && safeStorage.isEncryptionAvailable()); } catch { return false; }
 }
 /** Key for any provider, whether or not it is the active chat provider. */
-function getProviderKey(id: 'gemini' | 'groq' | 'openai' | 'openrouter' | 'custom'): string {
+function getProviderKey(id: string): string {
   return resolveProviderKey(id, store.get('cloud'), store.get('providers') as ProviderMap | undefined, keyCodec);
 }
 function geminiKey(): string {
@@ -104,11 +115,25 @@ function stt(): SttRouter {
   sttRouter ??= new SttRouter({ fetch: (url, init) => fetch(url, init as RequestInit), getKey: id => getProviderKey(id), now: () => Date.now() });
   return sttRouter;
 }
+let azureProvider: AzureTtsProvider | undefined;
+function azureEntry(): StoredProvider | undefined {
+  return (store.get('providers') as Record<string, StoredProvider | undefined> | undefined)?.azure;
+}
+/** Azure Speech (official REST API). Key and region never leave the main process. */
+function azure(): AzureTtsProvider {
+  azureProvider ??= new AzureTtsProvider({
+    getKey: () => getProviderKey('azure'),
+    getRegion: () => azureEntry()?.region ?? '',
+    getVoice: () => state.settings.ttsAzureVoice,
+    getRomanRoute: () => state.settings.ttsAzureRomanUrdu,
+  });
+  return azureProvider;
+}
 function ttsRouter(): TtsRouter {
-  router ??= new TtsRouter({ getKey: geminiKey, getPreferred: () => state.settings.ttsProvider });
+  router ??= new TtsRouter({ getKey: geminiKey, getPreferred: () => state.settings.ttsProvider, azure: azure() });
   return router;
 }
-function decryptApiKey(stored?: StoredCloud): string {
+function decryptApiKey(stored?: { encryptedKey?: string; rawKey?: string }): string {
   if (!stored) return '';
   if (stored.encryptedKey && safeStorage && safeStorage.isEncryptionAvailable()) {
     try {
@@ -491,7 +516,7 @@ function setupIPC() {
         ...keyStorage,
       };
       // Every provider keeps its own entry, so a Gemini key for voice survives while chat stays on another provider.
-      store.set('providers', withProviderEntry(store.get('providers') as ProviderMap | undefined, value.provider, toStore) as Record<string, StoredCloud | undefined>);
+      store.set('providers', withProviderEntry(store.get('providers') as ProviderMap | undefined, value.provider, toStore) as Record<string, StoredProvider | undefined>);
       if (!shouldActivate(currentSaved?.provider, value.provider, (value as { makeActive?: boolean }).makeActive)) {
         publishAI();
         return { ok: true, notice: `${CLOUD_PRESETS[value.provider].label} key saved for voice (speech recognition and voice). Chat stays on ${CLOUD_PRESETS[currentSaved!.provider].label}.` };
@@ -612,6 +637,7 @@ function setupIPC() {
     if (!clean) return { ok: false };
 
     const lang = requestedLang || detectSentenceLanguage(clean);
+    const synthStarted = Date.now();
     // Synthesis only (all provider calls and keys stay here). Playback, stop and the output level live in the renderer's tts-player.
     const result = await ttsRouter().synthesize({
       text: clean,
@@ -619,10 +645,60 @@ function setupIPC() {
       style: emotionStyle(emotion, lang),
       voice: state.settings.ttsGeminiVoice,
       speed: state.settings.ttsSpeed,
+      emotion,
     });
-    console.info(`[TTS] synthesize lang=${lang} chars=${clean.length} ok=${result.ok}${result.ok ? '' : ` status=${result.status ?? '-'}`}`);
+    console.info(`[TTS] engine=${result.provider ?? 'none'} voice=${result.voice ?? '-'} lang=${lang} chars=${clean.length} ok=${result.ok} ms=${Date.now() - synthStarted}${result.cached ? ' cached' : ''}${result.ok ? '' : ` status=${result.status ?? '-'}`}`);
     return result.ok ? { ok: true, dataUri: result.dataUri } : { ok: false };
   });
+  handle(CHANNELS.azureGet, () => {
+    const key = getProviderKey('azure');
+    return {
+      keySet: Boolean(key),
+      maskedKey: maskApiKey(key),
+      region: azureEntry()?.region ?? '',
+      charsUsed: azure().charsUsed,
+      lastError: azure().lastError,
+      backoffSeconds: Math.ceil((router?.azureBackoffRemainingMs() ?? 0) / 1000),
+    };
+  }, 'settings');
+  handle(CHANNELS.azureSave, (_e, value: unknown) => {
+    if (!value || typeof value !== 'object') return { ok: false, error: 'Invalid Azure settings.' };
+    const input = value as { apiKey?: unknown; region?: unknown };
+    const region = typeof input.region === 'string' ? input.region.trim().toLowerCase() : '';
+    if (!validAzureRegion(region)) return { ok: false, error: 'Enter the Azure region, for example eastus, uaenorth or southeastasia.' };
+    const newKey = typeof input.apiKey === 'string' ? input.apiKey.trim() : '';
+    if (newKey && !validAzureKey(newKey)) return { ok: false, error: 'That does not look like an Azure Speech key (letters and digits only).' };
+    const existing = azureEntry();
+    // Stored like the other voice keys (base64). Not safeStorage: it can block on this Linux setup (see DECISIONS.md).
+    const keyFields = newKey ? { rawKey: Buffer.from(newKey, 'utf-8').toString('base64') } : { encryptedKey: existing?.encryptedKey, rawKey: existing?.rawKey };
+    if (!keyFields.rawKey && !keyFields.encryptedKey) return { ok: false, error: 'Enter your Azure Speech key first.' };
+    store.set('providers', withProviderEntry(store.get('providers') as ProviderMap | undefined, 'azure', { provider: 'azure', region, ...keyFields }) as Record<string, StoredProvider | undefined>);
+    router?.resetBackoff(); // a new key or region may work again
+    azure().lastError = '';
+    return { ok: true, notice: 'Azure Speech saved. Voice engine "Auto" will now use it after Gemini.' };
+  }, 'settings');
+  handle(CHANNELS.azureTest, async (_e, sample: unknown) => {
+    const provider = azure();
+    if (!provider.hasKey()) return { ok: false, error: 'Save your Azure key and region first.' };
+    const roman = sample === 'roman';
+    const started = Date.now();
+    const result = await provider.synthesize({
+      text: roman ? 'Assalam o alaikum! Main Sudo-chan hoon. Aap kaise hain?' : 'Hello! I am Sudo-chan, your desktop companion.',
+      lang: roman ? 'hi' : 'en',
+      emotion: 'warm',
+      speed: state.settings.ttsSpeed,
+    });
+    console.info(`[TTS] engine=azure test voice=${result.voice ?? '-'} ok=${result.ok} ms=${Date.now() - started}${result.ok ? '' : ` status=${result.status ?? '-'}`}`);
+    if (result.ok) {
+      router?.resetBackoff(); // a working test lifts any earlier back-off
+      return { ok: true, dataUri: result.dataUri, voice: result.voice };
+    }
+    const error = result.status === 401 || result.status === 403
+      ? 'Azure rejected the key or region. Check both under "Keys and Endpoint" in the Azure portal.'
+      : result.status === 429 ? 'Azure rate limit or quota reached. Try again later.'
+      : provider.lastError || 'Azure did not return audio.';
+    return { ok: false, error };
+  }, 'settings');
   handle(CHANNELS.setVoiceActive, (event, payload: unknown) => {
     let active = false;
     let target: 'overlay' | 'chat' | null = null;
@@ -727,7 +803,7 @@ async function start() {
   // keyring, which stopped every window from opening. Encryption happens only when the user saves a key.
   try {
     const migrated = migrateProviders(store.get('cloud'), store.get('providers') as ProviderMap | undefined, keyCodec, false);
-    if (migrated) store.set('providers', migrated as Record<string, StoredCloud | undefined>);
+    if (migrated) store.set('providers', migrated as Record<string, StoredProvider | undefined>);
   } catch {
     // key migration is best effort
   }

@@ -143,3 +143,13 @@ export async function speak(
     callbacks?.onError?.();
   }
 }
+
+/** Plays one finished clip (for example the Azure test button) through the central player. */
+export async function playDataUriOnce(dataUri: string): Promise<boolean> {
+  const generation = beginPlayback();
+  const buffer = await decodeDataUri(dataUri);
+  if (!buffer || generation !== currentGeneration()) return false;
+  const ok = await playBuffer(buffer, generation);
+  finishPlayback(generation);
+  return ok;
+}

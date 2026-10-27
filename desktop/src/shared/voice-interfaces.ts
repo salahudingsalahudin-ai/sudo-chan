@@ -1,5 +1,6 @@
+import type { Emotion } from './speech.ts';
 export type SttProviderId = 'auto' | 'browser' | 'whisper' | 'gemini';
-export type TtsProviderId = 'google' | 'gemini' | 'azure' | 'elevenlabs';
+export type TtsProviderId = 'auto' | 'google' | 'gemini' | 'azure' | 'elevenlabs';
 export type VoiceLanguage = 'auto' | 'ur-PK' | 'en';
 
 export interface SttResult {
@@ -22,6 +23,8 @@ export interface TtsRequest {
   style?: string;
   voice?: string;
   speed?: number;
+  /** Parsed emotion tag of the sentence (used by SSML engines such as Azure). */
+  emotion?: Emotion;
 }
 
 export interface TtsResult {
@@ -30,6 +33,8 @@ export interface TtsResult {
   error?: string;
   status?: number;
   provider?: TtsProviderId;
+  /** Voice actually used (engine specific id). */
+  voice?: string;
   /** Gemini quota back-off hint in ms (from Retry-After / retryDelay / per-day detection). */
   retryAfterMs?: number;
   cached?: boolean;
