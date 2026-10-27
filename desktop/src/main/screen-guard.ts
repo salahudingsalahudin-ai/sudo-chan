@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
-import { evaluateWindowList } from '../shared/screen-guard.ts';
-import type { GuardResult } from '../shared/screen-guard.ts';
+import { evaluateWindowList, parseWindowList } from '../shared/screen-guard.ts';
+import type { GuardResult, WindowInfo } from '../shared/screen-guard.ts';
 
 /**
  * Lists the windows that are on screen through the accessibility bus (AT-SPI) so the screenshot can be
@@ -44,13 +44,28 @@ except Exception:
 print(json.dumps(out))
 `;
 
-export function checkVisibleWindows(timeoutMs = 4000): Promise<GuardResult> {
+/** Runs the AT-SPI helper once and returns its raw stdout (empty string when python3 is missing or it times out). */
+function runWindowHelper(timeoutMs: number): Promise<{ stdout: string; failed: boolean }> {
   return new Promise(resolve => {
     const child = spawn('python3', ['-I', '-c', WINDOW_LIST_HELPER], { stdio: ['ignore', 'pipe', 'ignore'] });
     let stdout = '';
     const timer = setTimeout(() => child.kill('SIGKILL'), timeoutMs);
     child.stdout.on('data', chunk => { stdout += String(chunk); });
-    child.on('error', () => { clearTimeout(timer); resolve({ status: 'unknown' }); });
-    child.on('close', () => { clearTimeout(timer); resolve(evaluateWindowList(stdout)); });
+    child.on('error', () => { clearTimeout(timer); resolve({ stdout: '', failed: true }); });
+    child.on('close', () => { clearTimeout(timer); resolve({ stdout, failed: false }); });
   });
+}
+
+export async function checkVisibleWindows(timeoutMs = 4000): Promise<GuardResult> {
+  const { stdout, failed } = await runWindowHelper(timeoutMs);
+  return failed ? { status: 'unknown' } : evaluateWindowList(stdout);
+}
+
+/**
+ * The window list itself, for Live Talk awareness (layer 1): which window has focus. Same helper, same limits; the
+ * caller (shared/live-awareness.ts) decides what may be used. Null when the helper is unavailable.
+ */
+export async function listWindows(timeoutMs = 3000): Promise<WindowInfo[] | null> {
+  const { stdout, failed } = await runWindowHelper(timeoutMs);
+  return failed ? null : parseWindowList(stdout);
 }

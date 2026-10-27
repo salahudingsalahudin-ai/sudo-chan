@@ -9,6 +9,7 @@ import type { VisionTarget } from '../shared/screen-assist.ts';
 import { runVisionChat, VisionError } from './vision-chat.ts';
 import { tokensFromChatPayload } from '../shared/usage.ts';
 import type { ChatUsageSink } from '../shared/usage.ts';
+import { awarenessPrompt, NO_SCREEN_SENTENCE } from '../shared/live-awareness.ts';
 
 export function normalizeCloudModel(provider: CloudProviderId, model: string): string {
   let clean = model.trim();
@@ -125,6 +126,8 @@ export function buildSystemPrompt(options?: {
   toolsPaused?: boolean;
   /** With `tools`: false leaves out the prompt lines for notes, reminders and tasks (this turn is not about them). Default true. */
   plannerTools?: boolean;
+  /** Live Talk awareness (layer 1): `app="..."; title="..."` of the focused window, or nothing. Goes into this prompt only, never into history. */
+  awareness?: string | null;
 }): string {
   if (options?.voice) {
     return [
@@ -135,6 +138,7 @@ export function buildSystemPrompt(options?: {
       "Start EVERY sentence with exactly one emotion tag in square brackets, chosen from: [warm] [excited] [calm] [curious] [soft] [happy].",
       "Use [happy] for greetings, [soft] for apologies, [curious] for questions, [excited] for good news, [calm] for reassurance, [warm] otherwise.",
       "Example: [happy] Assalam o Alaikum Sid! [curious] Aaj kis cheez par kaam karna hai?",
+      options.awareness ? awarenessPrompt(options.awareness) : NO_SCREEN_SENTENCE,
       ...(options.toolsPaused ? ["Computer tools are not available on this screenshot turn: answer what is on the screen; if Sid also wants an action done, say it needs a separate request: after your answer he can just say the task again (your description stays in this chat), and never claim you did something."] : []),
       ...(options.tools ? ["You can use computer tools (files, commands, links) but risky ones need the user to click Allow on screen: say \"please approve on screen\" and never treat a spoken yes as approval. Never claim an action happened unless the tool result confirms it."] : []),
     ].join(' ');
@@ -173,11 +177,14 @@ export function buildSystemPrompt(options?: {
       ? '- Real System Boundaries: Privacy-first desktop companion. You can see the screen ONLY on a turn where a screenshot is attached by screen assist; this is NOT such a turn, so you cannot see the screen and must say so instead of guessing. You cannot browse the live web. Files and commands are only possible through the tools below, with the user\'s approval.'
       : '- Real System Boundaries: Privacy-first desktop companion. Can see the screen of the user ONLY on a turn where a screenshot is attached to the message (when the user enabled screen assist and said your name or pressed the eye button); on every other turn you cannot see the screen and must say so instead of guessing; you cannot modify or delete OS files directly, cannot browse the live web.',
     options?.toolsPaused ? '- Tools (files, commands, links) are ON in settings but are NOT available on this screenshot turn. Answer what is on the screen; if the user also wants an action done, tell them to say the task again as a separate request right after (your description stays in this chat); never claim you did something.' : '',
+    options?.awareness ? awarenessPrompt(options.awareness) : '',
     options?.tools ? `\n${buildToolsPrompt(options.plannerTools !== false)}` : '',
   ].filter(Boolean).join('\n');
 }
 
 export const SYSTEM = buildSystemPrompt();
+/** Spoken Live Talk replies are short; see streamCloud. */
+export const VOICE_MAX_TOKENS = 450;
 
 export const FEW_SHOT_EXAMPLES: ModelMessage[] = [
   {
@@ -244,6 +251,8 @@ export interface StreamOptions {
   heavy?: boolean;
   cloud?: StoredCloudConfig;
   voice?: boolean;
+  /** Live Talk awareness (layer 1): the focused window's app name and title, set by main only while Live Talk is on with consent. System prompt only. */
+  awareness?: string | null;
   /** Present only when the user enabled "Let Sudo-chan use tools". */
   tools?: ToolRuntimeLike;
   /** Tool turns report a short phrase per finished tool call ("edited ~/a.py"): paths and verbs only, never contents. */
@@ -584,7 +593,7 @@ export class LocalAI {
       const plannerTools = wantsPlannerTools(messages);
       const toolRuntime = plannerTools ? options.tools : withoutPlannerTools(options.tools);
       console.log(`[Tools] offering ${toolRuntime.definitions.length} tool(s)${plannerTools ? '' : ' (no notes/reminders/tasks on this turn)'}`);
-      const toolSystem = buildSystemPrompt({ voice: options.voice, model, provider: providerLabel, tools: true, plannerTools });
+      const toolSystem = buildSystemPrompt({ voice: options.voice, model, provider: providerLabel, tools: true, plannerTools, awareness: options.awareness });
       // No few-shot examples on tool turns: the tool list is re-sent on every step and Groq limits input tokens per minute
       // (qwen: 7000), so ~600 tokens of examples per step would trigger 429s after two or three steps.
       const toolMessages = [{ role: 'system' as const, content: toolSystem }, ...messages];
@@ -638,14 +647,17 @@ export class LocalAI {
       voice: options?.voice,
       model,
       provider: providerLabel,
+      awareness: options?.awareness,
     });
-    const maxTokens = cloud.provider === 'groq' ? 950 : (options?.voice ? 1024 : 1500);
+    // Live Talk answers are 1-3 spoken sentences: a small cap keeps a runaway answer from taking ten seconds and spares Groq's tokens-per-minute budget.
+    const maxTokens = options?.voice ? VOICE_MAX_TOKENS : (cloud.provider === 'groq' ? 950 : 1500);
 
     const fullMessages = options?.voice
       ? [{ role: 'system' as const, content: systemPrompt }, ...messages]
       : [{ role: 'system' as const, content: systemPrompt }, ...FEW_SHOT_EXAMPLES, ...messages];
 
-    console.log(`[Cloud AI Payload] Model: ${model}`, JSON.stringify(fullMessages.slice(-5), null, 2));
+    // The system prompt can carry the focused window's title (Live Talk awareness): log its size only, never its text.
+    console.log(`[Cloud AI Payload] Model: ${model}`, JSON.stringify(fullMessages.slice(-5).map(m => m.role === 'system' ? { role: m.role, content: `[system prompt, ${m.content.length} chars]` } : m), null, 2));
 
     const combined = AbortSignal.any([signal, AbortSignal.timeout(60_000)]);
     try {

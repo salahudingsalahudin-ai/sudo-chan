@@ -2,6 +2,7 @@ import type { SpeechEvent } from './speech-events.js';
 import type { UsageSummary } from './usage.ts';
 import type { PanelAction, TasksView } from './tasks.ts';
 import type { LocalWakeMode } from './local-wake/types.ts';
+import type { LiveStopReason } from './live-talk.ts';
 export type Mood = 'calm' | 'worried' | 'happy';
 export type WindowKind = 'overlay' | 'chat' | 'settings';
 export type BotSize = 'small' | 'medium' | 'large';
@@ -56,6 +57,10 @@ export interface Settings {
   localWake?: LocalWakeMode;
   /** 0..1, how readily the on-device check says "that was my name" (0.5 = calibrated at enrolment). */
   localWakeSensitivity?: number;
+  /** Live Talk awareness (layer 1): 'window' = during Live Talk she is told the NAME and TITLE of the window in front (no screenshot). Click-only consent, default 'off'. */
+  liveAwareness?: 'off' | 'window';
+  /** Reserved for a future low-rate "keep an eye" mode (layer 3). Nothing reads it yet: it never captures anything. Default false. */
+  liveKeepAnEye?: boolean;
   /** Once a day, ask GitHub (from the main process only) whether a newer release exists. Default ON; never downloads anything. */
   updateCheckEnabled?: boolean;
 }
@@ -86,6 +91,8 @@ export interface AppState {
   approvalVisible?: boolean;
   /** 'working' while a tool is running, so the desktop bot can say "kaam kar rahi hoon...". */
   toolStatus?: 'working' | null;
+  /** True while the one-time "let her know my window name?" question is shown on the desktop bot (click-only; never blocks Live Talk). */
+  awarenessPrompt?: boolean;
   /** Bumped whenever the on-device wake profile is saved or deleted, so the desktop bot reloads it. */
   localWakeRevision?: number;
 }
@@ -177,7 +184,8 @@ export interface DesktopAPI {
   testCloud(config: CloudConfigInput): Promise<ActionResult>;
   testFeature(feature: 'break' | 'heavy'): Promise<ActionResult>;
   playSpeech(payload: string | { text: string; lang?: string; emotion?: string }): Promise<{ ok: boolean; dataUri?: string }>;
-  setVoiceActive(active: boolean, target?: 'overlay' | 'chat'): Promise<ActionResult>;
+  /** `reason` (only when ending) is for the `[live] stop reason=...` log line; it grants nothing. */
+  setVoiceActive(active: boolean, target?: 'overlay' | 'chat', reason?: LiveStopReason): Promise<ActionResult>;
   setIsSpeaking(speaking: boolean): Promise<ActionResult>;
   emitSpeechEvent(event: SpeechEvent): void;
   onSpeechEvent(callback: (event: SpeechEvent) => void): () => void;
@@ -198,6 +206,8 @@ export interface DesktopAPI {
   cancelScreen(): Promise<void>;
   /** Overlay Allow / Not now buttons. Only a click can call this: there is no voice path to consent. */
   screenConsent(granted: boolean): Promise<void>;
+  /** Overlay Allow / Not now buttons of the one-time window-name question. Only a click can call this: there is no voice path to consent. */
+  liveAwarenessConsent(granted: boolean): Promise<void>;
   clearMessages(): Promise<void>;
   quit(): Promise<void>;
   onToolApproval(callback: (event: ToolApprovalEvent) => void): () => void;
@@ -259,6 +269,7 @@ export const CHANNELS = {
   sendScreen: 'companion:send-screen',
   cancelScreen: 'companion:cancel-screen',
   screenConsent: 'companion:screen-consent',
+  liveAwarenessConsent: 'companion:live-awareness-consent',
   localWakeGet: 'companion:local-wake-get',
   localWakeSave: 'companion:local-wake-save',
   localWakeDelete: 'companion:local-wake-delete',

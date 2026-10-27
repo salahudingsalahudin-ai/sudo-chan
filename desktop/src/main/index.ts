@@ -51,7 +51,10 @@ import { DEFAULT_SCREEN_PROMPT, pickVisionTargets, VISION_DEFAULT_MODELS } from 
 import { ScreenFlow } from '../shared/screen-flow.ts';
 import { checkForUpdate, toNotice, type UpdateInfo, type UpdateState } from '../shared/update-check.ts';
 import type { FlowStatus } from '../shared/screen-flow.ts';
-import { checkVisibleWindows } from './screen-guard.ts';
+import { checkVisibleWindows, listWindows } from './screen-guard.ts';
+import { AWARENESS_IDLE_MS, AWARENESS_POLL_MS, awarenessChangeAllowed, LiveAwareness } from '../shared/live-awareness.ts';
+import { isLiveStopReason, liveStartLine, liveStopLine } from '../shared/live-talk.ts';
+import type { LiveStopReason } from '../shared/live-talk.ts';
 import type { VisionProviderInfo, VisionTarget } from '../shared/screen-assist.ts';
 import type { StreamOptions } from './local-ai.js';
 
@@ -82,6 +85,8 @@ interface StoreSchema {
   screenAssistConsent?: boolean;
   /** Pending reminders (set by the assistant's set_reminder tool). */
   reminders?: Reminder[];
+  /** The one-time "may she know my window name?" question was answered or dismissed with Not now (click-only). Asked once, then only Settings changes it. */
+  liveAwarenessAsked?: boolean;
   /** When the update check last ran and what it found (a version number and a github.com link; no keys, no identifiers). */
   updates?: UpdateState;
 }
@@ -473,6 +478,7 @@ function createWindow(kind: WindowKind) {
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   win.webContents.on('will-navigate', event => event.preventDefault());
   win.webContents.on('will-attach-webview', event => event.preventDefault());
+  if (isOverlay) win.on('hide', () => { if (state.voiceActiveTarget === 'overlay') setLiveTarget(null, 'window'); });
   win.on('close', event => { if (!quitting) { event.preventDefault(); win.hide(); if (isOverlay) { state.overlayVisible = false; publish(); } } });
   win.webContents.on('did-finish-load', () => {
     win.webContents.send(CHANNELS.state, snapshot());
@@ -547,14 +553,10 @@ function openChat() {
   if (!chat || chat.isDestroyed()) {
     chat = createWindow('chat');
     // Smoke tests keep it visible for automation; ordinary use dismisses on blur.
-    if (!smokeTest) chat.on('blur', () => chat?.hide());
-    chat.on('hide', () => {
-      if (state.voiceActiveTarget === 'chat') {
-        state.voiceActiveTarget = null;
-        state.voiceCallActive = false;
-        publish();
-      }
-    });
+    // Clicking elsewhere dismisses the chat, except while Live Talk is on in it (she is being talked to and the user may be working).
+    if (!smokeTest) chat.on('blur', () => { if (state.voiceActiveTarget !== 'chat') chat?.hide(); });
+    // Live Talk "here" ends when the chat window is closed or hidden (but not by the temporary hide of a screenshot).
+    chat.on('hide', () => { if (!captureHidden.has(chat!) && state.voiceActiveTarget === 'chat') setLiveTarget(null, 'window'); });
     chat.once('ready-to-show', () => { chat?.show(); chat?.focus(); });
   } else { chat.show(); chat.focus(); }
   const area = screen.getDisplayMatching(overlay.getBounds()).workArea;
@@ -647,6 +649,8 @@ const screenFlow = new ScreenFlow({
   capture: async () => {
     // Hide our own panels so the screenshot shows the user's work. The small overlay bot stays visible (it carries the indicator).
     const hidden = [chat, settingsWindow].filter((w): w is BrowserWindow => Boolean(w && !w.isDestroyed() && w.isVisible()));
+    // Their 'hide' event must not end Live Talk: this hide lasts a moment.
+    for (const win of hidden) captureHidden.add(win);
     for (const win of hidden) win.hide();
     if (hidden.length) await new Promise(resolve => setTimeout(resolve, 350));
     try {
@@ -656,6 +660,7 @@ const screenFlow = new ScreenFlow({
       return shot.ok ? { ok: true as const, shot: { dataUri: shot.dataUri, thumbnail: shot.thumbnail } } : { ok: false as const, reason: shot.reason };
     } finally {
       for (const win of hidden) if (!win.isDestroyed()) win.showInactive();
+      setTimeout(() => { for (const win of hidden) captureHidden.delete(win); }, 600);
     }
   },
   checkWindows: checkVisibleWindows,
@@ -679,8 +684,12 @@ function sendChat(text: string, isVoice: boolean, vision?: StreamOptions['vision
     model: aiState.cloud.model,
     apiKey: decryptApiKey(store.get('cloud')),
   } : undefined;
+  // Live Talk awareness: the current window-name line (or null) goes into this turn's system prompt only. Never waits, never stored.
+  const live = state.voiceActiveTarget !== null;
+  if (live) { lastLiveTurnAt = Date.now(); void awareness.refresh(); }
   const result = conversation.send(text, aiState.model, {
     mode: aiState.mode,
+    awareness: live && effectiveCloud ? awareness.current() : null,
     heavy: aiState.modelSizes[aiState.model]?.heavy,
     cloud: effectiveCloud,
     voice: isVoice,
@@ -730,10 +739,73 @@ function followUpVision(text: string, targets: VisionTarget[]): StreamOptions['v
   if (!hit) return undefined;
   return { dataUri: hit.shot.dataUri, thumbnail: undefined, targets, fallbackText: text, ageSeconds: hit.ageSeconds, onTiming: visionMs => console.info(`[Screen] follow-up on a ${hit.ageSeconds}s old screenshot vision=${visionMs}ms`) };
 }
+// ---- Live Talk: one target at a time, one instant stop (see desktop/LIVE-TALK-FLOW.md) ----
+/** Windows hidden for a moment by a screenshot: their 'hide' event must not end Live Talk. */
+const captureHidden = new WeakSet<BrowserWindow>();
+/** Layer 1 awareness: the focused window's name and title, in memory only, only while Live Talk is on and the user said yes. */
+const awareness = new LiveAwareness({ now: () => Date.now(), listWindows: () => listWindows(), log: line => console.info(line) });
+let awarenessTimer: ReturnType<typeof setInterval> | undefined;
+let awarenessPromptTimer: ReturnType<typeof setTimeout> | undefined;
+let awarenessPromptShownAt = 0;
+let lastLiveTurnAt = 0;
+function awarenessUsable(): boolean {
+  return state.voiceActiveTarget !== null && state.settings.liveAwareness === 'window' && aiState.mode === 'cloud';
+}
+/** Switch awareness on or off (and its slow poll) after Live Talk starts or stops, or the setting / AI mode changes. */
+function syncAwareness() {
+  const usable = awarenessUsable();
+  awareness.setEnabled(usable);
+  if (usable && !awarenessTimer) {
+    awarenessTimer = setInterval(() => { if (Date.now() - lastLiveTurnAt <= AWARENESS_IDLE_MS) void awareness.refresh(); }, AWARENESS_POLL_MS);
+    void awareness.refresh();
+  } else if (!usable && awarenessTimer) { clearInterval(awarenessTimer); awarenessTimer = undefined; }
+}
+function clearAwarenessPrompt() {
+  clearTimeout(awarenessPromptTimer);
+  awarenessPromptTimer = undefined;
+  if (state.awarenessPrompt) state.awarenessPrompt = false;
+}
+/** The question is asked once, on the desktop bot, and never blocks Live Talk. Timing out does not count as an answer. */
+function maybeAskAwareness() {
+  if (state.voiceActiveTarget !== 'overlay' || state.settings.liveAwareness === 'window' || store.get('liveAwarenessAsked')) return;
+  state.awarenessPrompt = true;
+  awarenessPromptShownAt = Date.now();
+  clearTimeout(awarenessPromptTimer);
+  awarenessPromptTimer = setTimeout(() => { if (state.awarenessPrompt) { state.awarenessPrompt = false; publish(); } }, 25_000);
+}
+/**
+ * The ONLY place Live Talk starts, ends or switches in the main process. Ending (or switching away) aborts the cloud reply, tools and
+ * screenshot flow, so nothing is spoken afterwards, and writes one count-only line. The renderers cut their own audio and mic
+ * immediately (shared/live-talk.ts runLiveStop); this makes it true for every other path (other window, window close, quit).
+ */
+function setLiveTarget(target: 'overlay' | 'chat' | null, reason: LiveStopReason = 'click') {
+  const previous = state.voiceActiveTarget ?? null;
+  if (previous === target) return;
+  if (previous) {
+    console.info(liveStopLine(target ? 'switch' : reason));
+    cancelScreenCapture();
+    conversation.stop();
+    stopAllTools();
+    awareness.end();
+    clearAwarenessPrompt();
+  }
+  state.voiceActiveTarget = target;
+  state.voiceCallActive = target !== null;
+  if (target) {
+    console.info(liveStartLine(target));
+    lastLiveTurnAt = Date.now();
+    awareness.begin(awarenessUsable());
+    maybeAskAwareness();
+  }
+  syncAwareness();
+  publish();
+}
 /** `patch` holds only the fields the caller changed; everything else comes from the CURRENT settings, so a stale form can never flip the mic. */
 async function saveSettings(patch: unknown, source: string = 'unknown') {
   const candidate: unknown = typeof patch === 'object' && patch !== null && !Array.isArray(patch) ? mergeSettings(state.settings, patch as Record<string, unknown>) : patch;
   if (!validSettings(candidate)) return { ok: false, error: 'Choose a valid shortcut and companion size.' };
+  // Window-name awareness can only be switched ON by a click in Settings (or the overlay question): no other window can do it.
+  if (!awarenessChangeAllowed(state.settings.liveAwareness, candidate.liveAwareness, source)) candidate.liveAwareness = state.settings.liveAwareness ?? 'off';
   if (candidate.screenAssistEnabled && !state.settings.screenAssistEnabled && !store.get('screenAssistConsent')) {
     if (await consentDialog()) store.set('screenAssistConsent', true);
     else candidate.screenAssistEnabled = false;
@@ -764,6 +836,7 @@ async function saveSettings(patch: unknown, source: string = 'unknown') {
   if (typeof candidate.pomodoroMinutes === 'number') {
     pomodoroTimer?.setDuration(candidate.pomodoroMinutes * 60 * 1000);
   }
+  syncAwareness();
   positionOverlay(); publish();
   return { ok: true };
 }
@@ -1107,35 +1180,27 @@ function setupIPC() {
     return { ok: false, error };
   }, 'settings');
   handle(CHANNELS.setVoiceActive, (event, payload: unknown) => {
-    let active = false;
-    let target: 'overlay' | 'chat' | null = null;
-
-    if (typeof payload === 'boolean') {
-      active = payload;
-      const callerWin = BrowserWindow.fromWebContents(event.sender);
-      const callerKind = callerWin ? windowKinds.get(callerWin) : undefined;
-      target = active ? (callerKind === 'overlay' ? 'overlay' : 'chat') : null;
-    } else if (payload && typeof payload === 'object') {
-      const p = payload as { active?: boolean; target?: 'overlay' | 'chat' };
-      active = Boolean(p.active);
-      if (active) {
-        if (p.target === 'overlay' || p.target === 'chat') {
-          target = p.target;
-        } else {
-          const callerWin = BrowserWindow.fromWebContents(event.sender);
-          const callerKind = callerWin ? windowKinds.get(callerWin) : undefined;
-          target = callerKind === 'overlay' ? 'overlay' : 'chat';
-        }
-      } else {
-        target = null;
-      }
+    const callerWin = BrowserWindow.fromWebContents(event.sender);
+    const callerKind = callerWin ? windowKinds.get(callerWin) : undefined;
+    const p = (typeof payload === 'boolean' ? { active: payload } : payload && typeof payload === 'object' ? payload : {}) as { active?: unknown; target?: unknown; reason?: unknown };
+    const requested = p.target === 'overlay' || p.target === 'chat' ? p.target : undefined;
+    if (p.active === true) {
+      // Only ONE target is live; starting one ends the other (setLiveTarget logs the switch).
+      setLiveTarget(requested ?? (callerKind === 'overlay' ? 'overlay' : 'chat'));
+    } else if (!requested || requested === state.voiceActiveTarget) {
+      // A late "end" from a window that is no longer the target must not end the other window's Live Talk.
+      setLiveTarget(null, isLiveStopReason(p.reason) ? p.reason : 'click');
     }
-
-    state.voiceCallActive = active;
-    state.voiceActiveTarget = target;
-    publish();
     return { ok: true, target: state.voiceActiveTarget };
-  });
+  }, ['overlay', 'chat']);
+  // Click-only: nothing spoken can reach this handler. It only does anything while the one-time window-name question is on screen.
+  handle(CHANNELS.liveAwarenessConsent, (_e, granted) => {
+    if (!state.awarenessPrompt || Date.now() - awarenessPromptShownAt < 400) return;
+    clearAwarenessPrompt();
+    store.set('liveAwarenessAsked', true);
+    if (granted === true) void saveSettings({ liveAwareness: 'window' }, 'awareness-prompt');
+    else publish();
+  }, 'overlay');
   // Compatibility only: speech state is owned by CHANNELS.speechEvent below.
   handle(CHANNELS.setIsSpeaking, () => ({ ok: true }));
   ipcMain.on(CHANNELS.speechEvent, (event, payload: unknown) => {
@@ -1329,6 +1394,7 @@ else {
 }
 app.on('window-all-closed', () => { /* Keep the companion available in the tray. */ });
 app.on('before-quit', () => {
+  setLiveTarget(null, 'quit');
   conversation.stop();
   pomodoroTimer?.stop();
   healthMonitor?.stop();

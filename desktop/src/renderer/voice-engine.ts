@@ -410,6 +410,8 @@ export class VoiceSession {
   private features = new ClipFeatureAccumulator();
   private silenceTimer: any = null;
   private isProcessingTranscribe = false;
+  /** Bumped by cancelPending() and stop(): a speech-to-text answer that belongs to an older generation is thrown away. */
+  private generation = 0;
   private callbacks: VoiceSessionCallbacks = {};
   private bargeInDetector = new BargeInDetector({ baseThreshold: BARGE_IN_BASE_THRESHOLD, sensitivity: DEFAULT_BARGE_IN_SENSITIVITY });
 
@@ -604,7 +606,27 @@ export class VoiceSession {
     this.clipEchoEnvelope = Math.max(this.clipEchoEnvelope, this.bargeInDetector.echoEnvelope);
   }
 
+  /**
+   * Instant stop of whatever this session is doing for the current conversation, WITHOUT closing the mic: the half-recorded clip is
+   * dropped and any speech-to-text request still in flight is ignored when it answers (no callback, no new turn). Used when Live Talk
+   * ends and when the mic goes back to listening only for her name.
+   */
+  cancelPending() {
+    this.generation++;
+    this.isSpeakingSpeech = false;
+    this.preRollChunks = [];
+    this.speechChunks = [];
+    this.burstPitches = [];
+    this.voicedMs = 0;
+    this.isProcessingTranscribe = false;
+    if (this.silenceTimer) {
+      clearTimeout(this.silenceTimer);
+      this.silenceTimer = null;
+    }
+  }
+
   private async dispatchTranscription(sampleRate: number, callbacks: VoiceSessionCallbacks, burstPitch?: number) {
+    const generation = this.generation;
     this.isProcessingTranscribe = true;
     const spokenMs = Math.round(this.voicedMs);
     this.voicedMs = 0;
@@ -627,6 +649,7 @@ export class VoiceSession {
         if (callbacks.localWake && !this.clipBargeFired) {
           try { local = await callbacks.localWake(merged, sampleRate); } catch { local = undefined; }
           if (!this.active) { this.isProcessingTranscribe = false; return; }
+          if (generation !== this.generation) return;
         }
         const decision = callbacks.decideClip(features, local);
         if (!decision.send) {
@@ -653,6 +676,8 @@ export class VoiceSession {
           if (typeof window !== 'undefined' && window.companion?.transcribeAudio) {
             callbacks.onInterim?.('✨ Samajh rahi hoon...');
             const result = await window.companion.transcribeAudio(dataUri, 'audio/wav', callbacks.language, callbacks.sttHint);
+            // Live Talk ended (or the session was cancelled) while this clip was away: its words belong to no conversation any more.
+            if (generation !== this.generation || !this.active) return;
             callbacks.onTranscribeResult?.(result.rateLimited ? 'rate-limited' : result.ok || result.error === 'Could not transcribe speech.' ? 'ok' : 'error', { quotaPressure: result.quotaPressure });
             if (result.ok && result.text) {
               callbacks.onFinal?.(result.text, { pitch: burstPitch });
@@ -662,10 +687,12 @@ export class VoiceSession {
             }
           }
         } catch {
-          callbacks.onInterim?.('');
-          callbacks.onUnclear?.({ clipMs });
+          if (generation === this.generation && this.active) {
+            callbacks.onInterim?.('');
+            callbacks.onUnclear?.({ clipMs });
+          }
         } finally {
-          this.isProcessingTranscribe = false;
+          if (generation === this.generation) this.isProcessingTranscribe = false;
         }
       };
       reader.readAsDataURL(wavBlob);
@@ -675,6 +702,7 @@ export class VoiceSession {
   }
 
   stop() {
+    this.generation++;
     this.active = false;
     this.isSpeakingSpeech = false;
     this.preRollChunks = [];
