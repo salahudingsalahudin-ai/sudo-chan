@@ -593,7 +593,7 @@ export class LocalAI {
       const plannerTools = wantsPlannerTools(messages);
       const toolRuntime = plannerTools ? options.tools : withoutPlannerTools(options.tools);
       console.log(`[Tools] offering ${toolRuntime.definitions.length} tool(s)${plannerTools ? '' : ' (no notes/reminders/tasks on this turn)'}`);
-      const toolSystem = buildSystemPrompt({ voice: options.voice, model, provider: providerLabel, tools: true, plannerTools, awareness: options.awareness });
+      const toolSystem = buildSystemPrompt({ voice: options.voice, model, provider: providerLabel, tools: true, awareness: options.awareness, plannerTools });
       // No few-shot examples on tool turns: the tool list is re-sent on every step and Groq limits input tokens per minute
       // (qwen: 7000), so ~600 tokens of examples per step would trigger 429s after two or three steps.
       const toolMessages = [{ role: 'system' as const, content: toolSystem }, ...messages];
