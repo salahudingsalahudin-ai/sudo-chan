@@ -3,7 +3,9 @@ import {
   SCENE_CENTERS,
   SCENE_KEYFRAMES,
   VOICE_DEMO_CYCLE_S,
+  CARD_ORBIT,
   chooseRenderer,
+  fitCardOrbit,
   isLowPower,
   sampleJourneyPose,
   sampleStoryWeights,
@@ -85,5 +87,19 @@ describe('voice demo', () => {
   });
   it('is completely still for reduced motion', () => {
     expect(sampleVoiceDemo(4.2, true)).toEqual({ mode: 'idle', listen: 0, speak: 0, level: 0 });
+  });
+});
+
+describe('fitCardOrbit', () => {
+  it.each([[1366, 800], [1440, 900], [1920, 1080], [1100, 700]])('keeps her and the cards inside the free column at %ix%i', (w, h) => {
+    const viewH = 4.28;
+    const fit = fitCardOrbit(w, h, viewH, 0.265);
+    const ppu = h / viewH;
+    const centre = w * (0.5 + fit.side);
+    const reach = (CARD_ORBIT.radius + CARD_ORBIT.halfCard) * fit.scale * ppu;
+    expect(fit.scale).toBeGreaterThan(0.7);
+    expect(fit.scale).toBeLessThanOrEqual(1);
+    expect(centre + reach).toBeLessThanOrEqual(w - 56);
+    expect(centre - reach).toBeGreaterThanOrEqual(Math.min(0.505 * w, 700) + 24);
   });
 });

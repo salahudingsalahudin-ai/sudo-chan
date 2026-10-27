@@ -20,7 +20,7 @@ function Art({ kind }: { kind: Kind }) {
     case 'intelligence':
       return <>
         {[[34, 12], [108, 12], [34, 56], [108, 56]].map(([x, y], i) => (
-          <g key={i}><rect x={x} y={y} width="58" height="34" rx="9" {...line} /><circle cx={x + 15} cy={y + 17} r="6" {...accent} strokeWidth="1.8" /><path d={`M${x + 28} ${y + 13}h20M${x + 28} ${y + 21}h13`} {...line} /></g>
+          <g key={i}><rect x={x} y={y} width="58" height="34" rx="9" {...line} /><circle cx={x + 15} cy={y + 17} r="6" {...accent} strokeWidth={1.8} /><path d={`M${x + 28} ${y + 13}h20M${x + 28} ${y + 21}h13`} {...line} /></g>
         ))}
       </>;
     case 'anatomy':
@@ -28,14 +28,14 @@ function Art({ kind }: { kind: Kind }) {
         <rect x="46" y="10" width="108" height="64" rx="12" {...line} />
         <path d="M60 28h50M60 40h34" {...line} />
         <rect x="60" y="50" width="38" height="16" rx="8" {...line} />
-        <rect x="106" y="50" width="38" height="16" rx="8" fill={ACCENT} fillOpacity=".18" {...accent} strokeWidth="1.8" />
-        <path d="M118 58l5 4 9-9" {...accent} strokeWidth="1.8" />
+        <rect x="106" y="50" width="38" height="16" rx="8" {...accent} fill={ACCENT} fillOpacity=".18" strokeWidth={1.8} />
+        <path d="M118 58l5 4 9-9" {...accent} strokeWidth={1.8} />
       </>;
     case 'demo':
       return <>
         <rect x="42" y="8" width="116" height="66" rx="8" {...line} />
         <path d="M88 84h24M100 74v10" {...line} />
-        <rect x="62" y="26" width="48" height="30" rx="4" strokeDasharray="4 4" {...accent} strokeWidth="1.8" />
+        <rect x="62" y="26" width="48" height="30" rx="4" strokeDasharray="4 4" {...accent} strokeWidth={1.8} />
         <path d="M112 44l14 6-6 2-2 6z" fill={ACCENT} stroke="none" />
       </>;
     default:
