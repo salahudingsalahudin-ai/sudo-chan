@@ -1205,3 +1205,26 @@ body[data-window=overlay]{overflow:hidden}.overlay-room{position:relative;width:
 .overlay-approval,.screen-panel,.overlay-caption,.overlay-speech{top:2%;left:5%;width:90%;box-sizing:border-box}
 .screen-badge{z-index:6}
 .overlay-caption .caption-chip{display:block;margin-bottom:3px;font-size:8.5px;font-weight:650;color:#8fe0c0;letter-spacing:.02em}
+
+/* Free usage meter (Settings) and the calm voice-limit line (Chat) */
+.section-icon i{font-style:normal;font-weight:700;font-size:16px;color:#b7efce}
+.usage-intro{font-size:12px;line-height:1.65;color:#b9c9cc;margin:6px 0 4px}
+.usage-list{display:flex;flex-direction:column;gap:2px;margin-top:6px}
+.usage-row{padding:14px 0;border-bottom:1px solid #354b55}
+.usage-row:last-child{border-bottom:0}
+.usage-row.usage-off{opacity:.55}
+.usage-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px}
+.usage-head b{font-size:13.5px;font-weight:600;color:#edf3ef}
+.usage-tag{font-size:10px;letter-spacing:.6px;text-transform:uppercase;padding:2px 8px;border-radius:999px;border:1px solid #3d5764;color:#9fbac2;background:rgba(16,29,37,.6)}
+.usage-tag.estimate{border-style:dashed;color:#e8cf9c;border-color:#6c5a36}
+.usage-tag.provider{color:#b7efce;border-color:#3e7a62}
+.usage-bar{height:6px;border-radius:999px;background:rgba(143,170,178,.18);overflow:hidden}
+.usage-bar i{display:block;height:100%;border-radius:inherit;background:linear-gradient(90deg,#237d87,#b7efce);transition:width .4s var(--ease)}
+.usage-bar.mid i{background:linear-gradient(90deg,#b98a2e,#f0cf86)}
+.usage-bar.high i{background:linear-gradient(90deg,#b24d3b,#f0907f)}
+.usage-amount{margin-top:7px;font-size:12px;color:#d8e6e8}
+.usage-blocked{margin-top:6px;font-size:12px;font-weight:600;color:#f3a999}
+.usage-detail{margin-top:4px;font-size:11.5px;color:#b9c9cc}
+.usage-note{margin-top:4px;font-size:11px;line-height:1.55;color:#8faab2}
+.usage-foot{font-size:11.5px;color:#b9c9cc;margin:10px 0 0}
+.chat-usage-note{padding:6px 16px;font-size:11px;line-height:1.5;color:#c9d8db;background:rgba(16,29,37,.72);border-bottom:1px solid rgba(149,220,228,.2)}

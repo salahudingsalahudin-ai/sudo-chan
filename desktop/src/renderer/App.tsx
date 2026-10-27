@@ -6,6 +6,7 @@ import { Bot } from './Bot';
 import { SonicOrb } from './SonicOrb';
 import { AISettings } from './AISettings';
 import { AzureVoiceSettings } from './AzureVoiceSettings';
+import { UsageSettings } from './UsageSettings';
 import { useLipSync } from './lipsync';
 import { escapeAction, panelPlan } from '../shared/overlay-panels.ts';
 import { ConversationWindow, DEFAULT_WAKE_ALIASES, WakeGate, buildWakeHint, matchWakeWord } from '../shared/wake-word.ts';
@@ -13,6 +14,7 @@ import { approvalHeadline, approvalSecondsLeft, approvalSpokenLine, mergeApprova
 import { clearInterruptedSpeech, getMutedPreference, hasInterruptedSpeech, resumeInterruptedSpeech, setMutedPreference, speak, stopSpeech } from './speech';
 import { isStopCommand, unclearAction } from '../shared/stop-intent.ts';
 import { DEFAULT_BARGE_IN_SENSITIVITY } from '../shared/barge-in.ts';
+import { formatResetLabel } from '../shared/usage.ts';
 import { isSpeakingNow, stopSpeaking } from './tts-player';
 import { ScreenPanel } from './ScreenPanel';
 import { VoiceSession, type BargeInInfo, getVoiceProfile, isSpeakerMatch, recordVoiceSample } from './voice-engine';
@@ -468,6 +470,15 @@ function Chat({ state }: { state: AppState }) {
   const [toolApprovals, setToolApprovals] = useState<ToolApprovalRequest[]>([]);
   const viewport = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLTextAreaElement>(null);
+  // Set only while a 429 says the realistic (Gemini) voice is out of quota; the chat shows one calm line then.
+  const [voiceLimitUntil, setVoiceLimitUntil] = useState<number | null>(null);
+  useEffect(() => {
+    let alive = true;
+    const check = () => { void api?.getUsage().then(summary => { if (alive) setVoiceLimitUntil(summary.geminiVoiceBlockedUntil); }).catch(() => {}); };
+    check();
+    const timer = setInterval(check, 30_000);
+    return () => { alive = false; clearInterval(timer); };
+  }, [conversation.busy]);
   const alive = useRef(true);
   const sending = submitting || conversation.busy;
   const [muted, setMuted] = useState(getMutedPreference);
@@ -775,6 +786,10 @@ function Chat({ state }: { state: AppState }) {
         <Icon name="settings" size={14} />
       </button>
     </div>
+
+    {voiceLimitUntil !== null && voiceLimitUntil > Date.now() && (
+      <div className="chat-usage-note" role="status">Realistic voice limit reached today - using basic voice until {formatResetLabel(voiceLimitUntil, Date.now())}</div>
+    )}
 
     {confirmHeavy && (
       <div className="chat-heavy-banner" role="alert">
@@ -1169,6 +1184,7 @@ function SettingsView({ state }: { state: AppState }) {
     settings.toolsEnabled !== state.settings.toolsEnabled ||
     settings.bargeInSensitivity !== state.settings.bargeInSensitivity ||
     settings.ttsProvider !== state.settings.ttsProvider ||
+    settings.ttsQuality !== state.settings.ttsQuality ||
     settings.ttsGeminiVoice !== state.settings.ttsGeminiVoice ||
     settings.ttsAzureVoice !== state.settings.ttsAzureVoice ||
     settings.ttsAzureRomanUrdu !== state.settings.ttsAzureRomanUrdu ||
@@ -1193,6 +1209,7 @@ function SettingsView({ state }: { state: AppState }) {
     state.settings.toolsEnabled,
     state.settings.bargeInSensitivity,
     state.settings.ttsProvider,
+    state.settings.ttsQuality,
     state.settings.ttsGeminiVoice,
     state.settings.ttsAzureVoice,
     state.settings.ttsAzureRomanUrdu,
@@ -1225,7 +1242,7 @@ function SettingsView({ state }: { state: AppState }) {
   return <main className="app-window settings-window"><WindowHeader subtitle="Your companion studio" settings/>
     <div className="settings-scroll soft-scroll" ref={settingsScroll}>
       <section className="settings-hero"><div className="settings-hero-copy"><span className="eyebrow"><span className="tiny-star" aria-hidden="true">✧</span>MAKE ROOM FOR A LITTLE MAGIC</span><h1>Quietly <em>yours.</em></h1><p>A little company. A space that feels like you.</p><span className="phase-pill"><span className={`presence-dot ${state.paused ? 'is-paused' : ''}`}/>{state.paused ? 'Taking a breath' : 'Here with you'}<span className="phase-divider"/>LOCAL AI</span></div><div className="settings-hero-stage"><span className="hero-orbit" aria-hidden="true"/><span className="hero-spark" aria-hidden="true">✦</span><div className="settings-hero-bot" data-size={settings.botSize}><Bot mood={state.paused ? 'calm' : 'happy'} paused={state.paused} glasses={settings.glassesEnabled ?? true}/></div><span className="hero-caption">YOUR DESKTOP, A LITTLE WARMER</span></div></section>
-      <nav className="section-tabs" aria-label="Settings sections">{[{ id: 'presence', title: 'Your companion', icon: 'spark' as const }, { id: 'rhythm', title: 'Your rhythm', icon: 'pause' as const }, { id: 'voice-identity', title: 'Voice Identity', icon: 'voice-call' as const }, { id: 'ai', title: 'Local AI', icon: 'chat' as const }, { id: 'privacy', title: 'Your privacy', icon: 'shield' as const }].map(section => <a key={section.id} href={`#${section.id}`} aria-current={activeSection === section.id ? 'location' : undefined} onClick={() => setActiveSection(section.id)}><Icon name={section.icon} size={16}/>{section.title}</a>)}</nav>
+      <nav className="section-tabs" aria-label="Settings sections">{[{ id: 'presence', title: 'Your companion', icon: 'spark' as const }, { id: 'rhythm', title: 'Your rhythm', icon: 'pause' as const }, { id: 'voice-identity', title: 'Voice Identity', icon: 'voice-call' as const }, { id: 'usage', title: 'Free usage', icon: 'spark' as const }, { id: 'ai', title: 'Local AI', icon: 'chat' as const }, { id: 'privacy', title: 'Your privacy', icon: 'shield' as const }].map(section => <a key={section.id} href={`#${section.id}`} aria-current={activeSection === section.id ? 'location' : undefined} onClick={() => setActiveSection(section.id)}><Icon name={section.icon} size={16}/>{section.title}</a>)}</nav>
       <form id="settings-form" onSubmit={save}>
         <section id="presence" className="settings-card scroll-reveal"><div className="card-heading"><span className="section-icon mint"><Icon name="spark"/></span><div><span className="eyebrow">01 / A LITTLE PRESENCE</span><h2>Your companion</h2></div></div>
           <SettingRow title="A comfortable size" description="A small friend, with just enough room to glow."><div className="size-picker" role="group" aria-label="Companion size">{(['small', 'medium', 'large'] as BotSize[]).map(size => <button type="button" key={size} aria-label={size} className={settings.botSize === size ? 'selected' : ''} aria-pressed={settings.botSize === size} onClick={() => setSettings({ ...settings, botSize: size })}><span className={`size-orb size-${size}`}/>{size}</button>)}</div></SettingRow>
@@ -1457,6 +1474,7 @@ function SettingsView({ state }: { state: AppState }) {
             </button>
           </SettingRow>
         </section>
+        <UsageSettings settings={settings} setSettings={setSettings}/>
         <AISettings/>
         <section id="privacy" className="settings-card privacy-card scroll-reveal">
           <div className="card-heading"><span className="section-icon peach"><Icon name="shield"/></span><div><span className="eyebrow">04 / YOUR SPACE STAYS YOURS</span><h2>Nothing behind the curtain.</h2></div></div>
