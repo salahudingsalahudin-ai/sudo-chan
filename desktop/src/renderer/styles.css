@@ -1126,3 +1126,10 @@ body[data-window=overlay]{overflow:hidden}.overlay-room{position:relative;width:
 
 /* Caption on the desktop bot during Live Talk: what you said and what she answers */
 .overlay-caption{max-height:46%;overflow:hidden;text-align:left}.overlay-caption .caption-you{color:#6b8c92;font-size:9px;margin-bottom:3px}.overlay-caption .caption-bot{color:#2e5560}
+
+/* Mic status dot in the overlay pill: green pulse = listening for the name, blue = Live Talk, grey = mic off */
+.presence-dot.is-listening{animation:micPulse 2.4s ease-in-out infinite}
+.presence-dot.is-live{background:#4aa8ff;box-shadow:0 0 0 3px #4aa8ff33}
+.presence-dot.is-off{background:#aab8bc;box-shadow:0 0 0 3px #aab8bc22}
+@keyframes micPulse{0%,100%{box-shadow:0 0 0 3px #62d9be1f}50%{box-shadow:0 0 0 5px #62d9be44}}
+@media (prefers-reduced-motion:reduce){.presence-dot.is-listening{animation:none}}

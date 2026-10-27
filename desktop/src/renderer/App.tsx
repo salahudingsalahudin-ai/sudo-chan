@@ -278,7 +278,10 @@ function Overlay({ state }: { state: AppState }) {
     </div>
     <div className="overlay-dock" data-interactive>
       <button className="companion-pill" onClick={() => void api?.openChat()}>
-        <span className={`presence-dot ${state.paused ? 'is-paused' : ''}`}/>
+        <span
+          className={`presence-dot ${state.paused ? 'is-paused' : isOverlayVoiceActive ? 'is-live' : shouldListen ? 'is-listening' : 'is-off'}`}
+          title={isOverlayVoiceActive ? 'Live Talk' : shouldListen ? 'Listening for your name' : 'Not listening'}
+        />
         {state.paused
           ? 'Taking a breath'
           : isOverlayVoiceActive
