@@ -177,6 +177,8 @@ function publishAI() {
 
 const conversation = new ChatSession(localAI, next => {
   if (chat && !chat.isDestroyed()) chat.webContents.send(CHANNELS.chatState, next);
+  // The desktop bot speaks replies and shows captions in Live Talk, so it needs chat updates too.
+  if (overlay && !overlay.isDestroyed()) overlay.webContents.send(CHANNELS.chatState, next);
 });
 let connectionCheck: Promise<AIState> | undefined;
 async function checkAI(): Promise<AIState> {
