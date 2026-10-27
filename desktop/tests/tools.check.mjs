@@ -489,7 +489,7 @@ test('agent loop: invalid JSON arguments become an error result, 429 is retried,
   const { options, texts } = loopOptions(async (url, init) => { bodies.push(JSON.parse(init.body)); return replies.shift(); }, runtime);
   await runToolLoop(options);
   assert.equal(bodies.length, 3);
-  assert.match(bodies[2].messages.at(-1).content, /not valid JSON/);
+  assert.match(bodies[2].messages.at(-1).content, /not a valid JSON object/);
   assert.deepEqual(texts, ['Sorry, let me retry.']);
   const empty = loopOptions(async () => json({ choices: [{ message: { content: '' } }] }), runtime);
   await assert.rejects(runToolLoop(empty.options), ToolLoopHttpError);

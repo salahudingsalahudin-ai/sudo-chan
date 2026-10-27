@@ -8,6 +8,7 @@ import { AISettings } from './AISettings';
 import { AzureVoiceSettings } from './AzureVoiceSettings';
 import { useLipSync } from './lipsync';
 import { ConversationWindow, DEFAULT_WAKE_ALIASES, WakeGate, buildWakeHint, matchWakeWord } from '../shared/wake-word.ts';
+import { approvalHeadline, approvalSecondsLeft, approvalSpokenLine, mergeApprovals, reduceApprovals } from '../shared/approval-ui.ts';
 import { clearInterruptedSpeech, getMutedPreference, hasInterruptedSpeech, resumeInterruptedSpeech, setMutedPreference, speak, stopSpeech } from './speech';
 import { isStopCommand, unclearAction } from '../shared/stop-intent.ts';
 import { DEFAULT_BARGE_IN_SENSITIVITY } from '../shared/barge-in.ts';
@@ -138,6 +139,31 @@ function handleUnclear(info: { clipMs: number }) {
   const resumed = resumeInterruptedSpeech();
   console.info(`[barge-in] unclear clip=${info.clipMs}ms -> ${resumed ? 'resume' : 'stay stopped'}`);
 }
+/** Compact approval panel on the desktop bot. Only these buttons (or Esc = deny) answer; speech never does. */
+function OverlayApproval({ request }: { request: ToolApprovalRequest }) {
+  const shownAt = useRef(Date.now());
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    shownAt.current = Date.now();
+    setNow(Date.now());
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape') void api?.respondToolApproval(request.id, 'deny'); };
+    window.addEventListener('keydown', onKey);
+    return () => { clearInterval(timer); window.removeEventListener('keydown', onKey); };
+  }, [request.id]);
+  const left = approvalSecondsLeft(request, shownAt.current, now);
+  const answer = (decision: 'allow' | 'allow-chat' | 'deny') => { void api?.respondToolApproval(request.id, decision); };
+  return <div className={`overlay-approval ${request.elevated ? 'is-elevated' : ''}`} role="alertdialog" aria-label={request.title} data-interactive>
+    <div className="approval-title">{approvalHeadline(request)}</div>
+    <pre className="approval-detail">{request.detail}</pre>
+    <div className="approval-actions">
+      <button type="button" className="approval-allow" onClick={() => answer('allow')}>Allow once</button>
+      {request.allowForChat && <button type="button" className="approval-chat" onClick={() => answer('allow-chat')}>This chat</button>}
+      <button type="button" className="approval-deny" onClick={() => answer('deny')}>Deny</button>
+    </div>
+    <div className="approval-timer">{left}s mein khud Deny</div>
+  </div>;
+}
 function Overlay({ state }: { state: AppState }) {
   const [arriving, setArriving] = useState(false);
   const [cursorOffset, setCursorOffset] = useState<{ x: number; y: number } | undefined>(undefined);
@@ -146,8 +172,32 @@ function Overlay({ state }: { state: AppState }) {
   const lip = useLipSync(state.voiceActiveTarget === 'overlay');
   const lastSpokenOverlayId = useRef<string | null>(null);
   const [caption, setCaption] = useState<{ you: string; bot: string }>({ you: '', bot: '' });
+  // Tool approval cards also appear on the desktop bot, because that is where the user is talking.
+  const [approvals, setApprovals] = useState<ToolApprovalRequest[]>([]);
+  useEffect(() => {
+    if (!api) return;
+    let alive = true;
+    const off = api.onToolApproval(event => setApprovals(previous => reduceApprovals(previous, event)));
+    void api.getToolApprovals().then(list => { if (alive) setApprovals(previous => mergeApprovals(list, previous)); }).catch(() => {});
+    return () => { alive = false; off(); };
+  }, []);
+  const approval = approvals[0];
+  const spokenApproval = useRef<string | null>(null);
+  useEffect(() => {
+    if (!approval || spokenApproval.current === approval.id) return;
+    spokenApproval.current = approval.id;
+    // One short spoken line; approving still needs a click.
+    if (state.voiceActiveTarget === 'overlay') void speak(approvalSpokenLine(approval)).catch(() => {});
+  }, [approval?.id]);
+  // A reminder came due: it is also a desktop notification; here she says it out loud.
+  useEffect(() => {
+    if (!api) return;
+    return api.onReminder(reminder => { void speak(`${reminder.late ? 'Der se yaad dila rahi hoon: ' : 'Yaad dilana: '}${reminder.text}`).catch(() => {}); });
+  }, []);
+  const toolsWorking = state.toolStatus === 'working';
   const isOverlayVoiceActiveForCaption = state.voiceActiveTarget === 'overlay';
-  const captionShown = isOverlayVoiceActiveForCaption && Boolean(caption.bot || caption.you);
+  const captionText = toolsWorking ? 'Kaam kar rahi hoon...' : (caption.bot || caption.you);
+  const captionShown = !approval && ((isOverlayVoiceActiveForCaption && Boolean(caption.bot || caption.you)) || toolsWorking);
   useEffect(() => { api?.setCaptionVisible(captionShown); }, [captionShown]);
   const isOverlayVoiceActive = state.voiceActiveTarget === 'overlay';
   const overlaySessionRef = useRef<VoiceSession | null>(null);
@@ -320,7 +370,8 @@ function Overlay({ state }: { state: AppState }) {
         {state.screenStatus === 'capturing' ? '👀 Dekh rahi hoon... ✕' : '📸 Screen bheji gayi'}
       </button>
     )}
-    {captionShown && <div className="overlay-caption" role="status" aria-live="polite" data-interactive><span className={caption.bot ? 'caption-bot' : 'caption-you'}>{caption.bot || caption.you}</span></div>}
+    {approval && <OverlayApproval request={approval} />}
+    {captionShown && <div className="overlay-caption" role="status" aria-live="polite" data-interactive><span className={toolsWorking || caption.bot ? 'caption-bot' : 'caption-you'}>{captionText}</span></div>}
     {state.speech && !isOverlayVoiceActive && <div className="overlay-speech" role="status" data-interactive>{state.speech}</div>}
 
     <div className="overlay-grip" data-interactive title="Drag to make yourself at home" aria-label="Drag companion"><span/><span/><span/></div>

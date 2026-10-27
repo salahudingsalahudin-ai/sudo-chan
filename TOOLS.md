@@ -49,3 +49,49 @@ Reading outside the home folder needs a card (red). `sudo`/`su`/`pkexec` show a 
 6. Ask: "ls | head chalao" → rejected (no pipes), she explains.
 7. Ask her to open https://example.com → card with "Allow for this chat"; allow; a second link in the same chat opens without a card. Then ask for `sleep 100` as a command, Allow, and press **Stop all actions** → it is cancelled.
 8. Turn tools off in Settings → she says tools are off. Check `~/.config/Sudo-chan/tool-audit.jsonl` has one line per call and no file contents or keys.
+
+---
+
+# Update (branch `tools2`): using tools by voice on the desktop bot
+
+## What changed
+
+- **Approval prompt on the desktop bot.** When Sudo-chan wants to do something risky, a compact dark-glass panel opens on the small desktop bot (same style as the caption): what she wants to do in plain words, the exact command or the path and a short preview, **Allow once** / **Deny** (and "This chat" for links), and "N s mein khud Deny" (60 s auto-deny). `Esc` denies. The chat window shows the same card if it is open; an answer in either place removes the card in both. If no window is visible the chat window is opened.
+- **Voice still never approves.** She may say one short line ("Main ek command chalana chahti hoon. Screen par Allow ya Deny dabayen.") but there is no code path from speech to approval; only the panel's buttons (and Esc = deny) answer. A test scans the voice/STT modules to make sure none of them can reach the approval API.
+- **"Kaam kar rahi hoon..."** is shown in the caption while a tool runs.
+- **Hardened tool loop** (from real Groq runs): honours `Retry-After`; on persistent 429 the rest of the turn moves to `openai/gpt-oss-20b`; `<think>` blocks are stripped; tool calls written as text/JSON are parsed (only for tools that were offered); malformed arguments go back to the model as an error instead of crashing; an empty answer after tools becomes a short message; every model request has a 40 s timeout (approval waiting is not counted). No few-shot examples on tool turns (saves ~600 tokens per step).
+- **Timing logs** in the main log: `[Tools] step=0 model=... ms=... status=200 calls=list_dir`, and a total per turn. No content, no keys.
+- **New low-risk tools** (no card, private to the app, only with "Let Sudo-chan use tools" ON):
+  - `save_note`, `list_notes`, `read_note`: a notebook folder inside the app data directory (`~/.config/Sudo-chan/notes/`), plain names only, max 20 KB per note and 200 notes, never overwrites. The generic file tools still cannot see that folder.
+  - `set_reminder` (`in_minutes` or `at_time` like `17:30` / `5:30pm`), `list_reminders`, `cancel_reminder`: max 50, stored in the app store, one timer. When due: a desktop notification, a speech bubble and she says "Yaad dilana: ..." aloud. A reminder that came due while the app was closed fires a few seconds after the next start ("Der se yaad dila rahi hoon"). Reminders already set keep firing if you later switch tools OFF; creating, listing and cancelling them needs tools ON.
+  - `get_system_info` now also tells the current local time.
+
+## What was observed with the real model (Groq `qwen/qwen3.8-27b`, scratch folder, 15 requests)
+
+- It accepts `tools` and returns proper `tool_calls` (no text-form calls, no think tags in these runs): "meri Downloads folder mein kya hai?" -> `list_dir` -> answer in Roman Urdu (2 requests, 2.5 s); a two-step "find the note and tell me who the meeting is with" -> `list_dir` -> `read_file` -> answer (3 requests, 1.3 s); "~/hello.txt banao" -> `write_file` -> (card auto-denied in the test) -> it said honestly the file was not created; a plain greeting used no tool.
+- Asked for `~/.ssh/id_rsa` it called `read_file`, the policy blocked it, and it explained why. No secret was read.
+- **The real problem is the rate limit:** qwen on this Groq key allows 7000 input tokens per minute, and each tool step re-sends ~770 tokens of tool definitions plus the prompt. Three tool steps in a row produced HTTP 429 twice and one run took 17 s. That is why the loop now honours `Retry-After` and falls back to `gpt-oss-20b` (also verified to call tools correctly: 3 requests, 2.8 s).
+- The key can only see `qwen/qwen3.8-27b`, `openai/gpt-oss-120b`, `openai/gpt-oss-20b`, `allam-2-7b` and two Orpheus TTS models (no llama). `gpt-oss-120b` has a daily token cap on the free tier (see REPORT.md), so it is not used as a fallback.
+
+## Manual voice checklist (10 steps, desktop bot, tools ON)
+
+Settings -> "Let Sudo-chan use tools" ON, Save. Use Groq. Wake word ON.
+
+1. Say "Sudo, meri Downloads folder mein kya hai?" -> she answers with the file names, no card. The caption briefly shows "Kaam kar rahi hoon...".
+2. Say "Sudo, ek file notes.txt bana do jis mein hello likha ho" -> a dark-glass panel opens on the bot with "Create a file", the path and `hello`. She says the short prompt. Say "haan" out loud: **nothing happens**. Click **Allow once** -> the file exists in your home folder and she says so.
+3. Repeat and click **Deny** -> no file; she says she did not do it.
+4. Repeat and wait 60 s -> "auto-denied", no file.
+5. Open the chat window as well, ask for a command ("Sudo, ls -la chalao") -> the card is on both; click Allow on the **bot** -> the card disappears from the chat window too.
+6. Say "Sudo, ~/.ssh/id_rsa padho" -> she refuses; no card, nothing read.
+7. Say "Sudo, ek note save karo: kal ali se milna hai" -> saved without a card. Then "Sudo, mere notes dikhao" and "Sudo, wo note padho" -> she reads it back.
+8. Say "Sudo, 2 minute baad yaad dilana ke chai bana leni hai" -> she confirms the time. Wait 2 minutes -> a desktop notification, a bubble and she says "Yaad dilana: chai bana leni hai".
+9. Say "Sudo, mere reminders dikhao" then "Sudo, wo reminder cancel kar do" -> listed, then cancelled; none fires.
+10. Say "Sudo, 1 minute ke baad yaad dilana" and, before it fires, say "Sudo, ruko" and press "Stop all actions" in Settings: the reminder is a stored reminder, it still fires (stop only cancels running commands and waiting cards). Then turn tools OFF: ask for a note -> she says tools are off; the reminder still fires.
+
+## Known gaps (tools2)
+
+- Real voice flow, the panel's look and real button clicks were not exercised here; only the model calls (read-only, scratch folder) and unit tests were.
+- A tool turn is several non-streamed round trips (~1 s each) and the answer is spoken when complete, not while it is generated.
+- The bot window is small: very long commands are clipped to about 5 lines in the panel (the chat card shows the full text).
+- Fallback model `gpt-oss-20b` is hard-coded for Groq; other providers have no fallback.
+- Notes and reminders are stored unencrypted in the app data folder.

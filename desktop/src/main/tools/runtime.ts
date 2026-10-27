@@ -20,6 +20,8 @@ export interface RuntimeOptions {
   isEnabled: () => boolean;
   /** Strips anything that looks like a credential from results before the model sees them. */
   redact?: (text: string) => string;
+  /** Number of tools running right now (0 when idle); lets the UI show "working...". */
+  onActivity?: (running: number) => void;
 }
 
 function approved(decision: ApprovalDecision): boolean {
@@ -103,6 +105,7 @@ export class ToolRuntime implements ToolRuntimeLike {
     }
     const combined = AbortSignal.any([signal, this.stop.signal]);
     this.running++;
+    this.options.onActivity?.(this.running);
     try {
       const output = await prepared.run(combined);
       const status: ToolStatus = combined.aborted ? 'aborted' : output.startsWith('Error:') ? 'error' : 'ok';
@@ -114,6 +117,7 @@ export class ToolRuntime implements ToolRuntimeLike {
       return `Error: ${clean(message)}`;
     } finally {
       this.running--;
+      this.options.onActivity?.(this.running);
     }
   }
 }

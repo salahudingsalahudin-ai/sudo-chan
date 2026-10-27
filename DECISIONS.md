@@ -111,3 +111,11 @@
 
 ## Integration refresh 2
 - Merged voice-fix f11aaf2 into `integrate`. Overlay chat updates carry no screenshot thumbnails; wake-triggered screen requests are voice turns; "name + stop word" only stops. Details in INTEGRATION.md "Refresh 2".
+
+
+## Tools by voice (branch tools2)
+- Real Groq runs showed qwen tool calling works but the 7000 input-tokens-per-minute limit bites after 2-3 tool steps (each step re-sends ~770 tokens of tool definitions). Decisions: honour Retry-After (clamped 1-8 s), fall back to `openai/gpt-oss-20b` for the rest of the turn after 3 consecutive 429s (also verified to call tools), drop the few-shot examples on tool turns, log per-step timing. `gpt-oss-120b` is not used (daily token cap per REPORT.md); no llama model is visible to this key.
+- Approval cards are routed by `routeApprovalRequest` (src/shared/approval-ui.ts): desktop bot first because that is where the user talks, chat window too if visible, chat opened only if nothing is visible. Answers go through the same `ApprovalManager`, so the first answer wins and `close` is sent to both windows. The overlay window shape gets a larger region (60 % of the height) while a card is shown (`state.approvalVisible`), as with the caption.
+- Voice must never approve: the only calls to `respondToolApproval` are the card buttons and Esc = deny; a source-scan test keeps every voice/STT module away from the approval API. The spoken line only asks the user to look at the screen.
+- Notes (private folder in userData) and reminders need no approval: they cannot reach user files or run programs. They still need "Let Sudo-chan use tools" ON to be created/listed/cancelled, but a reminder already set keeps firing if tools are switched off later (silently dropping a reminder the user asked for seemed worse).
+- Reminders start 4 s after the windows exist so a reminder that came due while the app was closed can be shown and spoken; the reminder store loads lazily so an add before start can never overwrite stored reminders.

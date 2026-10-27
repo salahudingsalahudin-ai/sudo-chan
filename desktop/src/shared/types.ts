@@ -63,6 +63,10 @@ export interface AppState {
   screenStatus?: 'capturing' | 'sent' | null;
   /** True while the desktop bot shows a Live Talk caption, so the native window shape leaves room for it. */
   captionVisible?: boolean;
+  /** True while a tool approval card is shown on the desktop bot (the native window shape then leaves room for it). */
+  approvalVisible?: boolean;
+  /** 'working' while a tool is running, so the desktop bot can say "kaam kar rahi hoon...". */
+  toolStatus?: 'working' | null;
 }
 export interface ModelMeta {
   sizeMB: number;
@@ -127,6 +131,7 @@ export interface DesktopAPI {
   resetPosition(): Promise<void>;
   setInteractive(interactive: boolean): void;
   setCaptionVisible(visible: boolean): void;
+  onReminder(callback: (reminder: { text: string; late: boolean }) => void): () => void;
   sendMessage(text: string, voice?: boolean): Promise<ActionResult>;
   getMessages(): Promise<ChatState>;
   onChat(callback: (state: ChatState) => void): () => void;
@@ -181,6 +186,7 @@ export const CHANNELS = {
   speechEvent: 'companion:speech-event',
   speechBroadcast: 'companion:speech-broadcast',
   caption: 'companion:caption',
+  reminderDue: 'companion:reminder-due',
   azureGet: 'companion:azure-get',
   azureSave: 'companion:azure-save',
   azureTest: 'companion:azure-test',

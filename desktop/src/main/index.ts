@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, globalShortcut, ipcMain, Menu, nativeImage, safeStorage, screen, session, Tray } from 'electron';
+import { app, BrowserWindow, dialog, globalShortcut, ipcMain, Menu, nativeImage, Notification, safeStorage, screen, session, Tray } from 'electron';
 import type { IpcMainInvokeEvent } from 'electron';
 import Store from 'electron-store';
 import { setLaunchAtLogin } from './autostart.js';
@@ -24,10 +24,14 @@ import { overlayShape } from '../shared/overlay-shape.js';
 import { LocalAI, normalizeCloudModel } from './local-ai.js';
 import { ChatSession } from './chat-session.js';
 import { ApprovalManager } from './tools/approval.js';
+import { routeApprovalClose, routeApprovalRequest, type ApprovalPort } from '../shared/approval-ui.js';
 import { AuditLog, redact } from './tools/audit.js';
 import * as toolPolicy from './tools/policy.js';
 import { createRegistry, nodeOpenDetached, nodeRunProgram, toDefinitions } from './tools/registry.js';
 import { ToolRuntime } from './tools/runtime.js';
+import { createNoteSpecs, createReminderSpecs } from './tools/extra-tools.js';
+import { NotesStore } from './tools/notes.js';
+import { Reminders, type Reminder } from './tools/reminders.js';
 import { PomodoroTimer } from './pomodoro.js';
 import { SystemHealthMonitor } from './system-health.js';
 import { captureScreen } from './screen-capture.ts';
@@ -60,6 +64,8 @@ interface StoreSchema {
   providers?: Record<string, StoredProvider | undefined>;
   /** The user has read and accepted that screenshots are sent to their cloud AI provider. */
   screenAssistConsent?: boolean;
+  /** Pending reminders (set by the assistant's set_reminder tool). */
+  reminders?: Reminder[];
 }
 
 const smokeTest = process.argv.includes('--smoke-test');
@@ -201,21 +207,70 @@ const conversation = new ChatSession(localAI, next => {
   if (overlay && !overlay.isDestroyed()) overlay.webContents.send(CHANNELS.chatState, withoutAttachments(next));
 });
 // ---- Tools (files, commands, links) with a click-to-approve card for every risky action ----
+// The desktop bot is where the user talks, so cards go there first (and to the chat window if it is open).
+function approvalPort(win: () => BrowserWindow | null | undefined): ApprovalPort | null {
+  const live = win();
+  if (!live || live.isDestroyed()) return null;
+  return {
+    visible: () => { const w = win(); return Boolean(w && !w.isDestroyed() && w.isVisible()); },
+    // A freshly created window pulls pending cards itself once it has loaded.
+    ready: () => { const w = win(); return Boolean(w && !w.isDestroyed() && !w.webContents.isLoading()); },
+    send: event => { const w = win(); if (w && !w.isDestroyed()) w.webContents.send(CHANNELS.toolApproval, event); },
+  };
+}
+function approvalPorts() {
+  return {
+    overlay: approvalPort(() => overlay),
+    chat: approvalPort(() => chat),
+    openChat: () => { openChat(); return approvalPort(() => chat); },
+  };
+}
+function setApprovalVisible(visible: boolean) {
+  if (Boolean(state?.approvalVisible) === visible) return;
+  state.approvalVisible = visible;
+  publish();
+}
 const toolApprovals = new ApprovalManager({
   timeoutMs: smokeTest ? smokeApprovalTimeoutMs() : undefined,
   emit: request => {
-    openChat();
-    if (!chat || chat.isDestroyed()) return false;
-    // A freshly created window pulls pending cards itself once it has loaded.
-    if (!chat.webContents.isLoading()) chat.webContents.send(CHANNELS.toolApproval, { type: 'request', request });
-    return true;
+    const routed = routeApprovalRequest(request, approvalPorts());
+    if (routed.overlay) setApprovalVisible(true);
+    return routed.shown;
   },
-  onClose: id => { if (chat && !chat.isDestroyed()) chat.webContents.send(CHANNELS.toolApproval, { type: 'close', id }); },
+  onClose: id => {
+    routeApprovalClose(id, approvalPorts());
+    // `finish` removes the entry before calling onClose, so 0 means this was the last open card.
+    if (toolApprovals.pendingCount === 0) setApprovalVisible(false);
+  },
 });
+// Reminders keep firing after they were set even if tools are switched off later: switching tools off stops the
+// assistant from creating, listing or cancelling them, but a reminder the user asked for is never silently dropped.
+let reminders: Reminders | undefined;
+function reminderService(): Reminders {
+  reminders ??= new Reminders({
+    load: () => (store.get('reminders') as Reminder[] | undefined) ?? [],
+    save: list => store.set('reminders', list),
+    now: () => Date.now(),
+    setTimer: (fn, ms) => setTimeout(fn, ms),
+    clearTimer: handle => clearTimeout(handle as ReturnType<typeof setTimeout>),
+    onDue: (reminder, lateMs) => {
+      const late = lateMs > 120_000;
+      try { if (Notification.isSupported()) new Notification({ title: 'Sudo-chan reminder', body: reminder.text, silent: false }).show(); } catch { /* notification service may be missing */ }
+      setHappy(`⏰ ${reminder.text}`, 9000);
+      if (overlay && !overlay.isDestroyed()) overlay.webContents.send(CHANNELS.reminderDue, { text: reminder.text, late });
+      console.info(`[Reminder] fired id=${reminder.id} late=${late}`);
+    },
+  });
+  return reminders;
+}
 let toolRuntime: ToolRuntime | undefined;
 function tools(): ToolRuntime {
   if (!toolRuntime) {
-    const specs = createRegistry(toolPolicy, { home: homedir(), runProgram: nodeRunProgram, openDetached: nodeOpenDetached });
+    const specs = [
+      ...createRegistry(toolPolicy, { home: homedir(), runProgram: nodeRunProgram, openDetached: nodeOpenDetached }),
+      ...createNoteSpecs(new NotesStore(join(app.getPath('userData'), 'notes'))),
+      ...createReminderSpecs(reminderService()),
+    ];
     const audit = new AuditLog({
       append: line => appendFileSync(join(app.getPath('userData'), 'tool-audit.jsonl'), line, { encoding: 'utf8', mode: 0o600 }),
     });
@@ -226,6 +281,10 @@ function tools(): ToolRuntime {
       audit,
       isEnabled: () => state.settings.toolsEnabled === true,
       redact,
+      onActivity: running => {
+        const next = running > 0 ? 'working' : null;
+        if ((state.toolStatus ?? null) !== next) { state.toolStatus = next; publish(); }
+      },
     });
   }
   return toolRuntime;
@@ -276,7 +335,7 @@ function snapshot(): AppState {
 function updateOverlayShape() {
   if (process.platform !== 'linux' || nativeWayland || !overlay || overlay.isDestroyed()) return;
   const [width, height] = overlay.getContentSize();
-  overlay.setShape(overlayShape(width, height, Boolean(state.speech || state.captionVisible || state.screenStatus)));
+  overlay.setShape(overlayShape(width, height, state.approvalVisible ? 'approval' : Boolean(state.speech || state.captionVisible || state.toolStatus || state.screenStatus)));
 }
 function parseSpeechEvent(value: unknown): SpeechEvent | null {
   if (!value || typeof value !== 'object') return null;
@@ -632,12 +691,12 @@ function setupIPC() {
   handle(CHANNELS.cancelScreen, () => cancelScreenCapture(), ['chat', 'overlay']);
   // Overlay may stop too (barge-in / "ruko" from the desktop bot); a stop also cancels a pending screen capture and running tools.
   handle(CHANNELS.stop, () => { cancelScreenCapture(); conversation.stop(); stopAllTools(); }, ['chat', 'overlay']);
-  handle(CHANNELS.toolApprovals, () => toolApprovals.list(), 'chat');
+  handle(CHANNELS.toolApprovals, () => toolApprovals.list(), ['chat', 'overlay']);
   handle(CHANNELS.toolApprovalReply, (_e, value) => {
     const v = value as { id?: unknown; decision?: unknown } | null;
     if (!v || typeof v.id !== 'string' || (v.decision !== 'allow' && v.decision !== 'allow-chat' && v.decision !== 'deny')) return { ok: false, error: 'Invalid answer.' };
     return toolApprovals.respond(v.id, v.decision) ? { ok: true } : { ok: false, error: 'That request already ended.' };
-  }, 'chat');
+  }, ['chat', 'overlay']);
   handle(CHANNELS.toolsStopAll, () => { cancelScreenCapture(); conversation.stop(); stopAllTools(); }, ['chat', 'overlay', 'settings']);
   handle(CHANNELS.ai, () => structuredClone(aiState));
   handle(CHANNELS.checkAI, () => checkAI());
@@ -1034,6 +1093,9 @@ async function start() {
   session.defaultSession.setPermissionCheckHandler((_contents, permission) => permission === 'media' && !smokeTest);
   setupIPC();
   overlay = createWindow('overlay'); positionOverlay();
+  // Reminders start a few seconds after the windows exist, so a reminder that came due while the app was closed can still be shown and spoken.
+  setTimeout(() => reminderService().start(), 4000);
+  app.on('before-quit', () => reminders?.stop());
   overlay.setIgnoreMouseEvents(false);
   overlay.on('resize', updateOverlayShape);
   overlay.once('ready-to-show', showOverlay);

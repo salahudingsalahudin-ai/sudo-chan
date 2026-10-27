@@ -19,6 +19,11 @@ const api: DesktopAPI = {
   resetPosition: () => ipcRenderer.invoke(CHANNELS.reset),
   setInteractive: interactive => ipcRenderer.send(CHANNELS.interactive, interactive),
   setCaptionVisible: visible => ipcRenderer.send(CHANNELS.caption, visible),
+  onReminder: callback => {
+    const listener = (_event: Electron.IpcRendererEvent, reminder: { text: string; late: boolean }) => callback(reminder);
+    ipcRenderer.on(CHANNELS.reminderDue, listener);
+    return () => ipcRenderer.removeListener(CHANNELS.reminderDue, listener);
+  },
   sendMessage: (text, voice) => ipcRenderer.invoke(CHANNELS.send, voice === undefined ? text : { text, voice }),
   getMessages: () => ipcRenderer.invoke(CHANNELS.messages),
   onChat: callback => {
