@@ -41,6 +41,8 @@ export interface Settings {
   /** "Let Sudo-chan use tools" (files, commands, links) with per-action approval. Off by default. */
   toolsEnabled?: boolean;
   screenAssistEnabled?: boolean;
+  /** Show "Screenshot in 3..." before the first capture of a session so a sensitive window can be closed (default ON). */
+  screenAssistCountdown?: boolean;
   /** 0..1, how easily the user can interrupt the bot while it speaks. */
   bargeInSensitivity?: number;
 }
@@ -60,7 +62,11 @@ export interface AppState {
   voiceActiveTarget?: 'overlay' | 'chat' | null;
   isSpeaking?: boolean;
   /** Shown on the overlay while a screenshot is taken / just sent. */
-  screenStatus?: 'capturing' | 'sent' | null;
+  screenStatus?: 'consent' | 'countdown' | 'capturing' | 'sent' | 'cached' | 'notice' | null;
+  /** Seconds left in the first-capture countdown (3, 2, 1) while screenStatus is 'countdown'. */
+  screenCountdown?: number;
+  /** Short reason shown and spoken on the overlay while screenStatus is 'notice' (consent declined, sensitive window, capture failed...). */
+  screenNotice?: string;
 }
 export interface ModelMeta {
   sizeMB: number;
@@ -96,7 +102,7 @@ export interface AIState {
   error: string;
   cloud: CloudConfig;
 }
-export interface ActionResult { ok: boolean; error?: string; notice?: string }
+export interface ActionResult { ok: boolean; error?: string; notice?: string; /** The reason was already shown/spoken on the overlay; do not send the words as a plain chat message. */ handled?: boolean }
 export interface AzureStatus { keySet: boolean; maskedKey: string; region: string; charsUsed: number; lastError: string; backoffSeconds: number }
 export type ToolRisk = 'read' | 'write' | 'command' | 'open';
 /** An action Sudo-chan wants to take that needs the user's click. */
@@ -127,7 +133,8 @@ export interface DesktopAPI {
   sendMessage(text: string, voice?: boolean): Promise<ActionResult>;
   getMessages(): Promise<ChatState>;
   onChat(callback: (state: ChatState) => void): () => void;
-  stopReply(): Promise<void>;
+  /** `keepScreen`: a barge-in keeps the cached screenshot; a real Stop / "ruko" drops it. */
+  stopReply(options?: { keepScreen?: boolean }): Promise<void>;
   getAI(): Promise<AIState>;
   onAI(callback: (state: AIState) => void): () => void;
   checkAI(): Promise<AIState>;
@@ -150,6 +157,8 @@ export interface DesktopAPI {
   testAzure(sample: 'en' | 'roman'): Promise<{ ok: boolean; error?: string; dataUri?: string; voice?: string }>;
   sendScreen(payload: { text?: string; voice?: boolean; source: 'wake' | 'button' }): Promise<ActionResult>;
   cancelScreen(): Promise<void>;
+  /** Overlay Allow / Not now buttons. Only a click can call this: there is no voice path to consent. */
+  screenConsent(granted: boolean): Promise<void>;
   clearMessages(): Promise<void>;
   quit(): Promise<void>;
   onToolApproval(callback: (event: ToolApprovalEvent) => void): () => void;
@@ -186,4 +195,5 @@ export const CHANNELS = {
   toolsStopAll: 'companion:tools-stop-all',
   sendScreen: 'companion:send-screen',
   cancelScreen: 'companion:cancel-screen',
+  screenConsent: 'companion:screen-consent',
 } as const;

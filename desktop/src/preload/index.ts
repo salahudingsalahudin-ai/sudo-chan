@@ -25,7 +25,7 @@ const api: DesktopAPI = {
     ipcRenderer.on(CHANNELS.chatState, listener);
     return () => ipcRenderer.removeListener(CHANNELS.chatState, listener);
   },
-  stopReply: () => ipcRenderer.invoke(CHANNELS.stop),
+  stopReply: options => ipcRenderer.invoke(CHANNELS.stop, options?.keepScreen === true ? { keepScreen: true } : undefined),
   getAI: () => ipcRenderer.invoke(CHANNELS.ai),
   onAI: callback => {
     const listener = (_event: Electron.IpcRendererEvent, state: AIState) => callback(state);
@@ -56,6 +56,7 @@ const api: DesktopAPI = {
   testAzure: sample => ipcRenderer.invoke(CHANNELS.azureTest, sample),
   sendScreen: payload => ipcRenderer.invoke(CHANNELS.sendScreen, payload),
   cancelScreen: () => ipcRenderer.invoke(CHANNELS.cancelScreen),
+  screenConsent: granted => ipcRenderer.invoke(CHANNELS.screenConsent, granted === true),
   clearMessages: () => ipcRenderer.invoke(CHANNELS.clear),
   quit: () => ipcRenderer.invoke(CHANNELS.quit),
   onToolApproval: callback => {

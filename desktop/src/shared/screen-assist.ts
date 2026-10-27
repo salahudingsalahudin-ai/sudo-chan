@@ -111,6 +111,26 @@ export const SCREEN_RULES = [
   '- Keep the same language and script as the user\'s message (Roman Urdu in Latin letters, or English).',
 ].join('\n');
 
+export interface ScreenRulesOptions {
+  /** The user is talking by voice: the answer is spoken aloud, so keep it short and plain. */
+  voice?: boolean;
+  /** Age of a re-used (cached) screenshot in seconds; 0 or undefined means it was taken for this turn. */
+  ageSeconds?: number;
+}
+
+/** SCREEN_RULES plus the voice/follow-up specifics. Only used on turns that really carry an image. */
+export function screenRules(options: ScreenRulesOptions = {}): string {
+  const lines = [SCREEN_RULES];
+  if (options.ageSeconds && options.ageSeconds > 3) {
+    lines.push(`- This is the SAME screenshot taken ${options.ageSeconds} seconds ago, not a fresh one. The screen may have changed since; say so in a few words ("purani screen ke mutabiq"), and offer to look again if they say so.`);
+  }
+  if (options.voice) {
+    lines.push('- The answer is spoken aloud: at most 3 short sentences, plain words, no lists, no code blocks, no markdown. If the user needs code or a long command, say you will keep it short and offer to put it in the chat.');
+  }
+  lines.push('- End with one short next step or offer ("aur kuch dekhna ho to bolo"), unless the answer already ends with an action.');
+  return lines.join('\n');
+}
+
 /** Replace image payloads with a placeholder so nothing visual ever reaches a log. */
 export function redactForLog(value: unknown): unknown {
   if (typeof value === 'string') return value.startsWith('data:image') ? '[image omitted]' : value;
@@ -164,6 +184,23 @@ export function pickVisionTargets(active: ({ provider: string } & VisionProvider
 export function isNoVisionError(status: number, body: string): boolean {
   if (status !== 400 && status !== 404 && status !== 422) return false;
   return /image|vision|multimodal|modalit|content.*(array|type)|unsupported/i.test(body);
+}
+
+/**
+ * How long a rate-limited provider asks us to wait: the Retry-After header (seconds) or the
+ * "Please try again in 4.02s / 850ms / 1m2.5s" sentence Groq puts in the error body. null if unknown.
+ */
+export function parseRetryAfterMs(body: string, retryAfterHeader?: string | null): number | null {
+  if (retryAfterHeader) {
+    const seconds = Number(retryAfterHeader);
+    if (Number.isFinite(seconds) && seconds >= 0) return Math.round(seconds * 1000);
+  }
+  const compound = /try again in\s+(\d+)m\s*(\d+(?:\.\d+)?)s/i.exec(body);
+  if (compound) return Math.round((Number(compound[1]) * 60 + Number(compound[2])) * 1000);
+  const simple = /try again in\s+(\d+(?:\.\d+)?)\s*(ms|s)\b/i.exec(body);
+  if (!simple) return null;
+  const value = Number(simple[1]);
+  return Math.round(simple[2].toLowerCase() === 'ms' ? value : value * 1000);
 }
 
 /** file:///home/me/Pictures/Screenshot.png -> /home/me/Pictures/Screenshot.png (null for anything else). */

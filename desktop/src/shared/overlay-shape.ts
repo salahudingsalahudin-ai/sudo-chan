@@ -2,7 +2,7 @@
 // animated SVG, shadows, grip and both dock labels (including paused text).
 // Unlike pointer polling, these regions keep accepting input after the pointer
 // crosses from a native Wayland application into our XWayland overlay.
-export function overlayShape(width: number, height: number, speech: boolean) {
+export function overlayShape(width: number, height: number, speech: boolean, tall = false) {
   const region = (left: number, top: number, right: number, bottom: number) => {
     const x = Math.floor(width * left), y = Math.floor(height * top);
     return { x, y, width: Math.ceil(width * right) - x, height: Math.ceil(height * bottom) - y };
@@ -13,5 +13,7 @@ export function overlayShape(width: number, height: number, speech: boolean) {
     region(.02, .83, .98, .99), // Chat pill and gear, including small/paused mode.
   ];
   if (speech) regions.push(region(.02, 0, .98, .29));
+  // A panel with buttons (screen-assist consent) needs more room than a one-line banner.
+  if (tall) regions.push(region(.02, 0, .98, .52));
   return regions;
 }

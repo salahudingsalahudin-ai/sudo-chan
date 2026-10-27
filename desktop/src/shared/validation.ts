@@ -28,6 +28,7 @@ export const DEFAULT_SETTINGS: Settings = {
   glassesEnabled: true,
   toolsEnabled: false,
   screenAssistEnabled: false,
+  screenAssistCountdown: true,
   bargeInSensitivity: 0.5,
 };
 export const BOT_DIMENSIONS = { small: [190, 230], medium: [220, 260], large: [264, 312] } as const;
@@ -93,6 +94,7 @@ export function validSettings(value: unknown): value is Settings {
   if (s.glassesEnabled !== undefined && typeof s.glassesEnabled !== 'boolean') return false;
   if (s.toolsEnabled !== undefined && typeof s.toolsEnabled !== 'boolean') return false;
   if (s.screenAssistEnabled !== undefined && typeof s.screenAssistEnabled !== 'boolean') return false;
+  if (s.screenAssistCountdown !== undefined && typeof s.screenAssistCountdown !== 'boolean') return false;
   if (s.bargeInSensitivity !== undefined && (typeof s.bargeInSensitivity !== 'number' || !Number.isFinite(s.bargeInSensitivity) || s.bargeInSensitivity < 0 || s.bargeInSensitivity > 1)) return false;
   return true;
 }
