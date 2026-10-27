@@ -130,6 +130,7 @@ function functionBody(source, header) {
   const app = read('src/renderer/App.tsx');
   const needs = [];
   if (/overlay-caption/.test(app) || /captionVisible/.test(index)) needs.push(['caption', /captionVisible/]);
+  if (/screen-badge/.test(app)) needs.push(['screen badge', /screenStatus/]);
   if (/overlay-approval|approvalVisible|ApprovalPanel/.test(app)) needs.push(['approval panel', /approval/i]);
   const bad = needs.filter(([, re]) => !re.test(shapeCall)).map(([n]) => n);
   // The shape helper itself must open the top region when asked.
