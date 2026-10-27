@@ -61,6 +61,8 @@ export interface AppState {
   isSpeaking?: boolean;
   /** Shown on the overlay while a screenshot is taken / just sent. */
   screenStatus?: 'capturing' | 'sent' | null;
+  /** True while the desktop bot shows a Live Talk caption, so the native window shape leaves room for it. */
+  captionVisible?: boolean;
 }
 export interface ModelMeta {
   sizeMB: number;
@@ -124,6 +126,7 @@ export interface DesktopAPI {
   saveSettings(settings: Settings): Promise<ActionResult>;
   resetPosition(): Promise<void>;
   setInteractive(interactive: boolean): void;
+  setCaptionVisible(visible: boolean): void;
   sendMessage(text: string, voice?: boolean): Promise<ActionResult>;
   getMessages(): Promise<ChatState>;
   onChat(callback: (state: ChatState) => void): () => void;
@@ -177,6 +180,7 @@ export const CHANNELS = {
   playAudio: 'companion:play-audio',
   speechEvent: 'companion:speech-event',
   speechBroadcast: 'companion:speech-broadcast',
+  caption: 'companion:caption',
   azureGet: 'companion:azure-get',
   azureSave: 'companion:azure-save',
   azureTest: 'companion:azure-test',

@@ -276,7 +276,7 @@ function snapshot(): AppState {
 function updateOverlayShape() {
   if (process.platform !== 'linux' || nativeWayland || !overlay || overlay.isDestroyed()) return;
   const [width, height] = overlay.getContentSize();
-  overlay.setShape(overlayShape(width, height, Boolean(state.speech)));
+  overlay.setShape(overlayShape(width, height, Boolean(state.speech || state.captionVisible || state.screenStatus)));
 }
 function parseSpeechEvent(value: unknown): SpeechEvent | null {
   if (!value || typeof value !== 'object') return null;
@@ -974,6 +974,11 @@ function setupIPC() {
     }
   });
   handle(CHANNELS.quit, () => app.quit(), 'settings');
+  ipcMain.on(CHANNELS.caption, (event, visible: unknown) => {
+    authorize(event, 'overlay');
+    const next = Boolean(visible);
+    if (Boolean(state.captionVisible) !== next) { state.captionVisible = next; publish(); }
+  });
   ipcMain.on(CHANNELS.interactive, (event, interactive: unknown) => {
     authorize(event, 'overlay');
     if (typeof interactive === 'boolean' && process.platform !== 'linux') {
