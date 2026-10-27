@@ -83,6 +83,7 @@ function functionBody(source, header) {
     welcome: ['overlay'], stop: ['chat', 'overlay'], sendScreen: ['chat', 'overlay'], cancelScreen: ['chat', 'overlay'],
     toolApprovals: ['chat'], toolApprovalReply: ['chat'], toolsStopAll: ['chat', 'overlay', 'settings'],
     usage: ['settings', 'chat'], clearKeys: ['settings'], keyStorageInfo: ['settings'],
+    tasksList: ['chat'], tasksAdd: ['chat'], tasksAct: ['chat'],
   };
   const registrations = [...index.matchAll(/\n  (handle|ipcMain\.on)\(CHANNELS\.(\w+),/g)].map((m, i, all) => ({
     name: m[2], kind: m[1], text: index.slice(m.index, all[i + 1]?.index ?? index.indexOf('\n}\n', m.index)),
@@ -192,6 +193,7 @@ async function smoke() {
       const json = payload => { res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ choices: [{ index: 0, message: payload, finish_reason: payload.tool_calls ? 'tool_calls' : 'stop' }] })); };
       const call = (name, argsObj) => ({ role: 'assistant', content: null, tool_calls: [{ id: `call_${seen.length}`, type: 'function', function: { name, arguments: JSON.stringify(argsObj) } }] });
       if (body.tools && last.role === 'user' && /SMOKE_LIST/.test(lastText)) return json(call('list_dir', { path: join(home, 'work') }));
+      if (body.tools && last.role === 'user' && /SMOKE_TASK/.test(lastText)) return json(call('add_task', { title: 'smoke task', due: 'kal' }));
       if (body.tools && last.role === 'user' && /SMOKE_WRITE/.test(lastText)) return json(call('write_file', { path: join(home, 'work', 'new.txt'), content: 'smoke' }));
       let text = 'SMOKE_REPLY_OK hello from the fake server';
       if (last.role === 'tool') text = /NOT done|denied|did not respond/i.test(lastText) ? `SMOKE_DENIED_SEEN ${lastText.slice(0, 60)}` : `SMOKE_TOOL_OK ${lastText.slice(0, 200)}`;

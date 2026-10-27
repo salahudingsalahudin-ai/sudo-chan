@@ -19,6 +19,7 @@ import { RemoveKeysRow, useKeyStorageInfo } from './KeyStorage';
 import { runChatVoiceTurn } from '../shared/chat-voice-turn.ts';
 import { DEFAULT_BARGE_IN_SENSITIVITY } from '../shared/barge-in.ts';
 import { formatResetLabel } from '../shared/usage.ts';
+import { TasksPanel } from './TasksPanel.tsx';
 import { MIC_CONFIRM_MS, changedSettings, micDotPress, micDotView } from '../shared/mic-control.ts';
 import { getLastStop, isSpeakingNow, stopSpeaking } from './tts-player';
 import { isPhantomTranscript, isSelfEchoTranscript } from '../shared/stt-hallucination.ts';
@@ -985,6 +986,7 @@ function Chat({ state }: { state: AppState }) {
       </div>
     ) : (
       <>
+        <TasksPanel/>
         <div className="chat-viewport soft-scroll" ref={viewport} role="log" aria-label="Your conversation" aria-live="polite">
           {!conversation.messages.length ? (
             <div className="chat-welcome">

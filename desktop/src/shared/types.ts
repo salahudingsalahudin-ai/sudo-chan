@@ -1,5 +1,6 @@
 import type { SpeechEvent } from './speech-events.js';
 import type { UsageSummary } from './usage.ts';
+import type { PanelAction, TasksView } from './tasks.ts';
 export type Mood = 'calm' | 'worried' | 'happy';
 export type WindowKind = 'overlay' | 'chat' | 'settings';
 export type BotSize = 'small' | 'medium' | 'large';
@@ -190,7 +191,13 @@ export interface DesktopAPI {
   getToolApprovals(): Promise<ToolApprovalRequest[]>;
   respondToolApproval(id: string, decision: 'allow' | 'allow-chat' | 'deny'): Promise<ActionResult>;
   stopAllTools(): Promise<void>;
+  /** "Aaj ka kaam" panel (chat window only). The renderer never touches the tasks file. */
+  getTasks(): Promise<TasksView>;
+  onTasks(callback: (view: TasksView) => void): () => void;
+  addTaskText(text: string): Promise<TasksActionResult>;
+  taskAction(id: string, action: PanelAction): Promise<TasksActionResult>;
 }
+export interface TasksActionResult { ok: boolean; error?: string; view: TasksView }
 export const CHANNELS = {
   state: 'companion:state', getState: 'companion:get-state',
   chat: 'companion:open-chat', settings: 'companion:open-settings',
@@ -223,6 +230,10 @@ export const CHANNELS = {
   toolApprovals: 'companion:tool-approvals',
   toolApprovalReply: 'companion:tool-approval-reply',
   toolsStopAll: 'companion:tools-stop-all',
+  tasksList: 'companion:tasks-list',
+  tasksAdd: 'companion:tasks-add',
+  tasksAct: 'companion:tasks-act',
+  tasksState: 'companion:tasks-state',
   sendScreen: 'companion:send-screen',
   cancelScreen: 'companion:cancel-screen',
   screenConsent: 'companion:screen-consent',

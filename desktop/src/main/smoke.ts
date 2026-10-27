@@ -153,7 +153,24 @@ export async function runSmoke(): Promise<void> {
       const answer = await approvalAsk;
       check('unanswered approval is denied on timeout (model told "NOT done")', Boolean(answer), answer ? undefined : 'no denial reply');
       lap('tool-approval');
+
+      // "Aaj ka kaam": the assistant's add_task tool and the chat window's panel share one tasks.json (own temp userData here).
+      const added = await ask(chat, 'SMOKE_TASK please add a task', 'SMOKE_TOOL_OK', 25_000);
+      check('task tool add_task runs without a card', Boolean(added && /Added t1: smoke task \(due tomorrow\)/.test(added)), added ? added.slice(0, 120) : 'no tool answer');
+      const panel = await evalIn<{ plan: Array<{ id: string; title: string }>; openCount: number }>(chat, 'return await window.companion.getTasks();');
+      check('chat panel sees the task the assistant added', panel.openCount === 1 && panel.plan[0]?.title === 'smoke task', JSON.stringify(panel).slice(0, 120));
+      const overlayTasks = await evalIn<string>(overlay, 'try { await window.companion.getTasks(); return "allowed"; } catch (e) { return String(e && e.message || e); }');
+      check('overlay cannot read the tasks (authorize)', /unavailable in this window/i.test(overlayTasks), overlayTasks.slice(0, 80));
       await evalIn(chat, `const s = await window.companion.getState(); return await window.companion.saveSettings({ ...s.settings, toolsEnabled: false });`);
+      const manual = await evalIn<{ ok: boolean; view: { openCount: number } }>(chat, 'return await window.companion.addTaskText("parson subah report bhejna");');
+      check('panel adds a task with tools OFF', manual.ok && manual.view.openCount === 2, JSON.stringify(manual).slice(0, 100));
+      const checked = await evalIn<{ ok: boolean; view: { openCount: number; doneToday: unknown[] } }>(chat, 'return await window.companion.taskAction("t1", "done");');
+      check('panel can check a task off', checked.ok && checked.view.openCount === 1 && checked.view.doneToday.length === 1, JSON.stringify(checked).slice(0, 100));
+      if (process.platform !== 'win32') {
+        const tasksMode = statSync(join(app.getPath('userData'), 'tasks.json')).mode & 0o777;
+        check('tasks.json is mode 600 and not inside config.json', tasksMode === 0o600 && !readFileSync(join(app.getPath('userData'), 'config.json'), 'utf8').includes('smoke task'), tasksMode.toString(8));
+      }
+      lap('tasks');
     } else {
       check('tools not present on this branch (skipped)', true, 'preload has no getToolApprovals');
     }

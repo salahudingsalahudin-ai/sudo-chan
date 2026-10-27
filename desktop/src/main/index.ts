@@ -38,7 +38,9 @@ import { AuditLog, redact } from './tools/audit.js';
 import * as toolPolicy from './tools/policy.js';
 import { createRegistry, nodeOpenDetached, nodeRunProgram, toDefinitions } from './tools/registry.js';
 import { ToolRuntime } from './tools/runtime.js';
-import { createNoteSpecs, createReminderSpecs } from './tools/extra-tools.js';
+import { createNoteSpecs, createReminderSpecs, createTaskSpecs } from './tools/extra-tools.js';
+import { TaskFile, TaskService } from './tasks-store.js';
+import type { TasksView } from '../shared/tasks.js';
 import { NotesStore } from './tools/notes.js';
 import { Reminders, type Reminder } from './tools/reminders.js';
 import { PomodoroTimer } from './pomodoro.js';
@@ -271,13 +273,27 @@ function reminderService(): Reminders {
   });
   return reminders;
 }
+// "Aaj ka kaam": tasks.json in userData. The assistant's task tools and the chat window's panel share this one service.
+// Like reminders, the file works with tools OFF (the panel is manual); only the assistant's tools need the switch.
+let lastTurnVoice = false;
+let taskService: TaskService | undefined;
+function tasksService(): TaskService {
+  taskService ??= new TaskService({
+    storage: new TaskFile(join(app.getPath('userData'), 'tasks.json')),
+    now: () => Date.now(),
+    // The new list goes to the chat window ONLY: the overlay never receives task titles.
+    onChange: view => { if (chat && !chat.isDestroyed()) chat.webContents.send(CHANNELS.tasksState, view); },
+  });
+  return taskService;
+}
 let toolRuntime: ToolRuntime | undefined;
 function tools(): ToolRuntime {
   if (!toolRuntime) {
     const specs = [
       ...createRegistry(toolPolicy, { home: homedir(), runProgram: nodeRunProgram, openDetached: nodeOpenDetached }),
       ...createNoteSpecs(new NotesStore(join(app.getPath('userData'), 'notes'))),
-      ...createReminderSpecs(reminderService()),
+      ...createReminderSpecs(reminderService(), () => Date.now(), tasksService()),
+      ...createTaskSpecs(tasksService(), reminderService(), () => (lastTurnVoice ? 'voice' : 'chat')),
     ];
     const audit = new AuditLog({
       append: line => appendFileSync(join(app.getPath('userData'), 'tool-audit.jsonl'), line, { encoding: 'utf8', mode: 0o600 }),
@@ -609,6 +625,7 @@ function visionTargets(): VisionTarget[] {
   return pickVisionTargets(active, others);
 }
 function sendChat(text: string, isVoice: boolean, vision?: StreamOptions['vision']) {
+  lastTurnVoice = isVoice;
   const effectiveCloud = aiState.mode === 'cloud' ? {
     provider: aiState.cloud.provider,
     endpoint: aiState.cloud.endpoint,
@@ -723,6 +740,16 @@ function setupIPC() {
   }, ['settings', 'chat', 'overlay']);
   handle(CHANNELS.reset, () => { resetOverlayPosition(); showOverlay(); }, 'settings');
   handle(CHANNELS.messages, () => conversation.snapshot(), 'chat');
+  // "Aaj ka kaam" panel: chat window only (the overlay/voice side has no way to reach tasks.json; the assistant uses the tools).
+  handle(CHANNELS.tasksList, () => tasksService().view(), 'chat');
+  handle(CHANNELS.tasksAdd, (_e, value) => tasksService().addFromText(value), 'chat');
+  handle(CHANNELS.tasksAct, (_e, value) => {
+    const done = tasksService().panelAction(value);
+    // Finishing or removing a task also cancels the reminder that was set for it.
+    const id = (value as { id?: unknown } | null)?.id;
+    if (done.ok && done.reminderId && typeof id === 'string') reminderService().cancelForTask(id);
+    return { ok: done.ok, error: done.error, view: done.view };
+  }, 'chat');
   handle(CHANNELS.clear, event => {
     const kind = windowKinds.get(BrowserWindow.fromWebContents(event.sender)!);
     if (kind !== 'chat' && kind !== 'settings') throw new Error('Operation unavailable in this window.');

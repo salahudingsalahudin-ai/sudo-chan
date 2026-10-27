@@ -1,5 +1,24 @@
 # Changelog (desktop)
 
+## planner (on top of integrate5): "Aaj ka kaam" daily planner and "mera kaam utha lo"
+
+Details, phrases to try and known gaps in `PLANNER.md`.
+
+- **Pure logic `src/shared/tasks.ts`:** add / update / complete / start / remove / reorder, today's plan (overdue, due today, in progress, priority; max 5),
+  next task, filters, finding a task by id or words, strict validation of everything read from disk, and a date parser for English, Roman Urdu and Urdu script
+  (aaj, kal, parson, subah, dopahar, shaam, raat, "5 baje", "saade paanch baje", "agle hafte", "3 din baad", weekdays, "in 2 hours", Urdu digits).
+- **Store `src/main/tasks-store.ts`:** `tasks.json` in userData, mode 0600, atomic write (temp + fsync + rename), `.bak` of the last good file, damaged
+  file copied to `tasks.corrupt.json` then restored from the backup, size and count caps. Never in `config.json`, no keys.
+- **Seven tools** in the existing registry (`add_task`, `list_tasks`, `update_task`, `complete_task`, `plan_today`, `next_task`, `start_task`): auto-approved,
+  audited, validated like `save_note`/`set_reminder`, off when "Let Sudo-chan use tools" is off. `TOOLS_PROMPT` explains when to use them, to answer in the
+  user's language in 1-3 short spoken sentences, and that starting a task is not doing it. `start_task` adds no permission.
+- **Reminders link:** `set_reminder` takes `task_id`; `add_task`/`update_task` with `remind=true` set a reminder at the due time; finishing a task cancels it.
+- **Chat window panel** (`TasksPanel.tsx`): collapsed "Aaj ka kaam - N baqi" bar, today's plan with check-off, add box with date words, works with tools OFF.
+  Three chat-only IPC channels (`tasksList`, `tasksAdd`, `tasksAct`) plus a chat-only push channel (`tasksState`); preload and `DesktopAPI` updated; the verify
+  wiring list knows the new channels. No overlay UI, no popups, no new notifications.
+- **Tests:** `tests/tasks.check.mjs` (96: dates, plan, validation, panel actions, in 4 time zones), `tests/tasks-store.check.mjs` (28: file, recovery, caps, tools,
+  policy/audit, reminders link, IPC wiring, prompt); 6 new checks in the real Electron smoke run.
+
 ## quota-saver (on top of mic-indicator): wake mode stops burning the free Groq listening allowance
 
 Wake mode sent every speech clip to Groq Whisper (~5 requests a minute while idle, 20 of 25 were room talk). Details in `QUOTA-SAVER.md`.
