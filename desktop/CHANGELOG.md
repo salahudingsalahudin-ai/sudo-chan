@@ -20,8 +20,8 @@
 
 See `USAGE-METER.md`.
 
-# Changelog
-## Unreleased (branch `intent-routing`)
+## intent-routing (on top of integrate2)
+
 - New `src/shared/intent.ts`: `classifyIntent` (screen / task / chat, English + Roman Urdu + Urdu script) and `routeSpeech`. Default is no screenshot when unsure.
 - Wake word: with "look at my screen" ON, only utterances that point at the screen start a screenshot ("meri screen dekho", "ye kya hai"). "Sudo, kaise ho?" and "Sudo, notes.txt bana do" no longer take a screenshot; tasks reach the tool loop.
 - Live Talk window: "meri screen dekho" now starts the normal screenshot flow (same consent, countdown, sensitive-window guard and cooldown) instead of plain chat.
