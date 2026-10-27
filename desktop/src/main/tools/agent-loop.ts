@@ -40,10 +40,14 @@ export interface LoopOptions {
   onText: (text: string) => void;
   maxSteps?: number;
   maxTokens?: number;
+  /** Larger limit for a request that may have to write a file (see wantsWriteBudget). Not used for plain answers. */
+  writeMaxTokens?: number;
   temperature?: number;
   sleep?: (ms: number) => Promise<void>;
   /** Called before each tool executes (for logging/UI). */
   onToolCall?: (name: string) => void;
+  /** Called after each tool finished with its name, parsed arguments and result text (used for the compact history note). */
+  onToolResult?: (name: string, args: unknown, result: string) => void;
   /** Used for the rest of the turn if the main model keeps answering 429 (rate limits are per model). */
   fallbackModel?: string;
   /** Timing hook, one call per model round trip (no content, no secrets). */
@@ -56,6 +60,18 @@ export interface LoopOptions {
 interface LoopState {
   model: string;
   usedFallback: boolean;
+  /** The next request may contain a long write/edit, so it gets the larger max_tokens. */
+  writeBudget: boolean;
+}
+
+const WRITE_INTENT = /\b(write|create|make|edit|change|modify|fix|update|add|append|replace|rename|rewrite|refactor|save|implement|banao|bana\s?do|banado|likho|likh\s?do|likhdo|badlo|badal|theek\s?kar|thik\s?kar|sahi\s?kar|dalo|daal\s?do|jodo|jod\s?do|hatao|mita\s?do|kar\s?do)\b/i;
+
+/**
+ * Plain answers keep the small max_tokens (Groq counts the requested tokens against its tokens-per-minute budget).
+ * A request gets the larger one only if the user asked for a change, or a file was just read (an edit usually follows).
+ */
+export function wantsWriteBudget(lastUserText: string, previousCalls: string[]): boolean {
+  return WRITE_INTENT.test(lastUserText) || previousCalls.includes('read_file');
 }
 
 interface Choice {
@@ -131,7 +147,7 @@ async function post(options: LoopOptions, state: LoopState, messages: LoopMessag
       messages,
       stream: false,
       temperature: options.temperature ?? 0.4,
-      max_tokens: options.maxTokens ?? 950,
+      max_tokens: state.writeBudget && options.writeMaxTokens ? Math.max(options.writeMaxTokens, options.maxTokens ?? 950) : (options.maxTokens ?? 950),
     };
     if (withTools) {
       body.tools = options.tools.definitions;
@@ -200,7 +216,9 @@ function parseCalls(value: unknown): ToolCallMessage[] {
 export async function runToolLoop(options: LoopOptions): Promise<{ steps: number; toolCalls: number }> {
   const maxSteps = options.maxSteps ?? MAX_TOOL_STEPS;
   const messages = [...options.messages];
-  const state: LoopState = { model: options.model, usedFallback: false };
+  const lastUser = [...messages].reverse().find(m => m.role === 'user');
+  const userText = typeof lastUser?.content === 'string' ? lastUser.content : '';
+  const state: LoopState = { model: options.model, usedFallback: false, writeBudget: wantsWriteBudget(userText, []) };
   const toolNames = options.tools.definitions.map(d => d.function.name);
   let toolCalls = 0;
 
@@ -227,6 +245,7 @@ export async function runToolLoop(options: LoopOptions): Promise<{ steps: number
       return { steps: step + 1, toolCalls };
     }
     messages.push({ role: 'assistant', content: content || null, tool_calls: calls });
+    const stepCalls = calls.map(c => c.function.name);
     for (let i = 0; i < calls.length; i++) {
       const call = calls[i];
       let result: string;
@@ -245,13 +264,16 @@ export async function runToolLoop(options: LoopOptions): Promise<{ steps: number
           options.onToolCall?.(call.function.name);
           toolCalls++;
           result = await options.tools.execute(call.function.name, args, call.id, options.signal);
+          try { options.onToolResult?.(call.function.name, args, result); } catch { /* the history note must never break the turn */ }
         }
       }
       messages.push({ role: 'tool', tool_call_id: call.id, content: result });
     }
+    state.writeBudget = wantsWriteBudget(userText, stepCalls);
   }
 
   // Step limit reached: ask for a final answer without offering tools.
+  state.writeBudget = false;
   messages.push({ role: 'user', content: 'Tool step limit reached. Do not call more tools. Tell the user briefly what was done and what is still pending.' });
   const final = await post(options, state, messages, false, maxSteps);
   const text = stripThinking(typeof final.message?.content === 'string' ? final.message.content : '');
