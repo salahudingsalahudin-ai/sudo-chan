@@ -1,6 +1,7 @@
 import type { SpeechEvent } from './speech-events.js';
 import type { UsageSummary } from './usage.ts';
 import type { PanelAction, TasksView } from './tasks.ts';
+import type { LocalWakeMode } from './local-wake/types.ts';
 export type Mood = 'calm' | 'worried' | 'happy';
 export type WindowKind = 'overlay' | 'chat' | 'settings';
 export type BotSize = 'small' | 'medium' | 'large';
@@ -51,6 +52,10 @@ export interface Settings {
   screenAssistCountdown?: boolean;
   /** 0..1, how easily the user can interrupt the bot while it speaks. */
   bargeInSensitivity?: number;
+  /** On-device wake word check ('off' default). 'assist': local candidates are always sent, other clips only if the quota gate would; 'strict': only candidates. */
+  localWake?: LocalWakeMode;
+  /** 0..1, how readily the on-device check says "that was my name" (0.5 = calibrated at enrolment). */
+  localWakeSensitivity?: number;
 }
 export interface AppState {
   settings: Settings;
@@ -79,6 +84,8 @@ export interface AppState {
   approvalVisible?: boolean;
   /** 'working' while a tool is running, so the desktop bot can say "kaam kar rahi hoon...". */
   toolStatus?: 'working' | null;
+  /** Bumped whenever the on-device wake profile is saved or deleted, so the desktop bot reloads it. */
+  localWakeRevision?: number;
 }
 export interface ModelMeta {
   sizeMB: number;
@@ -196,8 +203,16 @@ export interface DesktopAPI {
   onTasks(callback: (view: TasksView) => void): () => void;
   addTaskText(text: string): Promise<TasksActionResult>;
   taskAction(id: string, action: PanelAction): Promise<TasksActionResult>;
+  /** The stored on-device wake profile (derived feature vectors, never audio), or null. Overlay (to detect) and Settings (to show). */
+  getLocalWakeProfile(): Promise<LocalWakeProfileInfo>;
+  /** Settings only: replaces the profile after enrolment. The renderer sends feature vectors; main validates the structure. */
+  saveLocalWakeProfile(profile: unknown): Promise<ActionResult>;
+  /** Settings only: deletes the profile file ("Delete my voice samples"). */
+  deleteLocalWakeProfile(): Promise<ActionResult>;
 }
 export interface TasksActionResult { ok: boolean; error?: string; view: TasksView }
+/** `profile` is the parsed file content (renderer validates it again with parseProfile); `revision` changes on every save or delete so the overlay can reload. */
+export interface LocalWakeProfileInfo { profile: unknown | null; revision: number }
 export const CHANNELS = {
   state: 'companion:state', getState: 'companion:get-state',
   chat: 'companion:open-chat', settings: 'companion:open-settings',
@@ -237,4 +252,7 @@ export const CHANNELS = {
   sendScreen: 'companion:send-screen',
   cancelScreen: 'companion:cancel-screen',
   screenConsent: 'companion:screen-consent',
+  localWakeGet: 'companion:local-wake-get',
+  localWakeSave: 'companion:local-wake-save',
+  localWakeDelete: 'companion:local-wake-delete',
 } as const;

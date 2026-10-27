@@ -18,6 +18,18 @@ Details, phrases to try and known gaps in `PLANNER.md`.
   wiring list knows the new channels. No overlay UI, no popups, no new notifications.
 - **Tests:** `tests/tasks.check.mjs` (96: dates, plan, validation, panel actions, in 4 time zones), `tests/tasks-store.check.mjs` (28: file, recovery, caps, tools,
   policy/audit, reminders link, IPC wiring, prompt); 6 new checks in the real Electron smoke run.
+## local-wake (on top of main 3c689fb): on-device "is that my name?" check before the cloud
+
+Wake mode still depended on a cloud round trip to judge every clip. Now a local check marks clips as wake-word candidates first. Details, research and scoring in `LOCAL-WAKE.md`; real-voice check in `TEST-LOCAL-WAKE.md`.
+
+- **Engine (`src/shared/local-wake/`, pure):** personalised template matching (resample to 16 kHz, MFCC + deltas, subsequence DTW, leave-one-out calibrated threshold). No model file, no download, no account. Pluggable `LocalWakeEngine` / `LocalWakeDetector` registry.
+- **Setting `localWake`** `off` (default) | `assist` | `strict`, plus `localWakeSensitivity` (0..1). Assist: candidates always go, other clips only if the old quota gate says yes and quota is healthy. Strict: only candidates. Live Talk, the 30 s window, barge-in, intent and stop logic untouched; the cloud text still decides the wake.
+- **Voice engine:** optional `localWake` callback + `decideClip(features, local)`; evaluation is sliced into 4 ms steps on the renderer thread (measured 8-9 ms CPU per second of clip audio, <2 % of a core at 30 clips a minute; no Worker needed).
+- **Limiter:** candidate budget (burst 4, 1 per 20 s) and an adaptive threshold offset (-25 % .. +15 %) steered by the cloud's answers.
+- **Settings > Voice:** "Teach her your voice saying Sudo" (5-8 takes, live level meter, quality checks, optional "Sid"), accuracy self-test ("Heard 3/3"), sensitivity, "Delete my voice samples". Nothing on the overlay.
+- **Storage:** `userData/local-wake.json`, mode 0600, atomic, validated on read and write; feature vectors only, never audio. Three IPC handlers (get: overlay+settings; save/delete: settings only).
+- **Log:** `[wake-local] candidates=N rejected=M sent=K mode=...` once a minute, counts only.
+- Tests: `tests/local-wake.check.mjs` (25) + `tests/local-wake-pipeline.check.mjs` (4); one new verify wiring check. `npm run verify` 38/38, unit tests 491 pass (462 before; two unrelated timing tests flaked under load in earlier runs, a rerun was clean). Everything is verified on synthetic audio only.
 
 ## quota-saver (on top of mic-indicator): wake mode stops burning the free Groq listening allowance
 

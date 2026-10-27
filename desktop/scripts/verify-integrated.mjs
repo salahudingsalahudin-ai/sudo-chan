@@ -77,6 +77,16 @@ function functionBody(source, header) {
   add('wiring', 'tools and screen assist default to OFF', bad.length === 0 ? 'PASS' : 'FAIL', bad.length ? `not false: ${bad.join(', ')}` : '');
 }
 {
+  // On-device wake word: off by default, profile file is 0600 and holds feature vectors only (no audio), save/delete are settings-only.
+  const settingsDefaults = /DEFAULT_SETTINGS[^=]*=\s*{([\s\S]*?)\n};/.exec(validation)?.[1] ?? '';
+  const offByDefault = /\blocalWake:\s*'off'/.test(settingsDefaults);
+  const store = read('src/main/local-wake-store.ts');
+  const mode600 = /mode:\s*0o600/.test(store) && /parseProfile\(/.test(store);
+  const noAudioStored = !/(audio|wav|dataUri|samples)/i.test(stripComments(read('src/shared/local-wake/template-engine.ts').split('export interface StoredTemplate')[1]?.split('export interface TemplateEngineData')[0] ?? 'audio'));
+  const ok = offByDefault && mode600 && noAudioStored;
+  add('wiring', 'on-device wake word: default off, profile file 0600 and validated, stores no audio', ok ? 'PASS' : 'FAIL', ok ? '' : `${offByDefault ? '' : 'localWake default is not off; '}${mode600 ? '' : 'store must write mode 0o600 through parseProfile; '}${noAudioStored ? '' : 'stored template shape mentions audio'}`);
+}
+{
   // Every handler must be limited to the window kinds we intend. Extra kinds are allowed only where listed.
   const expect = {
     cloudConfig: ['settings'], fetchCloudModels: null, quit: ['settings'], reset: ['settings'], messages: ['chat'],
@@ -84,6 +94,7 @@ function functionBody(source, header) {
     toolApprovals: ['chat'], toolApprovalReply: ['chat'], toolsStopAll: ['chat', 'overlay', 'settings'],
     usage: ['settings', 'chat'], clearKeys: ['settings'], keyStorageInfo: ['settings'],
     tasksList: ['chat'], tasksAdd: ['chat'], tasksAct: ['chat'],
+    localWakeGet: ['overlay', 'settings'], localWakeSave: ['settings'], localWakeDelete: ['settings'],
   };
   const registrations = [...index.matchAll(/\n  (handle|ipcMain\.on)\(CHANNELS\.(\w+),/g)].map((m, i, all) => ({
     name: m[2], kind: m[1], text: index.slice(m.index, all[i + 1]?.index ?? index.indexOf('\n}\n', m.index)),

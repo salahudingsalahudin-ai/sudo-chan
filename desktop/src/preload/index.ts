@@ -85,5 +85,8 @@ const api: DesktopAPI = {
   },
   addTaskText: text => ipcRenderer.invoke(CHANNELS.tasksAdd, text),
   taskAction: (id, action) => ipcRenderer.invoke(CHANNELS.tasksAct, { id, action }),
+  getLocalWakeProfile: () => ipcRenderer.invoke(CHANNELS.localWakeGet),
+  saveLocalWakeProfile: profile => ipcRenderer.invoke(CHANNELS.localWakeSave, profile),
+  deleteLocalWakeProfile: () => ipcRenderer.invoke(CHANNELS.localWakeDelete),
 };
 contextBridge.exposeInMainWorld('companion', api);
