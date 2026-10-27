@@ -20,6 +20,11 @@ First public prototype: the desktop companion for Linux, plus the website with a
 - Voice output: Google voice by default, with optional Gemini or Azure Speech voices if you add a key. Gemini's free quota is small.
 - Only the bot you are talking to moves its mouth.
 
+### Installing and updates
+- Linux packages: an AppImage and a `.deb`, with a `SHA256SUMS` file so you can check your download. Windows and macOS packages are configured but have not been built or tested yet.
+- Settings tells you, in one calm line, if a newer version exists. The check happens at most once a day, only asks GitHub for the public release list, never downloads or installs anything, and can be switched off in Settings ("Check for new versions").
+- The system tray now shows the Sudo-chan icon.
+
 ### Privacy and safety
 - Your API keys stay on your computer and are never sent to the website.
 - Audio is not saved to disk. The only exception is a voice sample you choose to register for voice lock; it stays on your computer.
@@ -33,4 +38,5 @@ First public prototype: the desktop companion for Linux, plus the website with a
 - Urdu and Roman Urdu recognition is still unreliable; a good share of short clips may not be understood.
 - The default voice is robotic. A natural voice needs a Gemini or Azure key.
 - API keys are stored on your computer but not strongly encrypted yet.
-- Features that act on your computer (files, commands) or look at your screen are not part of this release. They exist on separate development branches and will be off by default and ask first.
+- Features that act on your computer (files, commands) or look at your screen are off by default and ask before they act. They have only been tested by their developers.
+- The AppImage may need `--no-sandbox` on systems that restrict unprivileged user namespaces (for example Ubuntu 24.04). The `.deb` does not.

@@ -1,5 +1,17 @@
 # Changelog (desktop)
 
+## installer-release (on top of main 3c689fb): packaging, update check wired in
+
+- **Packaging** (`package.json` `build`): AppImage + deb for Linux, nsis (Windows) and dmg (macOS, x64 + arm64) configured but NOT built or tested here.
+  Artifact names `Sudo-chan-<version>-<os>-<arch>.<ext>`, icons in `assets/`, executable `sudo-chan`, desktop entry + category Utility,
+  maintainer/author `Sid <noreply@sudo-chan.vercel.app>` (placeholder, owner TODO). Tray icon now read from `assets/icon.png` (the old
+  `build/icon.png` path never existed, so the tray always showed a 1x1 fallback). The Linux X11 relaunch in `bootstrap.ts` is unchanged and works
+  the same packaged; `start()` still never touches `safeStorage`.
+- **Update check wired in:** `src/shared/update-check.ts` (moved from `src/main`) runs in the main process 20 s after start and is re-evaluated hourly,
+  but asks GitHub at most once per 24 h. Settings shows one calm line + a switch (`updateCheckEnabled`, default on); IPC `updateNotice` is Settings-only
+  and returns a version number only. Never in smoke runs, never a popup, never on the overlay, no download. Tests in `tests/update-check.check.mjs`.
+- Release docs: `RELEASING.md` (owner steps), root `CHANGELOG.md`, `.github/workflows/{ci,release}.yml` (checksum file is `SHA256SUMS`).
+
 ## quota-saver (on top of mic-indicator): wake mode stops burning the free Groq listening allowance
 
 Wake mode sent every speech clip to Groq Whisper (~5 requests a minute while idle, 20 of 25 were room talk). Details in `QUOTA-SAVER.md`.
