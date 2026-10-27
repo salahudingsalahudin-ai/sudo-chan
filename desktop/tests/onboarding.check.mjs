@@ -410,3 +410,12 @@ test('the wizard never blocks the app: Esc or Skip setup closes it and records i
   assert.match(css, /overflow-x: hidden/);
   assert.match(read('../src/renderer/styles.css'), /@import url\('\.\/setup\.css'\)/);
 });
+
+test('saving other settings never fails just because the (unchanged) chat shortcut is unavailable; only choosing a NEW shortcut can fail the save', () => {
+  const main = strip(read('../src/main/index.ts'));
+  const body = main.slice(main.indexOf('async function saveSettings('), main.indexOf('function setupIPC()'));
+  assert.match(body, /const registered = \(changed \|\| !state\.shortcutAvailable\) \? registerShortcut\(candidate\.shortcut\) : true;/);
+  assert.match(body, /if \(changed && !registered\) return \{ ok: false, error: 'That shortcut is already in use/);
+  assert.match(body, /state\.settings = candidate; state\.shortcutAvailable = registered;/);
+  assert.doesNotMatch(body, /\(changed \|\| !state\.shortcutAvailable\) && !registerShortcut/);
+});
