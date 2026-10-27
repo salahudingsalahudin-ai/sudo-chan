@@ -1,7 +1,10 @@
 #!/usr/bin/env node
 // TEST-ONLY: takes PNG screenshots of every first-run setup wizard screen, for people to look at (and for a reviewer to read).
 //
-//   flock <heavy.lock> node_modules/electron/dist/electron --ozone-platform=x11 scripts/onboarding-shots.mjs [outDir]
+//   flock <heavy.lock> node_modules/electron/dist/electron --ozone-platform=x11 scripts/onboarding-shots.mjs [outDir] [--app=<dir or app.asar>]
+//
+// `--app=release/linux-unpacked/resources/app.asar` (or an extracted app folder) runs the PACKAGED app code instead of ./dist: the
+// installer-e2e check that the wizard also works from inside the asar with its packed node_modules. It is still the stock Electron binary.
 //
 // (needs the built app: npm run build). It runs the real built main process inside this Electron process, with
 //   * an ISOLATED temp userData folder (never ~/.config/Sudo-chan, no single-instance clash with a running Sudo-chan),
@@ -11,10 +14,11 @@
 import { app, BrowserWindow, globalShortcut } from 'electron';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const here = dirname(fileURLToPath(import.meta.url));
+const appArg = process.argv.slice(2).find(a => a.startsWith('--app='))?.slice(6);
 const outDir = process.argv.slice(2).find(a => !a.startsWith('-') && !a.endsWith('.mjs')) ?? join(here, '../screenshots/wizard');
 mkdirSync(outDir, { recursive: true });
 const tmp = mkdtempSync(join(tmpdir(), 'sudo-chan-shots-'));
@@ -214,5 +218,6 @@ try {
 }
 }
 // Electron emits 'ready' only after the entry module finished loading, so never `await app.whenReady()` here (it would wait forever).
-await import('../dist/main/index.js');
+if (appArg) console.log('[shots] app code from', resolve(appArg));
+await import(appArg ? pathToFileURL(join(resolve(appArg), 'dist/main/index.js')).href : '../dist/main/index.js');
 app.whenReady().then(drive);

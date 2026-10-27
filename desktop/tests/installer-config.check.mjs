@@ -42,5 +42,8 @@ test('packaging: every runtime dependency is a real "dependency" (devDependencie
 });
 
 test('deb: depends lists the libraries Electron needs on Debian/Ubuntu', () => {
-  for (const lib of ['libgtk-3-0', 'libnss3', 'libxss1', 'libxtst6', 'xdg-utils']) assert.ok(pkg.build.deb.depends.includes(lib), lib);
+  for (const lib of ['libgtk-3-0', 'libnss3', 'libgbm1', 'libxss1', 'libxtst6', 'xdg-utils']) assert.ok(pkg.build.deb.depends.includes(lib), lib);
+  // Electron links libasound.so.2 (speech and microphone); on Ubuntu 24.04 the package is called libasound2t64.
+  assert.ok(pkg.build.deb.depends.includes('libasound2 | libasound2t64'));
+  assert.equal(pkg.build.deb.packageCategory, 'utils');
 });
