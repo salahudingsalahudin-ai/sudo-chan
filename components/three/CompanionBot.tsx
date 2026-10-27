@@ -304,12 +304,12 @@ export default function CompanionBot({ pointer, interactions, voice, progress }:
           </mesh>
         ))}
         {eyeX.map((x, side) => (
-          <mesh key={side} position={[x * 1.5, -0.09, 0.52]} rotation={[0, side === 0 ? -0.8 : 0.8, 0]} scale={[1.4, 0.8, 1]}>
+          <mesh key={side} position={[x * 1.45, -0.09, 0.575]} rotation={[0, side === 0 ? -0.8 : 0.8, 0]} scale={[1.4, 0.8, 1]}>
             <circleGeometry args={[0.07, 16]} />
             <meshBasicMaterial ref={node => { blush.current[side] = node; }} color={PALETTE.blush} transparent opacity={0.35} depthWrite={false} toneMapped={false} />
           </mesh>
         ))}
-        <group position={[0, -0.25, 0.618]}>
+        <group position={[0, -0.25, 0.645]}>
           <mesh ref={smile} rotation={[0, 0, Math.PI]}><torusGeometry args={[0.062, 0.012, 6, 20, Math.PI]} /><meshBasicMaterial ref={smileMat} color={PALETTE.outline} toneMapped={false} /></mesh>
           <mesh ref={openMouth} visible={false} position={[0, -0.01, 0.002]} scale={[0.06, 0.02, 1]}>
             <circleGeometry args={[1, 20]} />

@@ -82,3 +82,5 @@ main.journey :is(a,button,input,[role="button"]):focus-visible,.privacy-page a:f
 .sudo-chan-canvas:focus-visible,.static-bot:focus-visible{outline:3px solid var(--color-accent);outline-offset:-8px;border-radius:24px}
 @media(prefers-reduced-motion:reduce){.companion-svg,.companion-svg .cs-aura{animation:none}}
 .journey.is-dark-world .stage-vignette{background:radial-gradient(ellipse at center,transparent 55%,#020a1259 110%)}
+/* The status label is a span inside .demo-status; the dot rule must not squeeze it. */
+.demo-status .demo-status-label{width:auto;height:auto;border-radius:0;background:none;box-shadow:none}

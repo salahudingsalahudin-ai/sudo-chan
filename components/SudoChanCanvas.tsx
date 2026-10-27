@@ -7,7 +7,7 @@ import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import type { KeyboardEvent as ReactKeyboardEvent, MutableRefObject, ReactNode } from 'react';
 import * as THREE from 'three';
 import type { BotMood } from '@/content';
-import { clamp, isLowPower, sampleJourneyPose, sampleStoryWeights, sampleVoiceDemo, smoothstep } from '@/lib/heroScene';
+import { isLowPower, sampleJourneyPose, sampleStoryWeights, sampleVoiceDemo, smoothstep, stageDepth } from '@/lib/heroScene';
 import type { StoryWeights, VoiceDemo } from '@/lib/heroScene';
 import CompanionBot from './three/CompanionBot';
 import FloatingCards from './three/FloatingCards';
@@ -180,7 +180,7 @@ function Scene({ progress, pointer, lowPower, interactions, quietDayActive, quie
 
   useFrame(() => {
     const p = progress.current;
-    const inside = clamp((p - 0.12) / 0.16) * (1 - clamp((p - 0.82) / 0.14));
+    const inside = stageDepth(p);
     scene.background = quietDayActive ? color.set('#04101c') : color.copy(paper).lerp(deep, inside);
   });
 

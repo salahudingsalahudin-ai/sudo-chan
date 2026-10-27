@@ -50,7 +50,7 @@ export default function ListeningRing({ voice, weights, reduced }: { voice: Muta
     target.set(PALETTE.idle).lerp(listenColor, v.listen).lerp(speakColor, v.speak);
     color.current.lerp(target, Math.min(1, dt * 6));
     const level = v.level;
-    const radius = 1.32 + emphasis * 0.14;
+    const radius = 1.2 + emphasis * 0.08;
     const mesh = bars.current;
     if (mesh) {
       for (let i = 0; i < BARS; i++) {
@@ -88,21 +88,21 @@ export default function ListeningRing({ voice, weights, reduced }: { voice: Muta
   return (
     <group position={[0, 0.25, -0.75]}>
       <mesh ref={glow} scale={1}>
-        <planeGeometry args={[4.3, 4.3]} />
+        <planeGeometry args={[4, 4]} />
         <meshBasicMaterial ref={glowMat} map={texture} transparent opacity={0.25} depthWrite={false} toneMapped={false} color={PALETTE.idle} />
       </mesh>
       <mesh>
-        <torusGeometry args={[1.26, 0.012, 6, 96]} />
+        <torusGeometry args={[1.14, 0.012, 6, 96]} />
         <meshBasicMaterial ref={line} transparent opacity={0.6} depthWrite={false} toneMapped={false} color={PALETTE.idle} />
       </mesh>
       {[0, 1].map(i => (
         <mesh key={i} ref={node => { ripples.current[i] = node; }} visible={false}>
-          <torusGeometry args={[1.26, 0.01, 6, 96]} />
+          <torusGeometry args={[1.14, 0.01, 6, 96]} />
           <meshBasicMaterial transparent opacity={0} depthWrite={false} toneMapped={false} color={PALETTE.listening} />
         </mesh>
       ))}
       <instancedMesh ref={bars} args={[undefined, undefined, BARS]} frustumCulled={false}>
-        <boxGeometry args={[0.034, 1, 0.02]} />
+        <boxGeometry args={[0.028, 1, 0.02]} />
         <meshBasicMaterial toneMapped={false} color={PALETTE.idle} />
       </instancedMesh>
     </group>

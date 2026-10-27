@@ -50,8 +50,8 @@ export function WakeChip(shared: Shared) {
   usePop(group, 'voice', shared);
   useFrame(() => fadeMaterial(material.current, shared.weights.current.voice));
   return (
-    <group ref={group} position={[1.25, 1.15, 0.4]} rotation={[0, -0.25, 0]} visible={false}>
-      <mesh><planeGeometry args={[1.4, 0.44]} /><meshBasicMaterial ref={material} map={texture} transparent depthWrite={false} toneMapped={false} /></mesh>
+    <group ref={group} position={[0.8, -1.2, 0.45]} rotation={[0, -0.12, 0]} visible={false}>
+      <mesh><planeGeometry args={[1.3, 0.41]} /><meshBasicMaterial ref={material} map={texture} transparent depthWrite={false} toneMapped={false} /></mesh>
     </group>
   );
 }
@@ -153,26 +153,26 @@ function drawScreen(ctx: CanvasRenderingContext2D, w: number, h: number, fixed: 
   ctx.lineWidth = 4;
   ctx.strokeStyle = 'rgba(88,200,255,.55)';
   ctx.stroke();
-  ctx.font = `600 26px ${CARD_FONT}`;
+  ctx.font = `600 32px ${CARD_FONT}`;
   ctx.fillStyle = '#9ec4d3';
-  ctx.fillText('draft.ts  ·  example only', 52, 78);
-  ctx.font = '30px ui-monospace, Menlo, Consolas, monospace';
+  ctx.fillText('draft.ts  ·  example only', 52, 84);
+  ctx.font = '46px ui-monospace, Menlo, Consolas, monospace';
   const lines: Array<[string, string, string]> = [
-    ['01', '#58d9ee', 'const response = await solve(problem);'],
-    ['02', '#8ee5b8', 'if (response.success) {'],
-    ['03', fixed ? '#84f2c2' : '#ffb49a', fixed ? '  return response.answer;' : '  return response.anser;'],
+    ['01', '#58d9ee', 'const answer = ask(q);'],
+    ['02', '#8ee5b8', 'if (answer.ok) {'],
+    ['03', fixed ? '#84f2c2' : '#ffb49a', fixed ? '  return answer.text;' : '  return answer.txet;'],
     ['04', '#8ee5b8', '}'],
   ];
   lines.forEach(([n, color, text], i) => {
-    const y = 160 + i * 66;
+    const y = 175 + i * 80;
     ctx.fillStyle = '#58d9ee';
     ctx.fillText(n, 52, y);
     ctx.fillStyle = i === 2 ? color : '#d8e6ec';
-    ctx.fillText(text, 112, y);
+    ctx.fillText(text, 124, y);
   });
-  ctx.font = '600 30px ui-monospace, Menlo, Consolas, monospace';
+  ctx.font = '600 38px ui-monospace, Menlo, Consolas, monospace';
   ctx.fillStyle = fixed ? '#6ef2c8' : '#ff927a';
-  ctx.fillText(fixed ? '✓ fixed · back in your flow' : '⨯ property does not exist', 52, 470);
+  ctx.fillText(fixed ? '✓ fixed' : '⨯ not found', 52, 500);
 }
 
 // Scene 05: she looks only after a click. A framed view of "your screen" with a consent button below it.
@@ -231,21 +231,21 @@ export function ScreenFrame(shared: Shared & { progress: { current: number } }) 
     // One slow scan line sweeps the frame, then rests.
     const u = shared.reduced ? 1 : (frame.clock.elapsedTime % 5) / 5;
     const sweeping = u < 0.6 ? smoothstep(0, 0.1, u) * (1 - smoothstep(0.5, 0.6, u)) : 0;
-    if (scan.current) scan.current.position.y = THREE.MathUtils.lerp(0.52, -0.52, clamp(u / 0.6));
+    if (scan.current) scan.current.position.y = THREE.MathUtils.lerp(0.46, -0.46, clamp(u / 0.6));
     if (scanMat.current) scanMat.current.opacity = sweeping * 0.7 * w;
   });
   const corners: Array<[number, number]> = [[-1, 1], [1, 1], [-1, -1], [1, -1]];
   return (
-    <group ref={group} position={[-1.0, 0.25, -0.35]} rotation={[0, 0.2, 0]} visible={false}>
-      <mesh renderOrder={10}><planeGeometry args={[2.2, 1.245]} /><meshBasicMaterial ref={screenMat} map={textures.stuck} transparent depthWrite={false} toneMapped={false} /></mesh>
+    <group ref={group} position={[1.85, 0.45, -0.1]} rotation={[0, -0.3, 0]} visible={false}>
+      <mesh renderOrder={10}><planeGeometry args={[1.8, 1.02]} /><meshBasicMaterial ref={screenMat} map={textures.stuck} transparent depthWrite={false} toneMapped={false} /></mesh>
       {corners.map(([sx, sy], i) => (
-        <group key={i} position={[sx * 1.16, sy * 0.68, 0.02]}>
-          <mesh position={[-sx * 0.09, 0, 0]} renderOrder={11}><boxGeometry args={[0.2, 0.034, 0.02]} /><meshBasicMaterial ref={node => { if (node) bracketMats.current[i * 2] = node; }} color="#58c8ff" transparent toneMapped={false} /></mesh>
-          <mesh position={[0, -sy * 0.09, 0]} renderOrder={11}><boxGeometry args={[0.034, 0.2, 0.02]} /><meshBasicMaterial ref={node => { if (node) bracketMats.current[i * 2 + 1] = node; }} color="#58c8ff" transparent toneMapped={false} /></mesh>
+        <group key={i} position={[sx * 0.95, sy * 0.55, 0.02]}>
+          <mesh position={[-sx * 0.09, 0, 0]} renderOrder={11}><boxGeometry args={[0.18, 0.03, 0.02]} /><meshBasicMaterial ref={node => { if (node) bracketMats.current[i * 2] = node; }} color="#58c8ff" transparent toneMapped={false} /></mesh>
+          <mesh position={[0, -sy * 0.09, 0]} renderOrder={11}><boxGeometry args={[0.03, 0.18, 0.02]} /><meshBasicMaterial ref={node => { if (node) bracketMats.current[i * 2 + 1] = node; }} color="#58c8ff" transparent toneMapped={false} /></mesh>
         </group>
       ))}
-      <mesh ref={scan} position={[0, 0.5, 0.02]} renderOrder={12}><planeGeometry args={[2.1, 0.03]} /><meshBasicMaterial ref={scanMat} color="#8fe9ff" transparent opacity={0} depthWrite={false} toneMapped={false} /></mesh>
-      <mesh position={[0.1, -0.98, 0.9]} rotation={[0, -0.1, 0]} renderOrder={13}><planeGeometry args={[1.6, 0.375]} /><meshBasicMaterial ref={chipMat} map={textures.chipA} transparent depthWrite={false} toneMapped={false} /></mesh>
+      <mesh ref={scan} position={[0, 0.5, 0.02]} renderOrder={12}><planeGeometry args={[1.7, 0.03]} /><meshBasicMaterial ref={scanMat} color="#8fe9ff" transparent opacity={0} depthWrite={false} toneMapped={false} /></mesh>
+      <mesh position={[0, -0.82, 0.3]} renderOrder={13}><planeGeometry args={[1.5, 0.35]} /><meshBasicMaterial ref={chipMat} map={textures.chipA} transparent depthWrite={false} toneMapped={false} /></mesh>
     </group>
   );
 }
@@ -278,16 +278,16 @@ export function PrivacyLock(shared: Shared) {
   return (
     <group ref={group} visible={false}>
       <mesh position={[0, 0.2, -0.5]}>
-        <sphereGeometry args={[1.75, 32, 22]} />
+        <sphereGeometry args={[1.5, 28, 20]} />
         <meshBasicMaterial ref={domeMat} color={PALETTE.cyan} wireframe transparent opacity={0.1} depthWrite={false} toneMapped={false} />
       </mesh>
-      <group ref={lock} position={[1.15, -0.2, 0.55]}>
+      <group ref={lock} position={[1.1, -0.25, 0.55]}>
         <mesh position={[0, 0.34, 0]} material={shackle}><torusGeometry args={[0.2, 0.055, 12, 32, Math.PI]} /></mesh>
         <RoundedBox args={[0.66, 0.52, 0.28]} radius={0.12} smoothness={4} material={body} />
         <mesh position={[0, 0.04, 0.145]}><circleGeometry args={[0.055, 20]} /><meshBasicMaterial color="#8fe9ff" toneMapped={false} /></mesh>
         <mesh position={[0, -0.05, 0.145]}><planeGeometry args={[0.03, 0.1]} /><meshBasicMaterial color="#8fe9ff" toneMapped={false} /></mesh>
       </group>
-      <mesh position={[1.1, -0.92, 0.6]} rotation={[0, -0.12, 0]}><planeGeometry args={[1.5, 0.35]} /><meshBasicMaterial ref={chipMat} map={chip} transparent depthWrite={false} toneMapped={false} /></mesh>
+      <mesh position={[0.78, -1.18, 0.6]} rotation={[0, -0.12, 0]}><planeGeometry args={[1.4, 0.33]} /><meshBasicMaterial ref={chipMat} map={chip} transparent depthWrite={false} toneMapped={false} /></mesh>
     </group>
   );
 }
