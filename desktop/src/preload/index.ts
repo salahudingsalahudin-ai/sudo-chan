@@ -51,6 +51,8 @@ const api: DesktopAPI = {
   },
   transcribeAudio: (base64Audio, mimeType, language, hint) => ipcRenderer.invoke(CHANNELS.transcribeAudio, { base64Audio, mimeType, language, hint }),
   playAudio: dataUri => ipcRenderer.invoke(CHANNELS.playAudio, dataUri),
+  sendScreen: payload => ipcRenderer.invoke(CHANNELS.sendScreen, payload),
+  cancelScreen: () => ipcRenderer.invoke(CHANNELS.cancelScreen),
   clearMessages: () => ipcRenderer.invoke(CHANNELS.clear),
   quit: () => ipcRenderer.invoke(CHANNELS.quit),
 };

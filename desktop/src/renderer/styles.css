@@ -1119,3 +1119,10 @@ body[data-window=overlay]{overflow:hidden}.overlay-room{position:relative;width:
 /* Wake-word indicator under the companion pill */
 .wake-indicator{margin-top:6px;border:1px solid rgba(149,220,228,.45);background:rgba(16,29,37,.82);color:#cfe9ee;font:600 11px/1 inherit;padding:5px 10px;border-radius:999px;cursor:pointer}
 .wake-indicator.is-paused{opacity:.7;border-style:dashed}
+
+/* Screen assist: overlay indicator and screenshot thumbnail in chat */
+.screen-badge{position:absolute;top:4px;left:50%;transform:translateX(-50%);z-index:5;border:1px solid rgba(149,220,228,.6);background:rgba(16,29,37,.92);color:#e6f6f8;font:700 11px/1 inherit;padding:6px 10px;border-radius:999px;cursor:pointer;white-space:nowrap}
+.screen-badge.is-sent{border-color:rgba(120,220,160,.6);cursor:default}
+.message-shot{margin:0 0 6px}
+.message-shot img{display:block;max-width:160px;border-radius:8px;border:1px solid rgba(149,220,228,.35)}
+.message-shot figcaption{font-size:10.5px;opacity:.75;margin-top:3px}

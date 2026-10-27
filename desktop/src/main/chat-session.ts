@@ -23,7 +23,8 @@ export class ChatSession {
     }
     this.error = '';
     const reply: ChatMessage = { id: crypto.randomUUID(), role: 'assistant', text: '', status: 'streaming' };
-    this.messages.push({ id: crypto.randomUUID(), role: 'user', text: value.trim() }, reply);
+    const attachment = options?.vision?.thumbnail ? { kind: 'screen' as const, thumbnail: options.vision.thumbnail } : undefined;
+    this.messages.push({ id: crypto.randomUUID(), role: 'user', text: value.trim(), ...(attachment ? { attachment } : {}) }, reply);
     this.messages = this.messages.slice(-100);
     const request = { controller: new AbortController(), reply };
     this.active = request;

@@ -1,6 +1,8 @@
 import { freemem, totalmem } from 'node:os';
 import type { AIMode, CloudProviderId, ModelMeta } from '../shared/types.js';
 import { CLOUD_PRESETS } from '../shared/validation.js';
+import type { VisionTarget } from '../shared/screen-assist.ts';
+import { runVisionChat, VisionError } from './vision-chat.ts';
 
 export function normalizeCloudModel(provider: CloudProviderId, model: string): string {
   let clean = model.trim();
@@ -126,7 +128,7 @@ export function buildSystemPrompt(options?: {
     modelFact,
     providerFact,
     '- Real Desktop Features: Pomodoro focus timer, live system RAM health alert, Live Talk voice companion, cute customizable glasses, quiet standby overlay.',
-    '- Real System Boundaries: Privacy-first desktop companion. Cannot view desktop screen pixels, cannot modify or delete OS files directly, cannot browse the live web.',
+    '- Real System Boundaries: Privacy-first desktop companion. Can see the screen of the user ONLY on a turn where a screenshot is attached to the message (when the user enabled screen assist and said your name or pressed the eye button); on every other turn you cannot see the screen and must say so instead of guessing. Cannot modify or delete OS files directly, cannot browse the live web.',
   ].filter(Boolean).join('\n');
 }
 
@@ -197,6 +199,8 @@ export interface StreamOptions {
   heavy?: boolean;
   cloud?: StoredCloudConfig;
   voice?: boolean;
+  /** One screenshot turn: the image goes only to the vision targets, never into history or logs. */
+  vision?: { dataUri: string; thumbnail?: string; targets: VisionTarget[]; fallbackText: string };
 }
 type Fetch = typeof fetch;
 export class LocalAIError extends Error {}
@@ -649,6 +653,24 @@ export class LocalAI {
   }
 
   async stream(model: string, messages: ModelMessage[], signal: AbortSignal, onText: (text: string) => void, options?: StreamOptions) {
+    if (options?.vision) {
+      try {
+        const result = await runVisionChat({
+          targets: options.vision.targets,
+          system: buildSystemPrompt({ voice: options.voice, provider: 'cloud vision' }),
+          history: messages,
+          fallbackText: options.vision.fallbackText,
+          imageDataUri: options.vision.dataUri,
+          signal,
+          log: line => console.info(line),
+        });
+        onText(result.text);
+        return;
+      } catch (error) {
+        if (error instanceof VisionError) throw new LocalAIError(error.message);
+        throw error;
+      }
+    }
     if (options?.mode === 'cloud' && options.cloud) {
       return this.streamCloud(options.cloud, messages, signal, onText, options);
     }
