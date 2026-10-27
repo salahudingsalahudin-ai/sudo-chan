@@ -42,7 +42,7 @@ function drawCard(def: CardDef) {
 
 // Four UI cards orbiting her. Each has a sharp and a blurred texture: the further a card is from her (the focus plane),
 // the more of the blurred one shows. A cheap, GPU-friendly depth-of-field that also works on low-power machines.
-export default function FloatingCards({ weights, reduced }: { weights: MutableRefObject<StoryWeights>; reduced: boolean }) {
+export default function FloatingCards({ weights, reduced, mobile }: { weights: MutableRefObject<StoryWeights>; reduced: boolean; mobile: MutableRefObject<boolean> }) {
   const viewport = useThree(state => state.viewport);
   const root = useRef<THREE.Group>(null);
   const items = useRef<Array<{ group: THREE.Group | null; sharp: THREE.MeshBasicMaterial | null; soft: THREE.MeshBasicMaterial | null }>>(
@@ -58,7 +58,7 @@ export default function FloatingCards({ weights, reduced }: { weights: MutableRe
     const w = weights.current.cards;
     const group = root.current;
     if (!group) return;
-    group.visible = w > 0.01;
+    group.visible = w > 0.01 && !mobile.current;
     if (!group.visible) return;
     const t = reduced ? 0.6 : state.clock.elapsedTime;
     CARDS.forEach((_, i) => {

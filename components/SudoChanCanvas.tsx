@@ -97,8 +97,8 @@ function Rig({ progress, pointer, interactions, quietDayActive, quietDayMoment, 
     } else if (mobile) {
       // Phones and narrow windows: she sits above the text and steps out of the way once the hero is over.
       x = 0;
-      y = 1.0 + bob;
-      scale = 0.6 * Math.max(heroOnly, 0.0001);
+      y = 1.15 + bob;
+      scale = 0.46 * Math.max(heroOnly, 0.0001);
       rotY = 0;
       rotX = 0.04;
       camZ = 7.1;
@@ -195,7 +195,7 @@ function Scene({ progress, pointer, lowPower, interactions, quietDayActive, quie
       <Rig progress={progress} pointer={pointer} interactions={interactions} quietDayActive={quietDayActive} quietDayMoment={quietDayMoment} voice={voice} weights={weights} mobileRef={mobileRef}>
         <ListeningRing voice={voice} weights={weights} reduced={reduced} />
         <GlbBot fallback={<CompanionBot pointer={pointer} interactions={interactions} voice={voice} progress={progress} />} />
-        <FloatingCards weights={weights} reduced={reduced} />
+        <FloatingCards weights={weights} reduced={reduced} mobile={mobileRef} />
         <WakeChip {...shared} />
         <ApprovalCard {...shared} />
         <ScreenFrame {...shared} progress={progress} />
