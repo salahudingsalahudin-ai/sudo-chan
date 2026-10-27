@@ -52,6 +52,7 @@ function StoryClock({ progress, voice, weights, reduced, quiet, mobile }: { prog
     smooth.current = THREE.MathUtils.damp(smooth.current, progress.current ?? 0, 6.5, dt);
     mobile.current = state.size.width < 768;
     const w = quiet ? ZERO_WEIGHTS : sampleStoryWeights(smooth.current);
+    if (!quiet && !mobile.current) w.screen *= smoothstep(1180, 1260, state.size.width);
     weights.current = w;
     const demo = sampleVoiceDemo(state.clock.elapsedTime, reduced);
     // In the voice scene she is shown listening, whatever the idle cycle is doing.
@@ -93,8 +94,11 @@ function Rig({ progress, pointer, interactions, quietDayActive, quietDayMoment, 
       const wc = weights.current.cards;
       x = THREE.MathUtils.lerp(x, fit.side * viewW, wc);
       scale *= THREE.MathUtils.lerp(1, fit.scale, wc);
-      // Small desktop windows: shrink her in the screen-help scene so she clears the wide demo panel on the left.
-      scale *= 1 - 0.17 * (1 - smoothstep(1100, 1300, state.size.width)) * weights.current.screen;
+      // Small desktop windows: the wide demo panel leaves no room for the screen prop, so it is hidden (see StoryClock)
+      // and she steps to the right and gets a little smaller instead.
+      const narrow = (1 - smoothstep(1180, 1260, state.size.width)) * sampleStoryWeights(p).screen;
+      x += narrow * 0.07 * viewW;
+      scale *= 1 - 0.12 * narrow;
     }
     if (quietDayActive) {
       x = mobile ? 0.32 : viewW * 0.2;
