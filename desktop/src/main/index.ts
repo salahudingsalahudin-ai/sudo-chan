@@ -436,6 +436,19 @@ function authorize(event: IpcMainInvokeEvent | Electron.IpcMainEvent, kind?: Win
   }
   return win;
 }
+/**
+ * For one-way messages (ipcMain.on): there is no caller to reject to, so a throw becomes an uncaught exception in the main
+ * process and Electron shows an error dialog. A window that is closing (pagehide -> speech stop) is no longer "known" at that
+ * moment, so unauthorised or late messages are dropped quietly instead.
+ */
+function authorizeOrDrop(event: Electron.IpcMainEvent, kind?: WindowKind | WindowKind[]): boolean {
+  try {
+    authorize(event, kind);
+    return true;
+  } catch {
+    return false;
+  }
+}
 function createWindow(kind: WindowKind) {
   const isOverlay = kind === 'overlay';
   const [width, height] = isOverlay ? BOT_DIMENSIONS[state.settings.botSize] : kind === 'chat' ? [460, 650] : [780, 760];
@@ -1126,7 +1139,7 @@ function setupIPC() {
   // Compatibility only: speech state is owned by CHANNELS.speechEvent below.
   handle(CHANNELS.setIsSpeaking, () => ({ ok: true }));
   ipcMain.on(CHANNELS.speechEvent, (event, payload: unknown) => {
-    authorize(event, ['overlay', 'chat']);
+    if (!authorizeOrDrop(event, ['overlay', 'chat'])) return;
     const evt = parseSpeechEvent(payload);
     if (!evt) return;
     if (evt.type !== 'level') console.info(`[TTS] speech:${evt.type}${evt.type === 'stop' ? ` reason=${evt.reason}` : ''}`);
@@ -1192,12 +1205,12 @@ function setupIPC() {
   });
   handle(CHANNELS.quit, () => app.quit(), 'settings');
   ipcMain.on(CHANNELS.caption, (event, visible: unknown) => {
-    authorize(event, 'overlay');
+    if (!authorizeOrDrop(event, 'overlay')) return;
     const next = Boolean(visible);
     if (Boolean(state.captionVisible) !== next) { state.captionVisible = next; publish(); }
   });
   ipcMain.on(CHANNELS.interactive, (event, interactive: unknown) => {
-    authorize(event, 'overlay');
+    if (!authorizeOrDrop(event, 'overlay')) return;
     if (typeof interactive === 'boolean' && process.platform !== 'linux') {
       ignoreMouse = !interactive; overlay.setIgnoreMouseEvents(ignoreMouse, { forward: true });
     }

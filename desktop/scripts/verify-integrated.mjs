@@ -132,7 +132,9 @@ function functionBody(source, header) {
     if (!kinds.length || tolerated.length || missing.length) problems.push(`${name}: wanted [${wanted}] got [${kinds}]`);
   }
   for (const reg of registrations.filter(r => r.kind === 'ipcMain.on')) {
-    if (!/authorize\(event/.test(reg.text)) problems.push(`${reg.name}: ipcMain.on handler without authorize()`);
+    // One-way messages have no caller to reject to: a throw would become an uncaught main-process exception (an error dialog), so they must drop quietly.
+    if (!/authorizeOrDrop\(event/.test(reg.text)) problems.push(`${reg.name}: ipcMain.on handler without authorizeOrDrop()`);
+    if (/[^a-zA-Z]authorize\(event/.test(reg.text)) problems.push(`${reg.name}: ipcMain.on handler calls authorize() directly (it throws)`);
   }
   add('wiring', 'IPC handlers use authorize() with the intended window kinds', problems.length === 0 ? 'PASS' : 'FAIL', problems.join('\n'));
 }
