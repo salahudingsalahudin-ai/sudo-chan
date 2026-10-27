@@ -2,7 +2,7 @@ import * as THREE from 'three';
 
 // Palette. The listening/speaking colours match the glow on the desktop companion (green = listening, violet = speaking).
 export const PALETTE = {
-  skin: '#fbe7e0',
+  skin: '#f9d9cc',
   skinShade: '#f0bfc0',
   hair: '#33337f',
   hairLight: '#5a5fd0',

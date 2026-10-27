@@ -14,7 +14,7 @@ export const SCENE_CENTERS = [0.02, 0.177, 0.335, 0.494, 0.652, 0.811, 0.975] as
 // side is a fraction of the viewport width (positive = right half), so props always stay clear of the text column.
 export type SceneKeyframe = { side: number; y: number; scale: number; rotY: number; rotX: number; camZ: number };
 export const SCENE_KEYFRAMES: readonly SceneKeyframe[] = [
-  { side: 0.255, y: 0.0, scale: 1.0, rotY: -0.2, rotX: 0.0, camZ: 7.0 }, // 01 hello: text left, her right
+  { side: 0.28, y: 0.0, scale: 1.0, rotY: -0.2, rotX: 0.0, camZ: 7.0 }, // 01 hello: text left, her right
   { side: -0.255, y: 0.02, scale: 1.04, rotY: 0.24, rotX: -0.02, camZ: 6.8 }, // 02 voice: text right, her left
   { side: 0.255, y: 0.1, scale: 0.94, rotY: -0.22, rotX: 0.02, camZ: 7.0 }, // 03 what she does
   { side: -0.275, y: 0.06, scale: 0.96, rotY: 0.2, rotX: 0.0, camZ: 7.0 }, // 04 tools: approval card

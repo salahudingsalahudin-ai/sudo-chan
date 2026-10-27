@@ -188,10 +188,10 @@ function Scene({ progress, pointer, lowPower, interactions, quietDayActive, quie
   return (
     <>
       <StoryClock progress={progress} voice={voice} weights={weights} reduced={reduced} quiet={quietDayActive} mobile={mobileRef} />
-      <ambientLight intensity={1.05} />
-      <directionalLight position={[-3, 5, 6]} intensity={1.6} />
-      <directionalLight position={[4, 2, 3]} intensity={0.55} color="#cfe9ff" />
-      <directionalLight position={[3, 3.5, -4]} intensity={1.4} color="#7ff3ff" />
+      <ambientLight intensity={0.9} />
+      <directionalLight position={[-3, 5, 6]} intensity={1.25} />
+      <directionalLight position={[4, 2, 3]} intensity={0.35} color="#dbeaff" />
+      <directionalLight position={[3, 3.5, -4]} intensity={0.6} color="#7ff3ff" />
       <Rig progress={progress} pointer={pointer} interactions={interactions} quietDayActive={quietDayActive} quietDayMoment={quietDayMoment} voice={voice} weights={weights} mobileRef={mobileRef}>
         <ListeningRing voice={voice} weights={weights} reduced={reduced} />
         <GlbBot fallback={<CompanionBot pointer={pointer} interactions={interactions} voice={voice} progress={progress} />} />
@@ -205,7 +205,7 @@ function Scene({ progress, pointer, lowPower, interactions, quietDayActive, quie
       {!lowPower && <Sparkles count={26} scale={[11, 7, 6]} size={1.3} speed={0.14} opacity={0.2} color="#80edfa" />}
       {!lowPower && (
         <EffectComposer multisampling={0}>
-          <Bloom intensity={0.45} luminanceThreshold={0.9} luminanceSmoothing={0.25} mipmapBlur />
+          <Bloom intensity={0.45} luminanceThreshold={1.12} luminanceSmoothing={0.2} mipmapBlur />
           <Vignette eskil={false} offset={0.17} darkness={0.22} />
         </EffectComposer>
       )}
@@ -242,6 +242,7 @@ export default function SudoChanCanvas({ progress, pointer, interactions, quietD
   return (
     <div ref={container} className="sudo-chan-canvas" role="button" tabIndex={0} aria-label="Sudo-chan. Press Enter or Space to say hello." onKeyDown={onKeyDown}>
       <Canvas
+        flat
         frameloop={active ? 'always' : 'never'}
         dpr={[1, lowPower ? 1.25 : 1.5]}
         camera={{ position: [0, 0.1, 7.2], fov: 34 }}

@@ -130,14 +130,14 @@ export function ApprovalCard(shared: Shared) {
   });
   return (
     <group ref={group} position={[0.1, -0.7, 0.8]} rotation={[0, 0.12, 0]} visible={false}>
-      <mesh><planeGeometry args={[1.9, 1.15]} /><meshBasicMaterial ref={cardMat} map={textures.card} transparent depthWrite={false} toneMapped={false} /></mesh>
-      <mesh position={[-0.12, -0.36, 0.01]}><planeGeometry args={[0.6, 0.225]} /><meshBasicMaterial ref={denyMat} map={textures.deny} transparent depthWrite={false} toneMapped={false} /></mesh>
+      <mesh renderOrder={10}><planeGeometry args={[1.9, 1.15]} /><meshBasicMaterial ref={cardMat} map={textures.card} transparent depthWrite={false} toneMapped={false} /></mesh>
+      <mesh position={[-0.12, -0.36, 0.01]} renderOrder={11}><planeGeometry args={[0.6, 0.225]} /><meshBasicMaterial ref={denyMat} map={textures.deny} transparent depthWrite={false} toneMapped={false} /></mesh>
       <group ref={allow} position={[0.62, -0.36, 0.01]}>
-        <mesh><planeGeometry args={[0.6, 0.225]} /><meshBasicMaterial ref={allowMat} map={textures.allow} transparent depthWrite={false} toneMapped={false} /></mesh>
+        <mesh renderOrder={11}><planeGeometry args={[0.6, 0.225]} /><meshBasicMaterial ref={allowMat} map={textures.allow} transparent depthWrite={false} toneMapped={false} /></mesh>
       </group>
       <group ref={cursor}>
-        <mesh position={[0.012, -0.012, -0.002]} scale={1.12}><shapeGeometry args={[cursorShape]} /><meshBasicMaterial color="#04101c" transparent depthWrite={false} /></mesh>
-        <mesh><shapeGeometry args={[cursorShape]} /><meshBasicMaterial ref={cursorMat} color="#ffffff" transparent depthWrite={false} toneMapped={false} /></mesh>
+        <mesh position={[0.012, -0.012, -0.002]} scale={1.12} renderOrder={12}><shapeGeometry args={[cursorShape]} /><meshBasicMaterial color="#04101c" transparent depthWrite={false} /></mesh>
+        <mesh renderOrder={13}><shapeGeometry args={[cursorShape]} /><meshBasicMaterial ref={cursorMat} color="#ffffff" transparent depthWrite={false} toneMapped={false} /></mesh>
       </group>
     </group>
   );
@@ -237,15 +237,15 @@ export function ScreenFrame(shared: Shared & { progress: { current: number } }) 
   const corners: Array<[number, number]> = [[-1, 1], [1, 1], [-1, -1], [1, -1]];
   return (
     <group ref={group} position={[-1.0, 0.25, -0.35]} rotation={[0, 0.2, 0]} visible={false}>
-      <mesh><planeGeometry args={[2.2, 1.245]} /><meshBasicMaterial ref={screenMat} map={textures.stuck} transparent depthWrite={false} toneMapped={false} /></mesh>
+      <mesh renderOrder={10}><planeGeometry args={[2.2, 1.245]} /><meshBasicMaterial ref={screenMat} map={textures.stuck} transparent depthWrite={false} toneMapped={false} /></mesh>
       {corners.map(([sx, sy], i) => (
         <group key={i} position={[sx * 1.16, sy * 0.68, 0.02]}>
-          <mesh position={[-sx * 0.09, 0, 0]}><boxGeometry args={[0.2, 0.034, 0.02]} /><meshBasicMaterial ref={node => { if (node) bracketMats.current[i * 2] = node; }} color="#58c8ff" transparent toneMapped={false} /></mesh>
-          <mesh position={[0, -sy * 0.09, 0]}><boxGeometry args={[0.034, 0.2, 0.02]} /><meshBasicMaterial ref={node => { if (node) bracketMats.current[i * 2 + 1] = node; }} color="#58c8ff" transparent toneMapped={false} /></mesh>
+          <mesh position={[-sx * 0.09, 0, 0]} renderOrder={11}><boxGeometry args={[0.2, 0.034, 0.02]} /><meshBasicMaterial ref={node => { if (node) bracketMats.current[i * 2] = node; }} color="#58c8ff" transparent toneMapped={false} /></mesh>
+          <mesh position={[0, -sy * 0.09, 0]} renderOrder={11}><boxGeometry args={[0.034, 0.2, 0.02]} /><meshBasicMaterial ref={node => { if (node) bracketMats.current[i * 2 + 1] = node; }} color="#58c8ff" transparent toneMapped={false} /></mesh>
         </group>
       ))}
-      <mesh ref={scan} position={[0, 0.5, 0.02]}><planeGeometry args={[2.1, 0.03]} /><meshBasicMaterial ref={scanMat} color="#8fe9ff" transparent opacity={0} depthWrite={false} toneMapped={false} /></mesh>
-      <mesh position={[0.1, -0.98, 0.9]} rotation={[0, -0.1, 0]}><planeGeometry args={[1.6, 0.375]} /><meshBasicMaterial ref={chipMat} map={textures.chipA} transparent depthWrite={false} toneMapped={false} /></mesh>
+      <mesh ref={scan} position={[0, 0.5, 0.02]} renderOrder={12}><planeGeometry args={[2.1, 0.03]} /><meshBasicMaterial ref={scanMat} color="#8fe9ff" transparent opacity={0} depthWrite={false} toneMapped={false} /></mesh>
+      <mesh position={[0.1, -0.98, 0.9]} rotation={[0, -0.1, 0]} renderOrder={13}><planeGeometry args={[1.6, 0.375]} /><meshBasicMaterial ref={chipMat} map={textures.chipA} transparent depthWrite={false} toneMapped={false} /></mesh>
     </group>
   );
 }

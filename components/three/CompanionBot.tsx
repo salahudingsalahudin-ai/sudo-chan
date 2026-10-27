@@ -72,9 +72,9 @@ export default function CompanionBot({ pointer, interactions, voice, progress }:
   const kit = useMemo(() => {
     const rim = { color: PALETTE.cyan, power: 2.2, strength: 0.75 };
     return {
-      skin: makeToonMaterial(PALETTE.skin, { ...rim, strength: 0.45 }),
-      hair: Object.assign(makeToonMaterial(PALETTE.hair, rim), { side: THREE.DoubleSide }),
-      hairLight: makeToonMaterial(PALETTE.hairLight, rim),
+      skin: makeToonMaterial(PALETTE.skin, { ...rim, strength: 0.3 }),
+      hair: Object.assign(makeToonMaterial(PALETTE.hair, { ...rim, strength: 0.4 }), { side: THREE.DoubleSide }),
+      hairLight: makeToonMaterial(PALETTE.hairLight, { ...rim, strength: 0.4 }),
       jacket: makeToonMaterial(PALETTE.jacket, { ...rim, strength: 0.6 }),
       trim: makeToonMaterial(PALETTE.jacketTrim, rim),
       outline: new THREE.MeshBasicMaterial({ color: PALETTE.outline, side: THREE.BackSide }),
@@ -84,7 +84,7 @@ export default function CompanionBot({ pointer, interactions, voice, progress }:
         face: new THREE.SphereGeometry(0.7, 48, 36),
         hairBack: new THREE.SphereGeometry(0.8, 40, 28, Math.PI - 0.34, Math.PI + 0.68, 0, 2.35),
         hairCap: new THREE.SphereGeometry(0.79, 40, 20, 0, Math.PI * 2, 0, 1.08),
-        bang: new THREE.ConeGeometry(0.1, 0.44, 8, 1),
+        bang: new THREE.ConeGeometry(0.125, 0.4, 10, 1),
         lock: new THREE.CapsuleGeometry(0.1, 0.5, 6, 10),
         cup: new THREE.CylinderGeometry(0.2, 0.2, 0.14, 24),
         torso: new THREE.CapsuleGeometry(0.42, 0.34, 8, 24),
@@ -152,8 +152,8 @@ export default function CompanionBot({ pointer, interactions, voice, progress }:
       if (eye) eye.scale.y = Math.max(0.06, 1 - closed * 0.94 - squint);
       const iris = irises.current[side];
       if (iris) {
-        iris.position.x = THREE.MathUtils.damp(iris.position.x, gx * 0.034, 9, dt);
-        iris.position.y = THREE.MathUtils.damp(iris.position.y, -gy * 0.026, 9, dt);
+        iris.position.x = THREE.MathUtils.damp(iris.position.x, gx * 0.03, 9, dt);
+        iris.position.y = THREE.MathUtils.damp(iris.position.y, -0.178 - gy * 0.022, 9, dt);
       }
       const white = sclera.current[side];
       if (white) white.color.copy(scratch.white).lerp(scratch.red, interactions.rednessRef.current);
@@ -198,7 +198,7 @@ export default function CompanionBot({ pointer, interactions, voice, progress }:
     if (v.listen > 0.02) target.current.lerp(new THREE.Color(PALETTE.listening), v.listen);
     if (v.speak > 0.02) target.current.lerp(new THREE.Color(PALETTE.speaking), v.speak);
     ledColor.current.lerp(target.current, Math.min(1, dt * 5));
-    const pulse = 1.4 + v.level * 1.8 + (reduced ? 0 : Math.sin(t * 2.2) * 0.18);
+    const pulse = 2.3 + v.level * 1.8 + (reduced ? 0 : Math.sin(t * 2.2) * 0.18);
     leds.current.forEach(m => { if (m) m.color.copy(ledColor.current).multiplyScalar(pulse); });
   });
 
@@ -230,14 +230,14 @@ export default function CompanionBot({ pointer, interactions, voice, progress }:
           <mesh geometry={kit.geo.hairCap} material={kit.outline} scale={1.045} />
         </group>
         {/* Fringe */}
-        {[-0.54, -0.36, -0.18, 0, 0.18, 0.36, 0.54].map((x, i) => (
+        {[-0.6, -0.45, -0.3, -0.15, 0, 0.15, 0.3, 0.45, 0.6].map((x, i) => (
           <mesh
             key={x}
             geometry={kit.geo.bang}
             material={i % 3 === 1 ? kit.hairLight : kit.hair}
-            position={[x * 1.02, 0.4 - Math.abs(x) * 0.12, Math.sqrt(Math.max(0.1, 0.624 - 0.109 - x * x * 1.04)) + 0.05]}
-            rotation={[Math.PI - 0.12, x * -0.25, x * 0.5]}
-            scale={[1, i % 2 ? 0.88 : 1, 0.5]}
+            position={[x * 1.02, 0.42 - Math.abs(x) * 0.1, Math.sqrt(Math.max(0.1, 0.624 - 0.109 - x * x * 1.04)) + 0.05]}
+            rotation={[Math.PI - 0.3, x * -0.25, x * 0.45]}
+            scale={[1, i % 2 ? 0.8 : 1, 0.55]}
           />
         ))}
         {/* Side locks */}
@@ -253,7 +253,7 @@ export default function CompanionBot({ pointer, interactions, voice, progress }:
           <mesh position={[0.08, 0.57, 0]}><sphereGeometry args={[0.06, 14, 12]} /><meshBasicMaterial ref={led(2)} toneMapped={false} color={PALETTE.idle} /></mesh>
         </group>
         {/* Headphones */}
-        <mesh position={[0, 0.04, 0]} rotation={[0, 0, 0]} material={kit.jacket}><torusGeometry args={[0.9, 0.03, 8, 48, Math.PI]} /></mesh>
+        <mesh position={[0, 0.04, 0]} material={kit.trim}><torusGeometry args={[0.87, 0.022, 8, 48, Math.PI]} /></mesh>
         {[-1, 1].map(s => (
           <group key={s} position={[s * 0.84, -0.02, 0]}>
             <Outlined geometry={kit.geo.cup} material={kit.jacket} outline={kit.outline} hull={0.1} rotation={[0, 0, Math.PI / 2]} />
@@ -269,21 +269,21 @@ export default function CompanionBot({ pointer, interactions, voice, progress }:
 
         {/* Face */}
         {eyeX.map((x, side) => (
-          <group key={side} position={[x, 0.17, 0.627]} rotation={[0, side === 0 ? -0.26 : 0.26, 0]}>
+          <group key={side} position={[x, 0.145, 0.627]} rotation={[0, side === 0 ? -0.26 : 0.26, 0]}>
             <group ref={node => { eyeContent.current[side] = node; }}>
-              <mesh position={[0, -0.2, 0]} scale={[0.17, 0.205, 1]}>
+              <mesh position={[0, -0.178, 0]} scale={[0.15, 0.178, 1]}>
                 <circleGeometry args={[1, 32]} />
                 <meshBasicMaterial ref={node => { sclera.current[side] = node; }} color="#ffffff" toneMapped={false} />
               </mesh>
-              <group ref={node => { irises.current[side] = node; }} position={[0, -0.2, 0.004]}>
-                <mesh scale={[0.135, 0.17, 1]} material={kit.iris}><circleGeometry args={[1, 32]} /></mesh>
-                <mesh position={[0, 0, 0.003]} scale={[0.06, 0.085, 1]} material={kit.ink}><circleGeometry args={[1, 24]} /></mesh>
+              <group ref={node => { irises.current[side] = node; }} position={[0, -0.18, 0.004]}>
+                <mesh scale={[0.125, 0.152, 1]} material={kit.iris}><circleGeometry args={[1, 32]} /></mesh>
+                <mesh position={[0, 0, 0.003]} scale={[0.055, 0.078, 1]} material={kit.ink}><circleGeometry args={[1, 24]} /></mesh>
                 <mesh position={[-0.045, 0.06, 0.006]}><circleGeometry args={[0.04, 16]} /><meshBasicMaterial color="#ffffff" toneMapped={false} /></mesh>
                 <mesh position={[0.04, -0.06, 0.006]}><circleGeometry args={[0.02, 12]} /><meshBasicMaterial color="#e8ffff" toneMapped={false} /></mesh>
               </group>
               {/* Click targets for the eye hover/click playfulness */}
               <mesh
-                position={[0, -0.2, 0.03]}
+                position={[0, -0.18, 0.03]}
                 onPointerOver={() => interactions.onEyeHover(side as 0 | 1)}
                 onPointerEnter={() => { document.body.style.cursor = 'pointer'; }}
                 onPointerLeave={() => { document.body.style.cursor = ''; }}
@@ -294,8 +294,8 @@ export default function CompanionBot({ pointer, interactions, voice, progress }:
               </mesh>
             </group>
             {/* Upper lid line with a small lash wing */}
-            <mesh position={[0, -0.2, 0.012]} rotation={[0, 0, 0.126]} scale={[1, 1.1, 1]} material={kit.ink}><torusGeometry args={[0.185, 0.017, 6, 28, Math.PI * 0.92]} /></mesh>
-            <mesh position={[(side === 0 ? -1 : 1) * 0.2, -0.12, 0.012]} rotation={[0, 0, (side === 0 ? 1 : -1) * 0.55]} material={kit.ink}><boxGeometry args={[0.08, 0.02, 0.01]} /></mesh>
+            <mesh position={[0, -0.178, 0.012]} rotation={[0, 0, 0.126]} scale={[1, 0.97, 1]} material={kit.ink}><torusGeometry args={[0.165, 0.017, 6, 28, Math.PI * 0.92]} /></mesh>
+            <mesh position={[(side === 0 ? -1 : 1) * 0.18, -0.11, 0.012]} rotation={[0, 0, (side === 0 ? 1 : -1) * 0.55]} material={kit.ink}><boxGeometry args={[0.08, 0.02, 0.01]} /></mesh>
           </group>
         ))}
         {eyeX.map((x, side) => (
@@ -310,7 +310,7 @@ export default function CompanionBot({ pointer, interactions, voice, progress }:
           </mesh>
         ))}
         <group position={[0, -0.25, 0.618]}>
-          <mesh ref={smile} rotation={[0, 0, Math.PI]}><torusGeometry args={[0.05, 0.011, 6, 20, Math.PI]} /><meshBasicMaterial ref={smileMat} color={PALETTE.outline} toneMapped={false} /></mesh>
+          <mesh ref={smile} rotation={[0, 0, Math.PI]}><torusGeometry args={[0.062, 0.012, 6, 20, Math.PI]} /><meshBasicMaterial ref={smileMat} color={PALETTE.outline} toneMapped={false} /></mesh>
           <mesh ref={openMouth} visible={false} position={[0, -0.01, 0.002]} scale={[0.06, 0.02, 1]}>
             <circleGeometry args={[1, 20]} />
             <meshBasicMaterial color="#7a2646" toneMapped={false} />

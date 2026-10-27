@@ -65,7 +65,7 @@ export default function ListeningRing({ voice, weights, reduced }: { voice: Muta
         mesh.setMatrixAt(i, dummy.matrix);
       }
       mesh.instanceMatrix.needsUpdate = true;
-      (mesh.material as THREE.MeshBasicMaterial).color.copy(color.current).multiplyScalar(1.5);
+      (mesh.material as THREE.MeshBasicMaterial).color.copy(color.current).multiplyScalar(2.2);
     }
     if (glowMat.current) {
       glowMat.current.color.copy(color.current);
