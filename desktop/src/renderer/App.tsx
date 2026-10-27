@@ -7,7 +7,7 @@ import { SonicOrb } from './SonicOrb';
 import { AISettings } from './AISettings';
 import { AzureVoiceSettings } from './AzureVoiceSettings';
 import { useLipSync } from './lipsync';
-import { ConversationWindow, DEFAULT_ASSISTANT_NAME, DEFAULT_WAKE_ALIASES, WakeGate, buildWakeHint, matchWakeWord } from '../shared/wake-word.ts';
+import { ConversationWindow, DEFAULT_WAKE_ALIASES, WakeGate, buildWakeHint, matchWakeWord } from '../shared/wake-word.ts';
 import { getMutedPreference, setMutedPreference, speak, stopSpeech } from './speech';
 import { DEFAULT_BARGE_IN_SENSITIVITY } from '../shared/barge-in.ts';
 import { stopSpeaking } from './tts-player';
@@ -113,12 +113,10 @@ function Overlay({ state }: { state: AppState }) {
   // Wake word + Live Talk listener for the overlay.
   // Privacy first: the mic is only open when "Listen for my name" is ON (and not paused) or Live Talk is active.
   const wakeEnabled = state.settings.wakeWordEnabled ?? true;
-  const [wakePaused, setWakePaused] = useState(false);
   const wakeGate = useRef(new WakeGate(2000));
   const wakeWindow = useRef(new ConversationWindow());
   const wakeOpened = useRef(false);
-  const shouldListen = isOverlayVoiceActive || (wakeEnabled && !wakePaused);
-  const assistantName = state.settings.customWakeWord || DEFAULT_ASSISTANT_NAME;
+  const shouldListen = isOverlayVoiceActive || wakeEnabled;
 
   useEffect(() => {
     // If Chat window is actively having a voice session, Overlay yields the mic to Chat
@@ -290,16 +288,6 @@ function Overlay({ state }: { state: AppState }) {
               : 'Right here'}
         <Icon name="chat" size={13}/>
       </button>
-      {wakeEnabled && !isOverlayVoiceActive && (
-        <button
-          className={`wake-indicator ${wakePaused ? 'is-paused' : ''}`}
-          onClick={() => setWakePaused(prev => !prev)}
-          title={wakePaused ? 'Name listening is paused. Click to resume.' : `Listening locally for "${assistantName}". Click to pause.`}
-          aria-pressed={wakePaused}
-        >
-          {wakePaused ? '⏸ Paused' : `👂 Listening for "${assistantName}"`}
-        </button>
-      )}
     </div>
   </main>;
 }
