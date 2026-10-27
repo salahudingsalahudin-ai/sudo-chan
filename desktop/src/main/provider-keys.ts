@@ -66,3 +66,23 @@ export function migrateProviders(active: StoredKey | undefined, providers: Provi
   }
   return changed ? next : null;
 }
+
+/**
+ * "Remove saved keys": drops the secret (`rawKey` / `encryptedKey`) from the active entry and from every provider entry.
+ * Provider, endpoint, model and region stay, so the user only has to paste a key again. `removed` counts the entries that
+ * really held a key. Pure: the caller writes the result to the store.
+ */
+export function stripAllKeys(active: StoredKey | undefined, providers: ProviderMap | undefined): { cloud: StoredKey | undefined; providers: ProviderMap; removed: number } {
+  const holders = new Set<string>();
+  const strip = (entry: StoredKey | undefined, id: string): StoredKey | undefined => {
+    if (!entry) return entry;
+    if (entry.rawKey || entry.encryptedKey) holders.add(id);
+    const { rawKey: _raw, encryptedKey: _enc, ...rest } = entry;
+    return rest;
+  };
+  const nextProviders: ProviderMap = {};
+  for (const [id, entry] of Object.entries(providers ?? {})) nextProviders[id] = strip(entry, id);
+  // The active entry is normally mirrored under `providers`; it counts once per provider.
+  const cloud = strip(active, active?.provider ?? 'cloud');
+  return { cloud, providers: nextProviders, removed: holders.size };
+}

@@ -1,5 +1,6 @@
 import { app, BrowserWindow } from 'electron';
-import { writeFileSync } from 'node:fs';
+import { readFileSync, statSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 /**
  * Smoke-test support. EVERYTHING in this file is inert unless the app was started with `--smoke-test`
@@ -117,6 +118,11 @@ export async function runSmoke(): Promise<void> {
     const denied = await evalIn<string>(chat, `try { await window.companion.saveCloudConfig({ provider: 'custom', endpoint: 'http://127.0.0.1:1/v1/chat/completions', model: 'x', apiKey: 'k' }); return 'allowed'; } catch (e) { return String(e && e.message || e); }`);
     check('chat window cannot save cloud config (authorize)', /unavailable in this window/i.test(denied), denied.slice(0, 120));
 
+    // Key storage: the settings window may read the storage description and remove keys; chat and overlay may not.
+    const keyDenied = await evalIn<string>(chat, `try { await window.companion.clearSavedKeys(); return 'allowed'; } catch (e) { return String(e && e.message || e); }`);
+    const keyInfoDenied = await evalIn<string>(overlay, `try { await window.companion.getKeyStorageInfo(); return 'allowed'; } catch (e) { return String(e && e.message || e); }`);
+    check('chat/overlay cannot remove keys or read key-storage info (authorize)', /unavailable in this window/i.test(keyDenied) && /unavailable in this window/i.test(keyInfoDenied), `${keyDenied.slice(0, 60)} / ${keyInfoDenied.slice(0, 60)}`);
+
     // Free-usage meter: Settings and Chat get the key-free summary, the overlay does not.
     const usageSettings = await evalIn<string>(settings, `try { const u = await window.companion.getUsage(); return u.rows.length + ':' + JSON.stringify(u).length; } catch (e) { return 'error ' + String(e && e.message || e); }`);
     const usageChat = await evalIn<string>(chat, `try { return String((await window.companion.getUsage()).rows.length); } catch (e) { return 'error ' + String(e && e.message || e); }`);
@@ -152,6 +158,21 @@ export async function runSmoke(): Promise<void> {
       check('tools not present on this branch (skipped)', true, 'preload has no getToolApprovals');
     }
     void home;
+
+    // Key files are owner-only, the settings window can read the storage description, and "Remove saved keys" really clears them (fake key only).
+    const configFile = join(app.getPath('userData'), 'config.json');
+    if (process.platform !== 'win32') {
+      const fileMode = statSync(configFile).mode & 0o777;
+      const dirMode = statSync(app.getPath('userData')).mode & 0o777;
+      check('config.json is 600 and its folder is 700', fileMode === 0o600 && dirMode === 0o700, `${fileMode.toString(8)} / ${dirMode.toString(8)}`);
+    }
+    const info = await evalIn<{ encrypted: boolean; hint: string }>(settings, 'return await window.companion.getKeyStorageInfo();');
+    check('settings can read the key-storage description (smoke run: not encrypted)', info.encrypted === false && /not encrypted/i.test(info.hint), info.hint.slice(0, 80));
+    const cleared = await evalIn<{ ok: boolean; removed?: number }>(settings, 'return await window.companion.clearSavedKeys();');
+    const ai = await evalIn<{ cloud: { apiKeySet: boolean; maskedKey: string } }>(settings, 'return await window.companion.getAI();');
+    const leftover = readFileSync(configFile, 'utf8').includes(Buffer.from('smoke-test-key').toString('base64'));
+    check('"Remove saved keys" clears the key from memory and from config.json', cleared.ok && (cleared.removed ?? 0) >= 1 && !ai.cloud.apiKeySet && !ai.cloud.maskedKey && !leftover, `removed=${cleared.removed} apiKeySet=${ai.cloud.apiKeySet} onDisk=${leftover}`);
+    lap('keys');
   } catch (error) {
     report.error = error instanceof Error ? error.message : String(error);
   } finally {

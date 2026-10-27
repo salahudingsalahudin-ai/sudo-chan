@@ -114,6 +114,8 @@ export interface AIState {
   cloud: CloudConfig;
 }
 export interface ActionResult { ok: boolean; error?: string; notice?: string; /** The reason was already shown/spoken on the overlay; do not send the words as a plain chat message. */ handled?: boolean }
+/** How API keys are stored on this platform. Produced by `describeKeyStorage()` in the main process (the single source of the wording). */
+export interface KeyStorageInfo { encrypted: boolean; hint: string; detail: string; fact: string }
 export interface AzureStatus { keySet: boolean; maskedKey: string; region: string; charsUsed: number; lastError: string; backoffSeconds: number }
 export type ToolRisk = 'read' | 'write' | 'command' | 'open';
 /** An action Sudo-chan wants to take that needs the user's click. */
@@ -167,6 +169,10 @@ export interface DesktopAPI {
   playAudio(dataUri: string): Promise<{ ok: boolean; error?: string }>;
   /** Free-quota meter for Settings and Chat. Counters and reset times only, never keys. */
   getUsage(): Promise<UsageSummary>;
+  /** Plain-words description of how keys are stored on this platform (Settings window only). */
+  getKeyStorageInfo(): Promise<KeyStorageInfo>;
+  /** Deletes every saved provider key from disk and memory (Settings window only; the UI asks for confirmation first). */
+  clearSavedKeys(): Promise<ActionResult & { removed?: number }>;
   getAzure(): Promise<AzureStatus>;
   saveAzure(config: { apiKey?: string; region: string }): Promise<ActionResult>;
   testAzure(sample: 'en' | 'roman'): Promise<{ ok: boolean; error?: string; dataUri?: string; voice?: string }>;
@@ -204,6 +210,8 @@ export const CHANNELS = {
   caption: 'companion:caption',
   reminderDue: 'companion:reminder-due',
   usage: 'companion:usage',
+  keyStorageInfo: 'companion:key-storage-info',
+  clearKeys: 'companion:clear-keys',
   azureGet: 'companion:azure-get',
   azureSave: 'companion:azure-save',
   azureTest: 'companion:azure-test',
