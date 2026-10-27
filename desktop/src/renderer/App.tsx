@@ -93,6 +93,7 @@ function Overlay({ state }: { state: AppState }) {
   // Only the bot the user is actually talking to moves its mouth (overlay = Live Talk on the desktop bot).
   const lip = useLipSync(state.voiceActiveTarget === 'overlay');
   const lastSpokenOverlayId = useRef<string | null>(null);
+  const [caption, setCaption] = useState<{ you: string; bot: string }>({ you: '', bot: '' });
   const isOverlayVoiceActive = state.voiceActiveTarget === 'overlay';
   const overlaySessionRef = useRef<VoiceSession | null>(null);
 
@@ -111,7 +112,7 @@ function Overlay({ state }: { state: AppState }) {
 
   // Wake word + Live Talk listener for the overlay.
   // Privacy first: the mic is only open when "Listen for my name" is ON (and not paused) or Live Talk is active.
-  const wakeEnabled = Boolean(state.settings.wakeWordEnabled);
+  const wakeEnabled = state.settings.wakeWordEnabled ?? true;
   const [wakePaused, setWakePaused] = useState(false);
   const wakeGate = useRef(new WakeGate(2000));
   const wakeWindow = useRef(new ConversationWindow());
@@ -213,6 +214,10 @@ function Overlay({ state }: { state: AppState }) {
     if (!api || state.voiceActiveTarget !== 'overlay') return;
     const unsub = api.onChat(chatState => {
       const last = chatState.messages[chatState.messages.length - 1];
+      // Show what was said and what she answers right on the desktop bot, so the chat window is never needed.
+      const lastUser = [...chatState.messages].reverse().find(m => m.role === 'user');
+      const trim = (t: string) => (t.length > 160 ? `${t.slice(0, 157)}...` : t);
+      setCaption({ you: lastUser ? trim(lastUser.text) : '', bot: last && last.role === 'assistant' ? trim(last.text) : '' });
       if (last && last.role === 'assistant' && last.status === 'complete' && last.text) {
         if (lastSpokenOverlayId.current !== last.id) {
           lastSpokenOverlayId.current = last.id;
@@ -220,7 +225,7 @@ function Overlay({ state }: { state: AppState }) {
         }
       }
     });
-    return () => unsub();
+    return () => { unsub(); setCaption({ you: '', bot: '' }); };
   }, [state.voiceActiveTarget]);
 
   useEffect(() => {
@@ -241,6 +246,7 @@ function Overlay({ state }: { state: AppState }) {
     return () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerleave', leave); };
   }, []);
   return <main className="overlay-room" aria-label="Sudo-chan desktop companion">
+    {isOverlayVoiceActive && (caption.bot || caption.you) && <div className="overlay-speech overlay-caption" role="status" data-interactive>{caption.you && <div className="caption-you">🗣️ {caption.you}</div>}{caption.bot && <div className="caption-bot">{caption.bot}</div>}</div>}
     {state.speech && !isOverlayVoiceActive && <div className="overlay-speech" role="status" data-interactive>{state.speech}</div>}
 
     <div className="overlay-grip" data-interactive title="Drag to make yourself at home" aria-label="Drag companion"><span/><span/><span/></div>
@@ -1161,7 +1167,7 @@ function SettingsView({ state }: { state: AppState }) {
             </div>
           </SettingRow>
           <SettingRow title="Listen for my name" description="Off by default. When on, the mic listens locally and only short clips with speech are sent to speech-to-text. Pause any time from the bot's indicator.">
-            <div className="switch-control"><span>{settings.wakeWordEnabled ? 'On' : 'Off'}</span><button className="switch" type="button" role="switch" aria-label="Listen for my name" aria-checked={Boolean(settings.wakeWordEnabled)} onClick={() => setSettings({ ...settings, wakeWordEnabled: !settings.wakeWordEnabled })}><span/></button></div>
+            <div className="switch-control"><span>{(settings.wakeWordEnabled ?? true) ? 'On' : 'Off'}</span><button className="switch" type="button" role="switch" aria-label="Listen for my name" aria-checked={Boolean(settings.wakeWordEnabled)} onClick={() => setSettings({ ...settings, wakeWordEnabled: !settings.wakeWordEnabled })}><span/></button></div>
           </SettingRow>
           <SettingRow
             title="Assistant name"

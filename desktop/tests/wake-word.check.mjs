@@ -74,9 +74,9 @@ test('ConversationWindow: 30s, extended by each utterance, then closed', () => {
   assert.equal(w.isOpen(60_001), false);
 });
 
-test('settings: wake word is OFF by default and validated', async () => {
+test('settings: wake word is ON by default (user request) and validated', async () => {
   const { DEFAULT_SETTINGS, validSettings } = await import('../src/shared/validation.ts');
-  assert.equal(DEFAULT_SETTINGS.wakeWordEnabled, false);
+  assert.equal(DEFAULT_SETTINGS.wakeWordEnabled, true);
   assert.deepEqual(DEFAULT_SETTINGS.wakeAliases, DEFAULT_WAKE_ALIASES);
   assert.equal(validSettings({ ...DEFAULT_SETTINGS, wakeWordEnabled: true, wakeAliases: ['Sudo'] }), true);
   assert.equal(validSettings({ ...DEFAULT_SETTINGS, wakeWordEnabled: 'yes' }), false);

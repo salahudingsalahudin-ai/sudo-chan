@@ -1123,3 +1123,6 @@ body[data-window=overlay]{overflow:hidden}.overlay-room{position:relative;width:
 /* Azure voice settings */
 .azure-fields{display:flex;flex-direction:column;gap:8px;min-width:200px}
 .azure-fields.azure-error{outline:1px solid rgba(255,120,120,.55);border-radius:10px;padding:4px}
+
+/* Caption on the desktop bot during Live Talk: what you said and what she answers */
+.overlay-caption{max-height:46%;overflow:hidden;text-align:left}.overlay-caption .caption-you{color:#6b8c92;font-size:9px;margin-bottom:3px}.overlay-caption .caption-bot{color:#2e5560}

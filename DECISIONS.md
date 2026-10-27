@@ -73,3 +73,7 @@
 - Roman Urdu route is a setting (default Hindi voice). Assumption: Hindi neural voices cope better with Latin-script text than ur-PK voices. Unmeasured (no key at build time).
 - The cache key includes the resolved Azure voice, so changing the voice never replays an old clip. A cached Azure clip is served even during back-off.
 - 401/403 backs off 10 minutes (bad key/region should not be hammered); a successful "Test Azure voice" or saving the key resets all back-offs.
+
+## Wake word default ON and desktop-bot captions (user request)
+- The user wants to say "Sid"/"Sudo" and talk to the desktop bot without opening the chat window. The flow already existed (wake -> Live Talk target `overlay` -> replies spoken by the overlay; sending a message never opens the chat). Two changes: `wakeWordEnabled` now defaults to ON (an unset value counts as ON; the "Listening for ..." indicator and pause button stay visible, and it can be turned off in Settings), and during overlay Live Talk the desktop bot shows a caption bubble with what was heard and her reply.
+- This reverses the earlier privacy-first default OFF, at the user's explicit request. Standby still sends only short, rate-limited clips to speech-to-text.

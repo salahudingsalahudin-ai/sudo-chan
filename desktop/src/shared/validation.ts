@@ -10,7 +10,7 @@ export const DEFAULT_SETTINGS: Settings = {
   voiceLockEnabled: false,
   registeredVoiceSample: '',
   customWakeWord: 'Sudo-chan',
-  wakeWordEnabled: false,
+  wakeWordEnabled: true,
   wakeAliases: ['Sudo', 'Sid', 'Sudo-chan', 'Suddo', 'Sit'],
   voiceVisualizerMode: 'bot',
   sttProvider: 'whisper',
