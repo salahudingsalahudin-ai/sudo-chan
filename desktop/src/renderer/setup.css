@@ -49,6 +49,7 @@
 
 /* mascot */
 .wiz-mascot { position: relative; width: 96px; height: 101px; margin: 0 auto; flex-shrink: 0; }
+.wiz-mascot.step-brain, .wiz-mascot.step-privacy { width: 76px; height: 80px; }
 .wiz-mascot.step-welcome { width: 156px; height: 164px; }
 .wiz-mascot.step-done { width: 132px; height: 138px; }
 .wiz-halo { position: absolute; inset: -6% -10%; border-radius: 50%; background: radial-gradient(closest-side, #5fe0c71f, #5fe0c700); pointer-events: none; }
@@ -97,7 +98,7 @@
 .wiz-card { padding: 14px 16px; border: 1px solid var(--wiz-line); border-radius: 16px; background: var(--wiz-card); cursor: pointer; transition: border-color .2s ease, background .2s ease, box-shadow .2s ease; }
 .wiz-card:hover { border-color: #5d7d86; background: var(--wiz-card-2); }
 .wiz-card.is-selected { border-color: var(--wiz-teal); background: #173a3a; box-shadow: 0 0 0 3px #74cebb1f; cursor: default; }
-.wiz-card.is-disabled { cursor: not-allowed; opacity: .78; border-style: dashed; background: #14222b; }
+.wiz-card.is-disabled { padding: 11px 16px; cursor: not-allowed; opacity: .78; border-style: dashed; background: #14222b; }
 .wiz-card.is-disabled:hover { border-color: var(--wiz-line); background: #14222b; }
 .wiz-card-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
 .wiz-card h3 { margin: 0; font-size: 16px; color: var(--wiz-text); }
@@ -161,9 +162,11 @@
 /* narrow window: stack the footer, keep everything inside the width */
 @media (max-width: 560px) {
   .wiz-scroll { padding: 14px 18px 18px; }
-  .wiz-actions { flex-wrap: wrap; }
-  .wiz-actions-right { flex-wrap: wrap; justify-content: stretch; }
-  .wiz-actions-right .wiz-primary { flex: 1 1 100%; order: 2; }
+  .wiz-actions { display: grid; grid-template-columns: auto 1fr; gap: 8px 10px; }
+  .wiz-actions-right { display: contents; }
+  .wiz-actions-right .wiz-primary { grid-column: 1 / -1; grid-row: 1; }
+  .wiz-actions > :first-child { grid-row: 2; grid-column: 1; }
+  .wiz-actions-right .wiz-link { grid-row: 2; grid-column: 2; justify-self: end; }
   .wiz-key-row { flex-direction: column; }
   .wiz-panel-head { flex-direction: column; }
   .wiz-switch-row { flex-direction: column; align-items: stretch; }

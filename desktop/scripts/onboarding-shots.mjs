@@ -40,14 +40,18 @@ const windowOf = kind => BrowserWindow.getAllWindows().find(w => !w.isDestroyed(
 
 const page = (win, body) => win.webContents.executeJavaScript(`(async () => { ${body} })()`, true);
 const shots = [];
+const overflow = [];
 async function shot(win, name) {
   await sleep(750); // let transitions and smooth scrolling settle
   const image = await win.webContents.capturePage();
   const file = join(outDir, `${name}.png`);
   writeFileSync(file, image.toPNG());
   const size = image.getSize();
-  shots.push(`${name}.png ${size.width}x${size.height}`);
-  console.log(`[shots] ${name}.png ${size.width}x${size.height}`);
+  // No horizontal scrolling at any size: the page and the scrolling stage must fit the width.
+  const hscroll = await page(win, `const d = document.documentElement; const s = document.querySelector('.wiz-scroll'); return d.scrollWidth > d.clientWidth || Boolean(s && s.scrollWidth > s.clientWidth);`);
+  if (hscroll) overflow.push(name);
+  shots.push(`${name}.png ${size.width}x${size.height}${hscroll ? ' HSCROLL' : ''}`);
+  console.log(`[shots] ${name}.png ${size.width}x${size.height} hscroll=${hscroll}`);
 }
 // Click a button/radio by its visible text (exact, or "starts with" when the text ends with *).
 const clickText = (win, text) => page(win, `
@@ -178,6 +182,12 @@ try {
   for (let i = 0; i < 3; i++) { await primary(win); await sleep(350); }
   await until(async () => (await heading(win)) === 'Us ka dimagh', 8000, 'brain step (Roman Urdu)');
   await shot(win, '04-brain-ur');
+  win.setSize(480, 560); // the smallest the wizard window can be
+  await sleep(500);
+  await shot(win, '04-brain-ur-min-size');
+  await page(win, `document.querySelector('.wiz-stage')?.scrollIntoView(); return 'ok'`);
+  win.setSize(600, 720);
+  await sleep(500);
   await primary(win);
   await until(async () => (await heading(win)) === 'Aap ke faislay', 8000, 'privacy step (Roman Urdu)');
   await shot(win, '05-privacy-ur');
@@ -189,7 +199,7 @@ try {
   await sleep(2000);
   const state = await page(windowOf('overlay'), 'return await window.companion.getState();');
   console.log(`[shots] after finishing: setupActive=${state.setupActive} onboardingDone=${state.settings.onboardingDone} wakeWordEnabled=${state.settings.wakeWordEnabled} tools=${state.settings.toolsEnabled} screen=${state.settings.screenAssistEnabled} awareness=${state.settings.liveAwareness}`);
-  console.log(`[shots] done: ${shots.length} screenshots in ${outDir}`);
+  console.log(`[shots] done: ${shots.length} screenshots in ${outDir}; horizontal overflow: ${overflow.length ? overflow.join(', ') : 'none'}`);
   writeFileSync(join(outDir, 'index.txt'), shots.join('\n') + '\n');
   cleanup();
   app.exit(0);
