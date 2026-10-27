@@ -111,11 +111,13 @@ export function buildSystemPrompt(options?: {
   if (options?.voice) {
     return [
       "You are Sudo-chan, speaking aloud to your creator and developer Sid.",
+      "This is a live voice conversation: Sid speaks into the microphone, speech recognition turns it into the text you see, and your reply is spoken aloud. So you CAN hear Sid this way. Never say that you cannot hear voices or that you only chat by text.",
       "Reply in the user's language, in 1-3 short natural spoken sentences. No markdown, no lists, no emojis, no URLs.",
       "Answer the question directly and warmly in Roman Urdu or English.",
       "Start EVERY sentence with exactly one emotion tag in square brackets, chosen from: [warm] [excited] [calm] [curious] [soft] [happy].",
       "Use [happy] for greetings, [soft] for apologies, [curious] for questions, [excited] for good news, [calm] for reassurance, [warm] otherwise.",
       "Example: [happy] Assalam o Alaikum Sid! [curious] Aaj kis cheez par kaam karna hai?",
+      ...(options.toolsPaused ? ["Computer tools are not available on this screenshot turn: if Sid wants an action done, tell him to ask again without the screenshot, and never claim you did something."] : []),
       ...(options.tools ? ["You can use computer tools (files, commands, links) but risky ones need the user to click Allow on screen: say \"please approve on screen\" and never treat a spoken yes as approval. Never claim an action happened unless the tool result confirms it."] : []),
     ].join(' ');
   }
@@ -148,6 +150,7 @@ export function buildSystemPrompt(options?: {
     modelFact,
     providerFact,
     '- Real Desktop Features: Pomodoro focus timer, live system RAM health alert, Live Talk voice companion, cute customizable glasses, quiet standby overlay.',
+    '- Voice: with Live Talk or the "Sudo/Sid" wake word turned on, the user speaks to you through the microphone (speech recognition converts it to text) and you can answer aloud. Do not claim you cannot hear voice when this is on; if a message arrives as plain text, just answer it.',
     options?.tools
       ? '- Real System Boundaries: Privacy-first desktop companion. You can see the screen ONLY on a turn where a screenshot is attached by screen assist; this is NOT such a turn, so you cannot see the screen and must say so instead of guessing. You cannot browse the live web. Files and commands are only possible through the tools below, with the user\'s approval.'
       : '- Real System Boundaries: Privacy-first desktop companion. Can see the screen of the user ONLY on a turn where a screenshot is attached to the message (when the user enabled screen assist and said your name or pressed the eye button); on every other turn you cannot see the screen and must say so instead of guessing; you cannot modify or delete OS files directly, cannot browse the live web.',
@@ -537,6 +540,7 @@ export class LocalAI {
     if (!model) throw new LocalAIError('Choose a Cloud API model in Settings → Local AI.');
 
     console.log(`[Cloud AI] Stream request model: ${model}`);
+    const streamT0 = Date.now();
 
     const providerLabel = CLOUD_PRESETS[cloud.provider]?.label || cloud.provider;
     if (options?.tools && options.tools.definitions.length) {
@@ -669,7 +673,7 @@ export class LocalAI {
           const choices = (chunk as { choices?: { delta?: { content?: unknown }; message?: { content?: unknown }; finish_reason?: string }[] })?.choices;
           const finishReason = choices?.[0]?.finish_reason;
           if (finishReason) {
-            console.log(`[Cloud AI] Stream finish_reason: "${finishReason}"`);
+            console.log(`[Cloud AI] Stream finish_reason: "${finishReason}" ms=${Date.now() - streamT0}`);
             if (finishReason === 'length') {
               console.warn('[Cloud AI] Note: reply reached max_tokens length limit.');
             }

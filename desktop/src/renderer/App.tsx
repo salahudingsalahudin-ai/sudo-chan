@@ -7,10 +7,11 @@ import { SonicOrb } from './SonicOrb';
 import { AISettings } from './AISettings';
 import { AzureVoiceSettings } from './AzureVoiceSettings';
 import { useLipSync } from './lipsync';
-import { ConversationWindow, DEFAULT_ASSISTANT_NAME, DEFAULT_WAKE_ALIASES, WakeGate, buildWakeHint, matchWakeWord } from '../shared/wake-word.ts';
-import { getMutedPreference, setMutedPreference, speak, stopSpeech } from './speech';
+import { ConversationWindow, DEFAULT_WAKE_ALIASES, WakeGate, buildWakeHint, matchWakeWord } from '../shared/wake-word.ts';
+import { clearInterruptedSpeech, getMutedPreference, hasInterruptedSpeech, resumeInterruptedSpeech, setMutedPreference, speak, stopSpeech } from './speech';
+import { isStopCommand, unclearAction } from '../shared/stop-intent.ts';
 import { DEFAULT_BARGE_IN_SENSITIVITY } from '../shared/barge-in.ts';
-import { stopSpeaking } from './tts-player';
+import { isSpeakingNow, stopSpeaking } from './tts-player';
 import { VoiceSession, type BargeInInfo, getVoiceProfile, isSpeakerMatch, recordVoiceSample } from './voice-engine';
 import type { VoiceProfile } from './voice-engine';
 
@@ -116,6 +117,27 @@ function ToolApprovalCards({ approvals, busy }: { approvals: ToolApprovalRequest
     <button type="button" className="text-button tool-stop" onClick={() => void api?.stopAllTools()}>⛔ Stop all actions</button>
   </div>;
 }
+/** After a barge-in: a stop command stays stopped; anything else is a new request that replaces the old reply. */
+function handleStopCommand(text: string): boolean {
+  clearInterruptedSpeech();
+  if (!isStopCommand(text)) return false;
+  if (isSpeakingNow()) stopSpeaking('stop-button');
+  void api?.stopReply();
+  console.info(`[barge-in] stop command "${text.trim()}" -> stay stopped`);
+  return true;
+}
+/** The interruption could not be understood: carry on where she was, unless it was too short to be anything but a command. */
+function handleUnclear(info: { clipMs: number }) {
+  const action = unclearAction(info.clipMs, hasInterruptedSpeech());
+  if (action === 'none') return;
+  if (action === 'stay-stopped') {
+    clearInterruptedSpeech();
+    console.info(`[barge-in] unclear clip=${info.clipMs}ms -> stay stopped`);
+    return;
+  }
+  const resumed = resumeInterruptedSpeech();
+  console.info(`[barge-in] unclear clip=${info.clipMs}ms -> ${resumed ? 'resume' : 'stay stopped'}`);
+}
 function Overlay({ state }: { state: AppState }) {
   const [arriving, setArriving] = useState(false);
   const [cursorOffset, setCursorOffset] = useState<{ x: number; y: number } | undefined>(undefined);
@@ -123,6 +145,7 @@ function Overlay({ state }: { state: AppState }) {
   // Only the bot the user is actually talking to moves its mouth (overlay = Live Talk on the desktop bot).
   const lip = useLipSync(state.voiceActiveTarget === 'overlay');
   const lastSpokenOverlayId = useRef<string | null>(null);
+  const [caption, setCaption] = useState<{ you: string; bot: string }>({ you: '', bot: '' });
   const isOverlayVoiceActive = state.voiceActiveTarget === 'overlay';
   const overlaySessionRef = useRef<VoiceSession | null>(null);
 
@@ -141,13 +164,11 @@ function Overlay({ state }: { state: AppState }) {
 
   // Wake word + Live Talk listener for the overlay.
   // Privacy first: the mic is only open when "Listen for my name" is ON (and not paused) or Live Talk is active.
-  const wakeEnabled = Boolean(state.settings.wakeWordEnabled);
-  const [wakePaused, setWakePaused] = useState(false);
+  const wakeEnabled = state.settings.wakeWordEnabled ?? true;
   const wakeGate = useRef(new WakeGate(2000));
   const wakeWindow = useRef(new ConversationWindow());
   const wakeOpened = useRef(false);
-  const shouldListen = isOverlayVoiceActive || (wakeEnabled && !wakePaused);
-  const assistantName = state.settings.customWakeWord || DEFAULT_ASSISTANT_NAME;
+  const shouldListen = isOverlayVoiceActive || wakeEnabled;
 
   useEffect(() => {
     // If Chat window is actively having a voice session, Overlay yields the mic to Chat
@@ -180,6 +201,7 @@ function Overlay({ state }: { state: AppState }) {
       },
       getBargeInSensitivity: () => stateRef.current.settings.bargeInSensitivity ?? DEFAULT_BARGE_IN_SENSITIVITY,
       onBargeIn: handleBargeIn,
+      onUnclear: handleUnclear,
       onFinal: (text, features) => {
         if (!text.trim()) return;
         const currentLive = isOverlayVoiceActiveRef.current;
@@ -196,6 +218,9 @@ function Overlay({ state }: { state: AppState }) {
             if (!isSpeakerMatch(features ?? {}, profile)) return;
           }
 
+          // "Sudo, ruko": a stop command right after the name only stops (speech, reply, pending screenshot); it never captures the screen.
+          if (match.rest && handleStopCommand(match.rest)) return;
+
           // Name heard: bot reacts, a 30 s conversation window opens where no name is needed.
           wakeOpened.current = true;
           wakeWindow.current.open(performance.now());
@@ -203,13 +228,14 @@ function Overlay({ state }: { state: AppState }) {
           void api?.setVoiceActive(true, 'overlay');
           if (currentSettings.screenAssistEnabled) {
             // If the screenshot cannot be taken (Local mode, cooldown...), still answer what was said.
-            void api?.sendScreen({ text: match.rest, source: 'wake' }).then(result => { if (!result.ok && match.rest) void api?.sendMessage(match.rest); });
+            void api?.sendScreen({ text: match.rest, source: 'wake' }).then(result => { if (!result.ok && match.rest) void api?.sendMessage(match.rest, true); });
           }
-          else if (match.rest) void api?.sendMessage(match.rest);
+          else if (match.rest) void api?.sendMessage(match.rest, true);
         } else {
           // In Live Talk: respond to whatever is spoken, and keep the wake window alive.
           wakeWindow.current.touch(performance.now());
-          void api?.sendMessage(text.trim());
+          if (handleStopCommand(text)) return;
+          void api?.sendMessage(text.trim(), true);
         }
       },
     });
@@ -244,17 +270,23 @@ function Overlay({ state }: { state: AppState }) {
   // Spoken reply playback when conversation updates in overlay mode
   useEffect(() => {
     // ONLY speak in overlay if OVERLAY is the designated active voice target!
+    console.info(`[voice] overlay target=${state.voiceActiveTarget ?? 'none'}`);
     if (!api || state.voiceActiveTarget !== 'overlay') return;
     const unsub = api.onChat(chatState => {
       const last = chatState.messages[chatState.messages.length - 1];
+      // Show what was said and what she answers right on the desktop bot, so the chat window is never needed.
+      const lastUser = [...chatState.messages].reverse().find(m => m.role === 'user');
+      const trim = (t: string) => (t.length > 160 ? `${t.slice(0, 157)}...` : t);
+      setCaption({ you: lastUser ? trim(lastUser.text) : '', bot: last && last.role === 'assistant' ? trim(last.text) : '' });
       if (last && last.role === 'assistant' && last.status === 'complete' && last.text) {
         if (lastSpokenOverlayId.current !== last.id) {
           lastSpokenOverlayId.current = last.id;
-          void speak(last.spoken ?? last.text);
+          console.info('[voice] overlay got a complete reply, speaking');
+          void speak(last.spoken ?? last.text).catch(error => console.error('[voice] speak failed', String(error)));
         }
       }
     });
-    return () => unsub();
+    return () => { unsub(); setCaption({ you: '', bot: '' }); };
   }, [state.voiceActiveTarget]);
 
   useEffect(() => {
@@ -285,9 +317,17 @@ function Overlay({ state }: { state: AppState }) {
         {state.screenStatus === 'capturing' ? '👀 Dekh rahi hoon... ✕' : '📸 Screen bheji gayi'}
       </button>
     )}
+    {isOverlayVoiceActive && (caption.bot || caption.you) && <div className="overlay-speech overlay-caption" role="status" data-interactive>{caption.you && <div className="caption-you">🗣️ {caption.you}</div>}{caption.bot && <div className="caption-bot">{caption.bot}</div>}</div>}
     {state.speech && !isOverlayVoiceActive && <div className="overlay-speech" role="status" data-interactive>{state.speech}</div>}
 
     <div className="overlay-grip" data-interactive title="Drag to make yourself at home" aria-label="Drag companion"><span/><span/><span/></div>
+    {shouldListen && !state.paused && (
+      <div
+        className={`overlay-glow ${lip.speaking ? 'is-speaking' : isOverlayVoiceActive ? 'is-live' : 'is-standby'}`}
+        style={{ ['--glow' as string]: String(Math.min(1, lip.speaking ? lip.level : overlayAudioLevel)) }}
+        aria-hidden="true"
+      />
+    )}
     <div
       className={`overlay-bot ${arriving ? 'bot-arriving' : ''}`}
       data-interactive
@@ -318,7 +358,17 @@ function Overlay({ state }: { state: AppState }) {
     </div>
     <div className="overlay-dock" data-interactive>
       <button className="companion-pill" onClick={() => void api?.openChat()}>
-        <span className={`presence-dot ${state.paused ? 'is-paused' : ''}`}/>
+        <span
+          className={`presence-dot mic-toggle ${state.paused ? 'is-paused' : isOverlayVoiceActive ? 'is-live' : shouldListen ? 'is-listening' : 'is-off'}`}
+          role="button"
+          tabIndex={0}
+          title={isOverlayVoiceActive ? 'Live Talk (click to end)' : shouldListen ? 'Mic on, listening for your name (click to turn off)' : 'Mic off (click to turn on)'}
+          onClick={event => {
+            event.stopPropagation();
+            if (isOverlayVoiceActive) void api?.setVoiceActive(false);
+            else void api?.saveSettings({ ...state.settings, wakeWordEnabled: !wakeEnabled });
+          }}
+        />
         {state.paused
           ? 'Taking a breath'
           : isOverlayVoiceActive
@@ -328,16 +378,6 @@ function Overlay({ state }: { state: AppState }) {
               : 'Right here'}
         <Icon name="chat" size={13}/>
       </button>
-      {wakeEnabled && !isOverlayVoiceActive && (
-        <button
-          className={`wake-indicator ${wakePaused ? 'is-paused' : ''}`}
-          onClick={() => setWakePaused(prev => !prev)}
-          title={wakePaused ? 'Name listening is paused. Click to resume.' : `Listening locally for "${assistantName}". Click to pause.`}
-          aria-pressed={wakePaused}
-        >
-          {wakePaused ? '⏸ Paused' : `👂 Listening for "${assistantName}"`}
-        </button>
-      )}
     </div>
   </main>;
 }
@@ -437,9 +477,10 @@ function Chat({ state }: { state: AppState }) {
         onFinal: text => {
           setUserSubtitle(text);
           setLiveTranscript('');
+          if (text.trim() && handleStopCommand(text)) return;
           if (text.trim() && !conversationBusyRef.current) {
             setBotSubtitle('');
-            void api?.sendMessage(text.trim());
+            void api?.sendMessage(text.trim(), true);
           }
         },
         onAudioLevel: level => {
@@ -447,6 +488,7 @@ function Chat({ state }: { state: AppState }) {
         },
         getBargeInSensitivity: () => settingsRef.current.bargeInSensitivity ?? DEFAULT_BARGE_IN_SENSITIVITY,
         onBargeIn: handleBargeIn,
+        onUnclear: handleUnclear,
       });
     } else {
       session.stop();
@@ -1055,6 +1097,7 @@ function SettingsView({ state }: { state: AppState }) {
     settings.customWakeWord !== state.settings.customWakeWord ||
     settings.wakeWordEnabled !== state.settings.wakeWordEnabled ||
     settings.screenAssistEnabled !== state.settings.screenAssistEnabled ||
+    settings.sttSpeed !== state.settings.sttSpeed ||
     JSON.stringify(settings.wakeAliases) !== JSON.stringify(state.settings.wakeAliases) ||
     settings.voiceVisualizerMode !== state.settings.voiceVisualizerMode ||
     settings.glassesEnabled !== state.settings.glassesEnabled ||
@@ -1076,6 +1119,7 @@ function SettingsView({ state }: { state: AppState }) {
     state.settings.customWakeWord,
     state.settings.wakeWordEnabled,
     state.settings.screenAssistEnabled,
+    state.settings.sttSpeed,
     JSON.stringify(state.settings.wakeAliases),
     state.settings.voiceVisualizerMode,
     state.settings.glassesEnabled,
@@ -1249,7 +1293,7 @@ function SettingsView({ state }: { state: AppState }) {
             </div>
           </SettingRow>
           <SettingRow title="Listen for my name" description="Off by default. When on, the mic listens locally and only short clips with speech are sent to speech-to-text. Pause any time from the bot's indicator.">
-            <div className="switch-control"><span>{settings.wakeWordEnabled ? 'On' : 'Off'}</span><button className="switch" type="button" role="switch" aria-label="Listen for my name" aria-checked={Boolean(settings.wakeWordEnabled)} onClick={() => setSettings({ ...settings, wakeWordEnabled: !settings.wakeWordEnabled })}><span/></button></div>
+            <div className="switch-control"><span>{(settings.wakeWordEnabled ?? true) ? 'On' : 'Off'}</span><button className="switch" type="button" role="switch" aria-label="Listen for my name" aria-checked={Boolean(settings.wakeWordEnabled)} onClick={() => setSettings({ ...settings, wakeWordEnabled: !settings.wakeWordEnabled })}><span/></button></div>
           </SettingRow>
           <SettingRow title="Let Sudo-chan look at my screen" description="Off by default. When on, saying her name (or pressing the eye button in chat) takes ONE screenshot and sends it to your cloud AI provider so she can explain what you are working on. Never on a timer, never saved. Close password or banking windows first.">
             <div className="switch-control"><span>{settings.screenAssistEnabled ? 'On' : 'Off'}</span><button className="switch" type="button" role="switch" aria-label="Let Sudo-chan look at my screen" aria-checked={Boolean(settings.screenAssistEnabled)} onClick={() => setSettings({ ...settings, screenAssistEnabled: !settings.screenAssistEnabled })}><span/></button></div>
@@ -1277,6 +1321,17 @@ function SettingsView({ state }: { state: AppState }) {
               onChange={e => setSettings({ ...settings, wakeAliases: e.target.value.split(',').map(a => a.trim()).filter(Boolean).slice(0, 20) })}
               placeholder="Sudo, Sid, Sudo-chan"
             />
+          </SettingRow>
+          <SettingRow title="Speech recognition speed" description="Fast answers sooner (about 0.5 s) but may mishear Urdu. Accurate understands Urdu and Roman Urdu better but takes 2-3 s.">
+            <select
+              className="wake-word-input"
+              value={settings.sttSpeed ?? 'fast'}
+              onChange={e => setSettings({ ...settings, sttSpeed: e.target.value as 'accurate' | 'fast' })}
+              aria-label="Speech recognition speed"
+            >
+              <option value="fast">Fast (Whisper first, Gemini if unsure)</option>
+              <option value="accurate">Accurate (Gemini first)</option>
+            </select>
           </SettingRow>
           <SettingRow
             title="Voice Recognition Language"

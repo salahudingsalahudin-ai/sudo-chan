@@ -14,6 +14,28 @@ let currentSource: AudioBufferSourceNode | null = null;
 let currentResolve: ((played: boolean) => void) | null = null;
 let levelTimer: ReturnType<typeof setInterval> | null = null;
 let generation = 0;
+// Where the currently playing buffer started, so a barge-in can report how far it got.
+let playing: { buffer: AudioBuffer; startedAt: number; offset: number } | null = null;
+let lastStop: { reason: StopReason; at: number } | null = null;
+
+export interface StopInfo {
+  reason: StopReason;
+  /** True if audio was actually playing or a reply was in flight when stop was requested. */
+  wasActive: boolean;
+  /** The clip that was playing and how many seconds of it had been heard (null if none was playing). */
+  played: { buffer: AudioBuffer; offsetSec: number } | null;
+}
+const stopListeners = new Set<(info: StopInfo) => void>();
+
+/** Subscribe to every stopSpeaking() call. Returns an unsubscribe function. */
+export function onStopSpeaking(listener: (info: StopInfo) => void): () => void {
+  stopListeners.add(listener);
+  return () => { stopListeners.delete(listener); };
+}
+
+export function getLastStop(): { reason: StopReason; at: number } | null {
+  return lastStop;
+}
 
 const LEVEL_INTERVAL_MS = 33;
 const levelBuffer = new Float32Array(1024);
@@ -85,7 +107,7 @@ export async function decodeDataUri(dataUri: string): Promise<AudioBuffer | null
 }
 
 /** Plays a decoded buffer. Resolves true if it played to the end, false if stopped or failed. */
-export function playBuffer(buffer: AudioBuffer, forGeneration: number): Promise<boolean> {
+export function playBuffer(buffer: AudioBuffer, forGeneration: number, offsetSec = 0): Promise<boolean> {
   if (forGeneration !== generation) return Promise.resolve(false);
   const context = audioContext();
   return new Promise<boolean>(resolve => {
@@ -100,12 +122,15 @@ export function playBuffer(buffer: AudioBuffer, forGeneration: number): Promise<
         if (currentSource === source) {
           currentSource = null;
           currentResolve = null;
+          playing = null;
           resolve(true);
         }
       };
       if (!tracker.active) tracker.begin();
       startLevelPump();
-      source.start();
+      playing = { buffer, startedAt: context.currentTime, offset: offsetSec };
+      if (offsetSec > 0) source.start(0, offsetSec);
+      else source.start();
     }).catch(() => resolve(false));
   });
 }
@@ -127,6 +152,14 @@ export function stopSpeaking(reason: StopReason): void {
   generation++;
   const source = currentSource;
   const resolve = currentResolve;
+  const wasActive = source !== null || tracker.active;
+  let played: StopInfo['played'] = null;
+  if (playing && source) {
+    const heard = playing.offset + Math.max(0, (ctx?.currentTime ?? playing.startedAt) - playing.startedAt);
+    played = { buffer: playing.buffer, offsetSec: Math.min(playing.buffer.duration || heard, heard) };
+  }
+  playing = null;
+  lastStop = { reason, at: Date.now() };
   currentSource = null;
   currentResolve = null;
   if (source) {
@@ -139,6 +172,9 @@ export function stopSpeaking(reason: StopReason): void {
   } catch {}
   stopLevelPump();
   tracker.end(reason);
+  for (const listener of stopListeners) {
+    try { listener({ reason, wasActive, played }); } catch (error) { console.warn('[TTS] stop listener failed:', (error as Error).message); }
+  }
   resolve?.(false);
 }
 

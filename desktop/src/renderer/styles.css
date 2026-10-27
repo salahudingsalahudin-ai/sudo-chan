@@ -1139,3 +1139,31 @@ body[data-window=overlay]{overflow:hidden}.overlay-room{position:relative;width:
 .message-shot{margin:0 0 6px}
 .message-shot img{display:block;max-width:160px;border-radius:8px;border:1px solid rgba(149,220,228,.35)}
 .message-shot figcaption{font-size:10.5px;opacity:.75;margin-top:3px}
+
+/* Caption on the desktop bot during Live Talk: what you said and what she answers */
+/* Compact caption that always stays inside the small overlay window: reply clamped to 3 lines, what you said to 1 line */
+.overlay-caption{top:3px;left:6px;width:calc(100% - 12px);max-height:35%;padding:6px 9px;overflow:hidden;text-align:left;border-radius:12px;background:#ffffffee;backdrop-filter:blur(4px);font-size:10px;line-height:1.35}
+.overlay-caption::after{display:none}
+.overlay-caption .caption-you{color:#7d98a0;font-size:8.5px;margin-bottom:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.overlay-caption .caption-bot{color:#2e5560;font-weight:550;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+
+/* Mic status dot in the overlay pill: green pulse = listening for the name, blue = Live Talk, grey = mic off */
+.presence-dot.is-listening{animation:micPulse 2.4s ease-in-out infinite}
+.presence-dot.is-live{background:#4aa8ff;box-shadow:0 0 0 3px #4aa8ff33}
+.presence-dot.is-off{background:#aab8bc;box-shadow:0 0 0 3px #aab8bc22}
+@keyframes micPulse{0%,100%{box-shadow:0 0 0 3px #62d9be1f}50%{box-shadow:0 0 0 5px #62d9be44}}
+@media (prefers-reduced-motion:reduce){.presence-dot.is-listening{animation:none}}
+
+/* Glow behind the desktop bot: it reacts to the real mic level while listening and to her voice while speaking */
+.overlay-glow{position:absolute;left:8%;top:14%;width:84%;height:74%;border-radius:50%;pointer-events:none;z-index:0;
+  background:radial-gradient(circle,rgba(98,217,190,.55) 0%,rgba(98,217,190,.22) 45%,rgba(98,217,190,0) 70%);
+  opacity:calc(.28 + var(--glow,0) * .72);transform:scale(calc(.92 + var(--glow,0) * .2));transition:opacity 90ms linear,transform 90ms linear}
+.overlay-glow.is-live{background:radial-gradient(circle,rgba(74,168,255,.6) 0%,rgba(74,168,255,.24) 45%,rgba(74,168,255,0) 70%)}
+.overlay-glow.is-speaking{background:radial-gradient(circle,rgba(150,120,255,.55) 0%,rgba(150,120,255,.22) 45%,rgba(150,120,255,0) 70%)}
+.overlay-glow.is-standby{animation:glowBreathe 3s ease-in-out infinite}
+@keyframes glowBreathe{0%,100%{filter:brightness(.85)}50%{filter:brightness(1.1)}}
+@media (prefers-reduced-motion:reduce){.overlay-glow.is-standby{animation:none}}
+
+/* The mic dot in the overlay pill is the on/off switch for the desktop bot's microphone */
+.presence-dot.mic-toggle{cursor:pointer;width:11px;height:11px;outline-offset:3px}
+.presence-dot.mic-toggle:hover{filter:brightness(1.15)}

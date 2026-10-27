@@ -7,7 +7,7 @@ import { dirname, join } from 'node:path';
 import { appendFileSync, mkdtempSync, promises as fsp } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { CHANNELS } from '../shared/types.js';
-import type { AIMode, AIState, AppState, CloudConfigInput, CloudProviderId, Settings, WindowKind } from '../shared/types.js';
+import type { AIMode, AIState, AppState, ChatState, CloudConfigInput, CloudProviderId, Settings, WindowKind } from '../shared/types.js';
 import { BOT_DIMENSIONS, clampPosition, CLOUD_PRESETS, DEFAULT_SETTINGS, maskApiKey, validCloudConfig, validPosition, validSettings } from '../shared/validation.js';
 import { cleanTextForSpeech, detectSentenceLanguage, emotionStyle, EMOTIONS } from '../shared/speech.js';
 import type { Emotion } from '../shared/speech.js';
@@ -123,7 +123,7 @@ function geminiKey(): string {
 }
 let sttRouter: SttRouter | undefined;
 function stt(): SttRouter {
-  sttRouter ??= new SttRouter({ fetch: (url, init) => fetch(url, init as RequestInit), getKey: id => getProviderKey(id), now: () => Date.now() });
+  sttRouter ??= new SttRouter({ fetch: (url, init) => fetch(url, init as RequestInit), getKey: id => getProviderKey(id), now: () => Date.now(), getMode: () => state.settings.sttSpeed ?? 'fast' });
   return sttRouter;
 }
 let azureProvider: AzureTtsProvider | undefined;
@@ -186,8 +186,14 @@ function publishAI() {
   }
 }
 
+function withoutAttachments(next: ChatState): ChatState {
+  return { ...next, messages: next.messages.map(message => (message.attachment ? { ...message, attachment: undefined } : message)) };
+}
 const conversation = new ChatSession(localAI, next => {
   if (chat && !chat.isDestroyed()) chat.webContents.send(CHANNELS.chatState, next);
+  // The desktop bot speaks replies and shows captions in Live Talk, so it needs chat updates too.
+  // Screenshot thumbnails are for the chat window only: the overlay gets the same text without any image.
+  if (overlay && !overlay.isDestroyed()) overlay.webContents.send(CHANNELS.chatState, withoutAttachments(next));
 });
 // ---- Tools (files, commands, links) with a click-to-approve card for every risky action ----
 const toolApprovals = new ApprovalManager({
@@ -319,6 +325,14 @@ function createWindow(kind: WindowKind) {
     webPreferences: { preload: join(directory, '../preload/index.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true, webSecurity: true, spellcheck: false, devTools: !app.isPackaged },
   });
   windowKinds.set(win, kind);
+  // Forward renderer warnings/errors and our own "[voice]" breadcrumbs to the main log (no secrets are ever logged there).
+  win.webContents.on('console-message', (...args: unknown[]) => {
+    const first = args[0] as { message?: string; level?: string | number } | undefined;
+    const message = typeof first === 'object' && first && 'message' in first ? String(first.message) : String(args[2] ?? '');
+    const level = typeof first === 'object' && first && 'level' in first ? first.level : args[1];
+    const loud = level === 'warning' || level === 'error' || level === 2 || level === 3;
+    if (loud || message.startsWith('[voice]')) console.info(`[renderer:${kind}] ${message.slice(0, 300)}`);
+  });
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   win.webContents.on('will-navigate', event => event.preventDefault());
   win.webContents.on('will-attach-webview', event => event.preventDefault());
@@ -422,6 +436,7 @@ function updateTray() {
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: 'Sudo-chan · Local AI', enabled: false }, { type: 'separator' },
     { label: state.overlayVisible ? 'Hide companion' : 'Show companion', click: () => { if (state.overlayVisible) { overlay.hide(); state.overlayVisible = false; publish(); } else showOverlay(); } },
+    { label: 'Microphone: listen for my name', type: 'checkbox', checked: state.settings.wakeWordEnabled ?? true, click: item => { void saveSettings({ ...state.settings, wakeWordEnabled: item.checked }); } },
     { label: 'Pause companion animation', type: 'checkbox', checked: state.paused, click: item => { state.paused = item.checked; publish(); } },
     { label: 'Open chat', click: openChat }, { label: 'Settings', click: openSettings },
     { type: 'separator' }, { label: 'Quit Sudo-chan', click: () => app.quit() },
@@ -494,7 +509,7 @@ function sendChat(text: string, isVoice: boolean, vision?: StreamOptions['vision
 async function sendWithScreen(value: unknown) {
   const v = (value && typeof value === 'object' ? value : {}) as { text?: unknown; voice?: unknown; source?: unknown };
   const text = typeof v.text === 'string' ? v.text.trim() : '';
-  const isVoice = typeof v.voice === 'boolean' ? v.voice : Boolean(state.voiceCallActive);
+  const isVoice = typeof v.voice === 'boolean' ? v.voice : (v.source === 'wake' || Boolean(state.voiceCallActive));
   if (v.source !== 'wake' && v.source !== 'button') return { ok: false, error: 'Unknown screen request.' };
   const source = v.source;
   if (conversation.snapshot().busy) return { ok: false, error: 'Wait for this reply, or press Stop first.' };
@@ -609,7 +624,8 @@ function setupIPC() {
   }, ['chat', 'overlay']);
   handle(CHANNELS.sendScreen, (_e, value) => sendWithScreen(value), ['chat', 'overlay']);
   handle(CHANNELS.cancelScreen, () => cancelScreenCapture(), ['chat', 'overlay']);
-  handle(CHANNELS.stop, () => { cancelScreenCapture(); conversation.stop(); stopAllTools(); }, 'chat');
+  // Overlay may stop too (barge-in / "ruko" from the desktop bot); a stop also cancels a pending screen capture and running tools.
+  handle(CHANNELS.stop, () => { cancelScreenCapture(); conversation.stop(); stopAllTools(); }, ['chat', 'overlay']);
   handle(CHANNELS.toolApprovals, () => toolApprovals.list(), 'chat');
   handle(CHANNELS.toolApprovalReply, (_e, value) => {
     const v = value as { id?: unknown; decision?: unknown } | null;
@@ -914,12 +930,22 @@ function setupIPC() {
     const base64 = base64Audio.includes('base64,') ? base64Audio.split('base64,')[1] : base64Audio;
     const sttHint = typeof hint === 'string' ? hint.replace(/[^\p{L}\p{N}\s,.'-]/gu, ' ').slice(0, 300).trim() : '';
     // Gemini first (best on Urdu / Roman Urdu), then Groq Whisper, then OpenAI; keys come from per-provider storage.
+    const sttStarted = Date.now();
+    let clipLevel = '';
+    try {
+      const pcm = Buffer.from(base64, 'base64');
+      const samples = Math.floor((pcm.length - 44) / 2);
+      let peak = 0, sum = 0;
+      for (let i = 0; i < samples; i++) { const v = Math.abs(pcm.readInt16LE(44 + i * 2)) / 32768; if (v > peak) peak = v; sum += v * v; }
+      clipLevel = samples > 0 ? ` sec=${(samples / 16000).toFixed(1)} peak=${peak.toFixed(2)} rms=${Math.sqrt(sum / samples).toFixed(3)}` : '';
+    } catch { /* level logging is best effort */ }
     const result = await stt().transcribe({
       base64,
       mimeType: typeof mimeType === 'string' ? mimeType : 'audio/wav',
       language: typeof language === 'string' ? language : undefined,
       hint: sttHint || undefined,
     });
+    console.info(`[STT] ok=${result.ok} provider=${result.provider ?? '-'} ms=${Date.now() - sttStarted} audioKB=${Math.round(base64.length * 0.75 / 1024)}${clipLevel}${result.ok ? '' : ` err=${result.error}`}`);
     if (result.ok) return { ok: true, text: result.text, scriptWarning: result.scriptWarning };
     return { ok: false, error: result.error ?? 'Could not transcribe speech.', fallbackToBrowser: true, rateLimited: Boolean(result.rateLimited) };
   });

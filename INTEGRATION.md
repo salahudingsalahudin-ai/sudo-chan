@@ -58,3 +58,41 @@ Dev start takes 30-50 s on this machine. To go back: quit it and start `npm run 
 
 ## Merging for real
 `integrate` already contains everything. Fast-forward `voice-fix` (or `main`) to `integrate` once the manual checklist passes: `git merge --ff-only integrate`. Then remove the worktrees (`git worktree remove <path>`) and delete the symlinked `desktop/node_modules` only inside worktrees, never the main checkout's.
+
+---
+
+## Refresh 2 (voice-fix up to f11aaf2 merged into `integrate`)
+
+`voice-fix` gained Azure/Gemini quota work, CSP audio decode fix, lip-sync target fix, wake word ON by default with captions, mic dot toggle, glow and tray mic item, fast STT (`sttSpeed`, default fast), resume after an unclear barge-in plus stop commands, minimum voiced clip filter, chat replies sent to the overlay, `sendMessage(text, voice)`, and the "she can hear through the mic" prompt facts. All of it is merged here together with tools and screen assist.
+
+### Conflicts and how they were resolved
+- `DECISIONS.md`, `styles.css`: both sides kept.
+- `index.ts` (stop handler): kept the tools/screen body (`cancelScreenCapture(); conversation.stop(); stopAllTools();`) and took voice-fix's wider access (`['chat', 'overlay']`), so "ruko" from the desktop bot also cancels a pending screenshot and running tools. Tool approval requests and replies stay chat-only.
+- `local-ai.ts` (system prompt): kept the voice-hearing fact AND the tools/screen truthfulness lines. The voice prompt also tells her when tools are paused on a screenshot turn.
+- `App.tsx` (5 blocks): approval cards, stop/unclear handlers, screen badge, caption bubble and both settings dirty-checks all kept.
+
+### Fixes made while merging (new interactions)
+1. The overlay now also gets chat updates (so the desktop bot can speak and show captions), but screenshot thumbnails are stripped from what the overlay receives (`withoutAttachments`). Approval cards still go to the chat window only.
+2. A wake-triggered screenshot request is always a voice turn (it no longer depends on the racy `voiceCallActive`).
+3. "Sudo, ruko" (stop command right after the name) now only stops. It no longer opens a conversation window, greets or takes a screenshot.
+4. Wake fallback messages (when the screenshot cannot be taken) are also sent as voice.
+
+### Tests
+`npm run typecheck`, `node scripts/build.mjs` and `npm test` pass: 197 tests (6 new in `tests/integration-refresh.check.mjs`: prompt matrix for voice/tools/screenshot, stop-after-name, main wiring checks for stop/approvals/overlay attachments/startup safeStorage, settings defaults).
+
+### Not tested
+Real mic and speakers, the real wake-triggered screenshot end to end, approval cards on screen, the overlay caption with a real reply, Azure and Gemini audio. The wiring checks in the new test file read source text, so they only protect against accidental removal, not against runtime bugs.
+
+### Extra manual checklist items
+- Say "Sudo, kaise ho?": bot wakes, caption shows, she answers aloud (desktop bot only, chat window stays closed).
+- Interrupt her mid-sentence with a mumble: she resumes. Interrupt with "ruko ruko": she stays stopped.
+- Say "Sudo, ruko" while she talks: she stops, no screenshot, no greeting.
+- Click the mic dot: it turns grey and the mic stops; click again to resume. Also try the tray item "Microphone: listen for my name".
+- With "Let Sudo-chan use tools" ON, ask her to read a file: the approval card appears in the chat window only (never on the overlay), and saying "yes" aloud does nothing.
+- With screen assist ON, say "Sudo, ye error kya hai?": the "Dekh rahi hoon" badge shows on the overlay, the thumbnail shows only in the chat window, and she answers aloud.
+
+### Run the integrated app (quit the running Sudo-chan first: single-instance lock)
+```
+cd "/home/lenovo/Desktop/new 3/.claude/worktrees/agent-aee23de05faa2681a/desktop" && npm run dev
+```
+(`desktop/node_modules` in this worktree is a symlink to the main checkout's, so no install is needed.)

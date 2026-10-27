@@ -28,6 +28,8 @@ export interface SttDeps {
   fetch: FetchLike;
   getKey(provider: 'gemini' | 'groq' | 'openai'): string;
   now(): number;
+  /** 'fast' tries Groq Whisper first (about 0.5 s) before Gemini; 'accurate' (default) tries Gemini first. */
+  getMode?(): string | undefined;
 }
 
 // '-latest' aliases: the dated 2.5 names returned 404 for the user's key. Lite first: it answered a clip in ~1.8 s, while gemini-flash-latest exceeded the 9 s timeout in a sanity check.
@@ -175,7 +177,9 @@ export class SttRouter {
   async transcribe(req: SttRequest): Promise<SttOutcome> {
     let sawRateLimit = false;
     const lang = normalizeSttLang(req.language);
-    for (const route of this.routes) {
+    const fast = this.deps.getMode?.() === 'fast';
+    const ordered = fast ? [...this.routes.filter(r => r.provider === 'whisper'), ...this.routes.filter(r => r.provider !== 'whisper')] : this.routes;
+    for (const route of ordered) {
       const key = this.deps.getKey(route.key);
       if (!key) continue;
       const now = this.deps.now();
@@ -183,7 +187,9 @@ export class SttRouter {
         if (this.blockedByRateLimit[route.id]) sawRateLimit = true;
         continue;
       }
+      const routeStarted = this.deps.now();
       const result = await route.run(req, key);
+      console.info(`[STT] route=${route.id} status=${result.status} chars=${result.text.length} ms=${this.deps.now() - routeStarted}`);
       if (result.status === 429) {
         this.blockedUntil[route.id] = this.deps.now() + 60_000;
         this.blockedByRateLimit[route.id] = true;
@@ -196,9 +202,16 @@ export class SttRouter {
         this.blockedByRateLimit[route.id] = false;
         continue;
       }
+      // Fast mode: Whisper often writes Urdu speech in Arabic script garbage. If we did not ask for Urdu, let Gemini have a go instead.
+      if (fast && route.provider === 'whisper' && result.text && hasArabicScript(result.text) && lang !== 'ur') continue;
       if (result.text && isValidTranscription(result.text)) {
         const arabic = hasArabicScript(result.text);
         return { ok: true, text: result.text, provider: route.provider, scriptWarning: arabic && lang !== 'ur' ? true : undefined };
+      }
+      // Fast mode: a short rejected Whisper result (one or two words) is almost always noise or a half-heard word;
+      // asking Gemini as well just adds ~2 s of waiting and usually returns nothing. Only longer garbage gets a second opinion.
+      if (fast && route.provider === 'whisper' && result.text.trim().split(/\s+/).filter(Boolean).length < 4) {
+        return { ok: false, error: 'Could not transcribe speech.' };
       }
       // A valid but empty/garbage transcription: do not burn more quota on other providers for silence.
       if (route.provider === 'gemini') return { ok: false, error: 'Could not transcribe speech.' };

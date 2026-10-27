@@ -96,3 +96,18 @@
 - Branch `integrate` = voice-fix + tools + screen. Conflicts and their resolutions are listed in INTEGRATION.md.
 - Screenshot turn with tools enabled: vision model answers without tools (graceful degradation), the prompt says tools are not available on that turn (`toolsPaused`); tools turn without screenshot says she cannot see the screen; both off = unchanged baseline. Stop / Stop all actions cancel screen capture, reply and tools together.
 - Tests: 175/175 including tests/integration.check.mjs (mocked fetch). Not tested: the integrated app on screen, real wake-word screenshot flow, real tool calls.
+
+## Wake word default ON and desktop-bot captions (user request)
+- The user wants to say "Sid"/"Sudo" and talk to the desktop bot without opening the chat window. The flow already existed (wake -> Live Talk target `overlay` -> replies spoken by the overlay; sending a message never opens the chat). Two changes: `wakeWordEnabled` now defaults to ON (an unset value counts as ON; the "Listening for ..." indicator and pause button stay visible, and it can be turned off in Settings), and during overlay Live Talk the desktop bot shows a caption bubble with what was heard and her reply.
+- This reverses the earlier privacy-first default OFF, at the user's explicit request. Standby still sends only short, rate-limited clips to speech-to-text.
+
+## Resume interrupted reply / stop commands (user request)
+- Behaviour: a barge-in remembers where she was (`speech.ts`: sentence index plus, when the clip was playing, the exact heard offset from `tts-player.ts`, reported by the new `onStopSpeaking` listener). If the interruption is not understood (STT returned nothing usable), she resumes from that moment minus a 0.4 s rewind (exact via `AudioBufferSourceNode.start(0, offset)`, the interrupted clip is replayed from its stored buffer, the next sentences are synthesized as usual). If the user says a stop command (`isStopCommand`: stop, ruko, roko roko, bas karo, chup, khamosh, band karo, Urdu script variants, at most 4 words, no question) she stays stopped and the text is NOT sent to the chat.
+- Only `stopSpeaking('barge-in')` creates the saved state. Stop button, mute, window close, errors, app quit and any new reply (`new-reply`) forget it. A new real utterance also forgets it.
+- Limits: resume only within 20 s of the interruption and at most 2 resumes per reply (a resumed reply can be interrupted again), so it cannot loop. `speak()` is only called for complete assistant messages, so the whole reply is already available; nothing is resumable while a reply is still streaming.
+- Short-clip rule: the length that counts is the speech itself (`VoiceSession.voicedMs`, frames above the speech threshold), not the padded clip. If the unclear utterance is under 1 s she stays stopped (it is most likely "ruko" that the recogniser missed); from 1 s up she resumes. This is a heuristic, tune `SHORT_INTERRUPTION_MS` if it feels wrong.
+- Fixed on the way: an exception inside the transcription callback left `isProcessingTranscribe` stuck true (the mic then ignored all later speech); it now resets in a `finally`.
+- STT rate limit or network error also counts as "unclear" (she resumes), because from the user's side she simply was not understood.
+
+## Integration refresh 2
+- Merged voice-fix f11aaf2 into `integrate`. Overlay chat updates carry no screenshot thumbnails; wake-triggered screen requests are voice turns; "name + stop word" only stops. Details in INTEGRATION.md "Refresh 2".

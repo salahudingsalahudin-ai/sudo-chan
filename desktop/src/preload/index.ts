@@ -18,7 +18,7 @@ const api: DesktopAPI = {
   saveSettings: settings => ipcRenderer.invoke(CHANNELS.save, settings),
   resetPosition: () => ipcRenderer.invoke(CHANNELS.reset),
   setInteractive: interactive => ipcRenderer.send(CHANNELS.interactive, interactive),
-  sendMessage: text => ipcRenderer.invoke(CHANNELS.send, text),
+  sendMessage: (text, voice) => ipcRenderer.invoke(CHANNELS.send, voice === undefined ? text : { text, voice }),
   getMessages: () => ipcRenderer.invoke(CHANNELS.messages),
   onChat: callback => {
     const listener = (_event: Electron.IpcRendererEvent, state: ChatState) => callback(state);

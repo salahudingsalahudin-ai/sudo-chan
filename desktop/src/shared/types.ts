@@ -24,6 +24,8 @@ export interface Settings {
   sttProvider?: SttProviderId;
   sttLanguage?: SttLanguage;
   ttsProvider?: TtsProviderId;
+  /** Speech recognition: 'accurate' = Gemini first (better Urdu, ~2-3 s), 'fast' = Groq Whisper first (~0.5 s). */
+  sttSpeed?: 'accurate' | 'fast';
   ttsVoice?: string;
   ttsGeminiVoice?: string;
   /** 'auto' (by language) or an Azure neural voice id. */
@@ -122,7 +124,7 @@ export interface DesktopAPI {
   saveSettings(settings: Settings): Promise<ActionResult>;
   resetPosition(): Promise<void>;
   setInteractive(interactive: boolean): void;
-  sendMessage(text: string): Promise<ActionResult>;
+  sendMessage(text: string, voice?: boolean): Promise<ActionResult>;
   getMessages(): Promise<ChatState>;
   onChat(callback: (state: ChatState) => void): () => void;
   stopReply(): Promise<void>;
