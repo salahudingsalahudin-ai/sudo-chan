@@ -93,6 +93,8 @@ function Rig({ progress, pointer, interactions, quietDayActive, quietDayMoment, 
       const wc = weights.current.cards;
       x = THREE.MathUtils.lerp(x, fit.side * viewW, wc);
       scale *= THREE.MathUtils.lerp(1, fit.scale, wc);
+      // Small desktop windows: shrink her in the screen-help scene so she clears the wide demo panel on the left.
+      scale *= 1 - 0.17 * (1 - smoothstep(1100, 1300, state.size.width)) * weights.current.screen;
     }
     if (quietDayActive) {
       x = mobile ? 0.32 : viewW * 0.2;
