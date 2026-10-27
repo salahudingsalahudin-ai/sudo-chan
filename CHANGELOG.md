@@ -39,4 +39,4 @@ First public prototype: the desktop companion for Linux, plus the website with a
 - The default voice is robotic. A natural voice needs a Gemini or Azure key.
 - API keys are stored on your computer but not strongly encrypted yet.
 - Features that act on your computer (files, commands) or look at your screen are off by default and ask before they act. They have only been tested by their developers.
-- The AppImage may need `--no-sandbox` on systems that restrict unprivileged user namespaces (for example Ubuntu 24.04). The `.deb` does not.
+- The AppImage needs FUSE 2 (`libfuse2`) on recent Ubuntu. Only tested on one Linux machine.

@@ -66,7 +66,7 @@ To take the download down again, set `RELEASE_PUBLISHED` back to `false` and red
 - The default voice is robotic. Natural voices need a Gemini or Azure key; Gemini's free quota is tiny.
 - Users must bring their own API key. Keys are stored on the user's computer but not strongly encrypted yet.
 - Tools that act on the computer (files, commands) and screen help are on separate branches and are **not** in a release built from `main` unless you merge them. They are off by default and ask first.
-- The packaged app was only tested on one Linux machine. On Ubuntu 24.04 and other systems that restrict unprivileged user namespaces, the AppImage may need `--no-sandbox` (the `.deb` installs a setuid sandbox helper and does not).
+- The packaged app was only tested on one Linux machine. The AppImage needs FUSE 2 (`sudo apt install libfuse2` on Ubuntu 22.04+; this laptop does not have it, so the AppImage itself was only run after `--appimage-extract`). On systems that restrict unprivileged user namespaces (Ubuntu 24.04) the AppImage starts itself with `--no-sandbox`; the `.deb` instead installs an AppArmor profile. Neither was tested on 24.04.
 
 ## Code signing (optional, recommended before wider release)
 
