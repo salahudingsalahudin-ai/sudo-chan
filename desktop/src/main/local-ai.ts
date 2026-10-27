@@ -3,6 +3,7 @@ import type { AIMode, CloudProviderId, ModelMeta } from '../shared/types.js';
 import { CLOUD_PRESETS } from '../shared/validation.js';
 import { runToolLoop, ToolLoopHttpError, ToolsUnsupportedError } from './tools/agent-loop.js';
 import type { ToolRuntimeLike } from './tools/types.js';
+import { describeToolCall } from './tools/trace.js';
 import type { VisionTarget } from '../shared/screen-assist.ts';
 import { runVisionChat, VisionError } from './vision-chat.ts';
 import { tokensFromChatPayload } from '../shared/usage.ts';
@@ -95,9 +96,11 @@ function safeJson(text: string): unknown {
 export const TOOLS_PROMPT = [
   '[TOOLS ARE ON]',
   'You can act on the user\'s computer ONLY through tool calls:',
-  '- read-only (home folder only): read_file, list_dir, search_files, get_system_info',
+  '- read-only (home folder only): read_file (about 6 KB per call; for a bigger file use start_line/end_line and follow the "call again with start_line=N" footer), list_dir, search_files, get_system_info',
   '- no click needed, private to this app: save_note, list_notes, read_note (your own notebook), set_reminder (in_minutes or at_time like "17:30"), list_reminders, cancel_reminder',
-  '- need the user to click Allow on screen every time: write_file, append_file, run_command (one program, no pipes), open_url, open_app',
+  '- need the user to click Allow on screen every time: edit_file, write_file, append_file, run_command (one program, no pipes), open_url, open_app',
+  'Changing files: to change an existing file read the needed part (read_file), then call edit_file with old_text copied EXACTLY (it must match one place only; add neighbouring lines if the tool says it matches several) and new_text. Use write_file ONLY for a new file, with content under about 2500 characters; for more, write the first part and use append_file. Never rewrite a whole existing file with write_file for a small change. Do not re-read a file you already have.',
+  'Lines like [tools: ...] in earlier assistant messages are a log the app added of what tools did (paths only). Use it for context such as "that file", but never write such a line yourself and never speak it.',
   'Rules: use a tool only when the request needs it. Before a risky action say in one short sentence what you are about to do; the user approves with a button on screen, NOT by voice or by saying "yes".',
   'If a tool result says blocked, denied, timed out or NOT done, tell the user plainly and do not pretend otherwise. NEVER claim you read, wrote, ran or opened anything unless a tool result confirms it.',
   'You cannot see the screen on a turn with tools (a screenshot turn has no tools) and you cannot browse the web; secrets (.ssh, .env, passwords, browser data) are off limits.',
@@ -231,6 +234,8 @@ export interface StreamOptions {
   voice?: boolean;
   /** Present only when the user enabled "Let Sudo-chan use tools". */
   tools?: ToolRuntimeLike;
+  /** Tool turns report a short phrase per finished tool call ("edited ~/a.py"): paths and verbs only, never contents. */
+  onToolNote?: (note: string) => void;
   /** One screenshot turn: the image goes only to the vision targets, never into history or logs. */
   vision?: { dataUri: string; thumbnail?: string; targets: VisionTarget[]; fallbackText: string; /** Seconds since a re-used screenshot was taken (undefined/0 = fresh). */ ageSeconds?: number; /** Called with the vision call's duration so main can log one combined [Screen] timing line. */ onTiming?: (visionMs: number) => void };
 }
@@ -581,6 +586,13 @@ export class LocalAI {
           signal,
           onText,
           maxTokens: cloud.provider === 'groq' ? 950 : 1500,
+          // Only requests that may contain a file write/edit get more room; Groq counts the requested tokens against its
+          // 7000 tokens-per-minute budget, so this stays modest.
+          writeMaxTokens: cloud.provider === 'groq' ? 1900 : 3000,
+          onToolResult: (name, args, result) => {
+            const note = describeToolCall(name, args, result);
+            if (note) options.onToolNote?.(note);
+          },
           onToolCall: name => console.log(`[Tools] model called ${name}`),
           // Groq limits input tokens per minute per model and tool turns re-send the tool list every step,
           // so a second model keeps the turn alive when the main one answers 429.
