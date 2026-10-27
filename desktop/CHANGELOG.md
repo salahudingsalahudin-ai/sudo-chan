@@ -30,6 +30,17 @@ Wake mode still depended on a cloud round trip to judge every clip. Now a local 
 - **Storage:** `userData/local-wake.json`, mode 0600, atomic, validated on read and write; feature vectors only, never audio. Three IPC handlers (get: overlay+settings; save/delete: settings only).
 - **Log:** `[wake-local] candidates=N rejected=M sent=K mode=...` once a minute, counts only.
 - Tests: `tests/local-wake.check.mjs` (25) + `tests/local-wake-pipeline.check.mjs` (4); one new verify wiring check. `npm run verify` 38/38, unit tests 491 pass (462 before; two unrelated timing tests flaked under load in earlier runs, a rerun was clean). Everything is verified on synthetic audio only.
+## installer-release (on top of main 3c689fb): packaging, update check wired in
+
+- **Packaging** (`package.json` `build`): AppImage + deb for Linux, nsis (Windows) and dmg (macOS, x64 + arm64) configured but NOT built or tested here.
+  Artifact names `Sudo-chan-<version>-<os>-<arch>.<ext>`, icons in `assets/`, executable `sudo-chan`, desktop entry + category Utility,
+  maintainer/author `Sid <noreply@sudo-chan.vercel.app>` (placeholder, owner TODO). Tray icon now read from `assets/icon.png` (the old
+  `build/icon.png` path never existed, so the tray always showed a 1x1 fallback). The Linux X11 relaunch in `bootstrap.ts` is unchanged and works
+  the same packaged; `start()` still never touches `safeStorage`.
+- **Update check wired in:** `src/shared/update-check.ts` (moved from `src/main`) runs in the main process 20 s after start and is re-evaluated hourly,
+  but asks GitHub at most once per 24 h. Settings shows one calm line + a switch (`updateCheckEnabled`, default on); IPC `updateNotice` is Settings-only
+  and returns a version number only. Never in smoke runs, never a popup, never on the overlay, no download. Tests in `tests/update-check.check.mjs`.
+- Release docs: `RELEASING.md` (owner steps), root `CHANGELOG.md`, `.github/workflows/{ci,release}.yml` (checksum file is `SHA256SUMS`).
 
 ## quota-saver (on top of mic-indicator): wake mode stops burning the free Groq listening allowance
 

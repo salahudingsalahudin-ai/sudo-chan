@@ -59,6 +59,7 @@ const api: DesktopAPI = {
   transcribeAudio: (base64Audio, mimeType, language, hint) => ipcRenderer.invoke(CHANNELS.transcribeAudio, { base64Audio, mimeType, language, hint }),
   playAudio: dataUri => ipcRenderer.invoke(CHANNELS.playAudio, dataUri),
   getUsage: () => ipcRenderer.invoke(CHANNELS.usage),
+  getUpdateNotice: () => ipcRenderer.invoke(CHANNELS.updateNotice),
   getKeyStorageInfo: () => ipcRenderer.invoke(CHANNELS.keyStorageInfo),
   clearSavedKeys: () => ipcRenderer.invoke(CHANNELS.clearKeys),
   getAzure: () => ipcRenderer.invoke(CHANNELS.azureGet),

@@ -4,6 +4,7 @@
 // Order (build runs before the unit tests because several tests import ../dist/*):
 //   1 typecheck   2 production build   3 unit tests   4 static wiring checks   5 REAL Electron smoke run
 // Prints a PASS/FAIL table and exits non-zero on any FAIL. Use `--skip-smoke` to skip step 5.
+// `--packaged=release/linux-unpacked/sudo-chan` runs step 5 against a packaged build (electron-builder output) instead of `electron .`.
 // What this can and cannot prove is documented in VERIFY.md (no microphone, speakers, real screenshots, real model).
 import { spawn, spawnSync } from 'node:child_process';
 import { createServer } from 'node:http';
@@ -92,7 +93,7 @@ function functionBody(source, header) {
     cloudConfig: ['settings'], fetchCloudModels: null, quit: ['settings'], reset: ['settings'], messages: ['chat'],
     welcome: ['overlay'], stop: ['chat', 'overlay'], sendScreen: ['chat', 'overlay'], cancelScreen: ['chat', 'overlay'],
     toolApprovals: ['chat'], toolApprovalReply: ['chat'], toolsStopAll: ['chat', 'overlay', 'settings'],
-    usage: ['settings', 'chat'], clearKeys: ['settings'], keyStorageInfo: ['settings'],
+    usage: ['settings', 'chat'], updateNotice: ['settings'], clearKeys: ['settings'], keyStorageInfo: ['settings'],
     tasksList: ['chat'], tasksAdd: ['chat'], tasksAct: ['chat'],
     localWakeGet: ['overlay', 'settings'], localWakeSave: ['settings'], localWakeDelete: ['settings'],
   };
@@ -178,8 +179,10 @@ function functionBody(source, header) {
 async function smoke() {
   if (args.has('--skip-smoke')) return add('smoke', 'real Electron smoke run', 'SKIP', '--skip-smoke');
   if (!process.env.DISPLAY && !process.env.WAYLAND_DISPLAY) return add('smoke', 'real Electron smoke run', 'SKIP', 'no DISPLAY/WAYLAND_DISPLAY (run under xvfb-run or a desktop session)');
-  const electron = join(root, 'node_modules/electron/dist/electron');
-  if (!existsSync(electron) || !existsSync(join(root, 'dist/main/bootstrap.js'))) return add('smoke', 'real Electron smoke run', 'FAIL', 'electron binary or dist/main/bootstrap.js missing (build first)');
+  const packagedArg = process.argv.slice(2).find(a => a.startsWith('--packaged='))?.slice('--packaged='.length);
+  const packaged = packagedArg ? join(root, packagedArg) : undefined;
+  const electron = packaged ?? join(root, 'node_modules/electron/dist/electron');
+  if (!existsSync(electron) || (!packaged && !existsSync(join(root, 'dist/main/bootstrap.js')))) return add('smoke', packaged ? 'packaged app smoke run' : 'real Electron smoke run', 'FAIL', packaged ? `packaged binary not found: ${packagedArg}` : 'electron binary or dist/main/bootstrap.js missing (build first)');
 
   const base = mkdtempSync(join(tmpdir(), 'sudo-chan-verify-'));
   const home = join(base, 'home');
@@ -226,8 +229,8 @@ async function smoke() {
 
   const launch = extra => new Promise(resolve => {
     const started = Date.now();
-    const child = spawn(electron, ['.', '--smoke-test', '--ozone-platform=x11', ...extra], {
-      cwd: root,
+    const child = spawn(electron, [...(packaged ? [] : ['.']), '--smoke-test', '--ozone-platform=x11', ...extra], {
+      cwd: packaged ? dirname(electron) : root,
       stdio: ['ignore', 'pipe', 'pipe'],
       env: { ...process.env, HOME: home, SUDO_CHAN_SMOKE_HIDDEN: '1', SUDO_CHAN_SMOKE_REPORT: reportFile, SUDO_CHAN_SMOKE_ENDPOINT: endpoint, SUDO_CHAN_SMOKE_HOME: home, SUDO_CHAN_SMOKE_APPROVAL_MS: '1500' },
     });

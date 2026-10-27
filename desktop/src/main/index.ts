@@ -49,6 +49,7 @@ import { SystemHealthMonitor } from './system-health.js';
 import { captureScreen } from './screen-capture.ts';
 import { DEFAULT_SCREEN_PROMPT, pickVisionTargets, VISION_DEFAULT_MODELS } from '../shared/screen-assist.ts';
 import { ScreenFlow } from '../shared/screen-flow.ts';
+import { checkForUpdate, toNotice, type UpdateInfo, type UpdateState } from '../shared/update-check.ts';
 import type { FlowStatus } from '../shared/screen-flow.ts';
 import { checkVisibleWindows } from './screen-guard.ts';
 import type { VisionProviderInfo, VisionTarget } from '../shared/screen-assist.ts';
@@ -81,6 +82,8 @@ interface StoreSchema {
   screenAssistConsent?: boolean;
   /** Pending reminders (set by the assistant's set_reminder tool). */
   reminders?: Reminder[];
+  /** When the update check last ran and what it found (a version number and a github.com link; no keys, no identifiers). */
+  updates?: UpdateState;
 }
 
 const smokeTest = process.argv.includes('--smoke-test');
@@ -139,6 +142,30 @@ let localWakeFile: LocalWakeFile | undefined;
 function localWake(): LocalWakeFile {
   localWakeFile ??= new LocalWakeFile(join(app.getPath('userData'), 'local-wake.json'));
   return localWakeFile;
+}
+/** Update CHECK only (see shared/update-check.ts): the fetch happens here in the main process, the pages never get network access. */
+let lastUpdateInfo: UpdateInfo | undefined;
+let updateTimer: ReturnType<typeof setInterval> | undefined;
+async function runUpdateCheck(): Promise<void> {
+  try {
+    lastUpdateInfo = await checkForUpdate({
+      fetch: (url, init) => fetch(url, init),
+      now: () => Date.now(),
+      currentVersion: () => app.getVersion(),
+      isEnabled: () => state.settings.updateCheckEnabled !== false,
+      readState: () => store.get('updates'),
+      writeState: next => store.set('updates', next),
+    });
+  } catch {
+    // Best effort: a failed check must never disturb the app.
+  }
+}
+function startUpdateChecks(): void {
+  // Never in smoke runs (they must not touch the network). The first check waits a little so startup stays quiet.
+  if (smokeTest) return;
+  setTimeout(() => void runUpdateCheck(), 20_000);
+  // The checker itself allows a real request at most once per 24 h (and one retry per hour after a failure).
+  updateTimer = setInterval(() => void runUpdateCheck(), 60 * 60 * 1000);
 }
 localAI.usage = {
   groqChat: (headers, ok) => usage().groqChat(headers, ok),
@@ -982,6 +1009,8 @@ function setupIPC() {
     console.info(`[TTS] engine=${result.provider ?? 'none'} voice=${result.voice ?? '-'} lang=${lang} chars=${clean.length} ok=${result.ok} ms=${Date.now() - synthStarted}${result.cached ? ' cached' : ''}${result.ok ? '' : ` status=${result.status ?? '-'}`}`);
     return result.ok ? { ok: true, dataUri: result.dataUri } : { ok: false };
   });
+  // The calm "newer version" line in Settings. Only a version number crosses to the page; no URL, no network from the renderer.
+  handle(CHANNELS.updateNotice, () => toNotice(lastUpdateInfo, state.settings.updateCheckEnabled !== false), 'settings');
   // How keys are stored, in words (single source: describeKeyStorage). Never calls safeStorage.
   handle(CHANNELS.keyStorageInfo, () => describeKeyStorage(keyPlan, process.platform), 'settings');
   // "Remove saved keys": click + confirm in Settings. Clears every provider key (chat, Gemini, Groq, Azure ...) from disk and memory.
@@ -1241,7 +1270,7 @@ async function start() {
   // X11's native shape routes input directly; never disable the entire Linux
   // overlay while waiting for a cursor sample to make it interactive again.
   state.shortcutAvailable = registerShortcut(state.settings.shortcut);
-  const icon = nativeImage.createFromPath(join(directory, '../../build/icon.png'));
+  const icon = nativeImage.createFromPath(join(directory, '../../assets/icon.png'));
   if (!smokeHidden) {
     tray = new Tray(icon.isEmpty() ? nativeImage.createFromDataURL(TRAY_ICON) : icon.resize({ width: 22, height: 22 }));
     tray.setToolTip('Sudo-chan · Local companion'); tray.on('click', openChat); updateTray();
@@ -1252,6 +1281,7 @@ async function start() {
   if (smokeTest) console.log('SUDO_CHAN_READY', JSON.stringify({ backend: state.displayBackend, shortcut: state.shortcutAvailable }));
   if (smokeTest) void runSmoke();
   void checkAI().catch(() => {});
+  startUpdateChecks();
 
   pomodoroTimer = new PomodoroTimer({
     onBreak: msg => setHappy(msg, 7000),
@@ -1291,6 +1321,7 @@ app.on('before-quit', () => {
   healthMonitor?.stop();
   quitting = true; globalShortcut.unregisterAll();
   if (resetInterval) clearInterval(resetInterval);
+  if (updateTimer) clearInterval(updateTimer);
   clearTimeout(happyTimer); clearTimeout(positionTimer); clearTimeout(displayTimer);
   saveOverlayPosition();
   tray?.destroy();
