@@ -21,16 +21,16 @@ The API is `POST /api/waitlist`. It validates and lowercases email addresses, re
 
 ## Character model
 
-The scene in `components/SudoChanCanvas.tsx` looks for `public/models/sudo-chan.glb` and loads it when present. If it is absent or fails to load, it renders the procedural ceramic bot instead. Replace the GLB at that path to use a production character model. Keep the model centered around the origin and facing the camera along negative Z; the existing visor and chest effects assume that orientation. `components/SudoChanJourney.tsx` dynamically imports the 3D scene only when WebGL is available; touch devices and reduced-motion mode use the tracked static companion.
+The 3D scene lives in `components/SudoChanCanvas.tsx` with its parts in `components/three/`: a procedural, original anime-style companion (`CompanionBot`, toon-shaded with an outline and a rim light), a listening/speaking glow ring (`ListeningRing`, green = listening, violet = speaking, the same colours as the desktop app), four orbiting UI cards with a depth-of-field style blur (`FloatingCards`) and one explanatory prop per scroll scene (`StoryProps`: wake-word chip, approval card with Allow/Deny, screen frame with a consent button, privacy lock). The listening and speaking animation is a made-up demo loop (`sampleVoiceDemo` in `lib/heroScene.ts`); nothing reads the microphone. Everything is procedural, with no model download. Optionally, if `USE_REAL_MODEL` in `components/sudoChanConfig.ts` is turned on and `public/models/sudo-chan.glb` exists, `components/three/GlbBot.tsx` loads that model instead of the procedural character (the loader is imported on demand). `lib/heroScene.ts` holds the pure helpers (scene poses, story weights, renderer choice) and is unit tested. `components/SudoChanJourney.tsx` mounts the 3D scene only when `chooseRenderer` says so: phones and touch devices, reduced motion, Save-Data, low-core or low-memory devices and missing WebGL get the lightweight SVG twin (`components/CompanionSvg.tsx`). A WebGL context loss also falls back to the SVG companion.
 
 All landing page copy and scene labels are collected in `content.ts`.
 
 ## Notes
 
 - Seven chapters create a 910vh scroll journey. ScrollTrigger scrubs the 3D camera and world transitions, while Lenis smooths scrolling.
-- The procedural fallback keeps the page usable without a model asset. The optional GLB can include a rig or use the existing runtime head tracking.
-- Three.js effects are capped at DPR 2. Touch devices hide the custom cursor; reduced-motion preferences suppress UI animation.
-- Latest production build: 154 kB first-load JavaScript for `/`. The WebGL scene is code-split (about 250 KiB gzip) and loads only on desktop browsers with WebGL; touch devices, reduced-motion, low-memory/low-core devices and Save-Data connections get the lightweight CSS/SVG companion.
+- The lightweight SVG companion keeps the page usable without WebGL. On phones she greets you in the hero and then steps aside, so she never sits on the text.
+- Three.js rendering is capped at DPR 1.5 (1.25 on weaker machines) and stops completely when the scene is off-screen or the tab is hidden. Touch devices hide the custom cursor; reduced-motion preferences suppress UI animation.
+- Latest production build: 155 kB first-load JavaScript for `/`. The WebGL scene is code-split (roughly 250 KiB gzip, three.js included) and is imported only on desktop browsers that pass `chooseRenderer`.
 
 ## Validation
 
