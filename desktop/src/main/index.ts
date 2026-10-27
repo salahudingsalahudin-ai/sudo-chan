@@ -755,12 +755,14 @@ function setupIPC() {
     const base64 = base64Audio.includes('base64,') ? base64Audio.split('base64,')[1] : base64Audio;
     const sttHint = typeof hint === 'string' ? hint.replace(/[^\p{L}\p{N}\s,.'-]/gu, ' ').slice(0, 300).trim() : '';
     // Gemini first (best on Urdu / Roman Urdu), then Groq Whisper, then OpenAI; keys come from per-provider storage.
+    const sttStarted = Date.now();
     const result = await stt().transcribe({
       base64,
       mimeType: typeof mimeType === 'string' ? mimeType : 'audio/wav',
       language: typeof language === 'string' ? language : undefined,
       hint: sttHint || undefined,
     });
+    console.info(`[STT] ok=${result.ok} provider=${result.provider ?? '-'} ms=${Date.now() - sttStarted} audioKB=${Math.round(base64.length * 0.75 / 1024)}${result.ok ? '' : ` err=${result.error}`}`);
     if (result.ok) return { ok: true, text: result.text, scriptWarning: result.scriptWarning };
     return { ok: false, error: result.error ?? 'Could not transcribe speech.', fallbackToBrowser: true, rateLimited: Boolean(result.rateLimited) };
   });

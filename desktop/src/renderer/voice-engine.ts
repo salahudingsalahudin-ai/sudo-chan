@@ -505,7 +505,7 @@ export class VoiceSession {
           this.speechChunks.push(new Float32Array(inputData));
 
           if (!this.silenceTimer) {
-            // Conversational silence timeout (750ms allows natural speech flow without cutting off mid-sentence)
+            // Conversational silence timeout (600ms keeps replies snappy while still allowing short natural pauses)
             this.silenceTimer = setTimeout(() => {
               this.silenceTimer = null;
               this.isSpeakingSpeech = false;
@@ -515,7 +515,7 @@ export class VoiceSession {
                   : undefined;
                 void this.dispatchTranscription(sampleRate, this.callbacks, avgPitch);
               }
-            }, 750);
+            }, 600);
           }
         } else {
           // Standby background ambient: maintain circular pre-roll buffer (~340ms)

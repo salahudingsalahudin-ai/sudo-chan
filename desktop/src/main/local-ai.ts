@@ -507,6 +507,7 @@ export class LocalAI {
     if (!model) throw new LocalAIError('Choose a Cloud API model in Settings → Local AI.');
 
     console.log(`[Cloud AI] Stream request model: ${model}`);
+    const streamT0 = Date.now();
 
     const providerLabel = CLOUD_PRESETS[cloud.provider]?.label || cloud.provider;
     const systemPrompt = buildSystemPrompt({
@@ -602,7 +603,7 @@ export class LocalAI {
           const choices = (chunk as { choices?: { delta?: { content?: unknown }; message?: { content?: unknown }; finish_reason?: string }[] })?.choices;
           const finishReason = choices?.[0]?.finish_reason;
           if (finishReason) {
-            console.log(`[Cloud AI] Stream finish_reason: "${finishReason}"`);
+            console.log(`[Cloud AI] Stream finish_reason: "${finishReason}" ms=${Date.now() - streamT0}`);
             if (finishReason === 'length') {
               console.warn('[Cloud AI] Note: reply reached max_tokens length limit.');
             }
