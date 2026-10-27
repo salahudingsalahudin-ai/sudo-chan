@@ -11,14 +11,15 @@ import { useLipSync } from './lipsync';
 import { escapeAction, panelPlan } from '../shared/overlay-panels.ts';
 import { ConversationWindow, DEFAULT_WAKE_ALIASES, WakeGate, buildWakeHint, matchWakeWord } from '../shared/wake-word.ts';
 import { approvalHeadline, approvalSecondsLeft, approvalSpokenLine, mergeApprovals, reduceApprovals } from '../shared/approval-ui.ts';
-import { clearInterruptedSpeech, getMutedPreference, hasInterruptedSpeech, resumeInterruptedSpeech, setMutedPreference, speak, stopSpeech } from './speech';
+import { clearInterruptedSpeech, getLastBotSpeech, getMutedPreference, hasInterruptedSpeech, resumeInterruptedSpeech, setMutedPreference, speak, stopSpeech } from './speech';
 import { isStopCommand, unclearAction } from '../shared/stop-intent.ts';
 import { routeSpeech } from '../shared/intent.ts';
 import { RemoveKeysRow, useKeyStorageInfo } from './KeyStorage';
 import { runChatVoiceTurn } from '../shared/chat-voice-turn.ts';
 import { DEFAULT_BARGE_IN_SENSITIVITY } from '../shared/barge-in.ts';
 import { formatResetLabel } from '../shared/usage.ts';
-import { isSpeakingNow, stopSpeaking } from './tts-player';
+import { getLastStop, isSpeakingNow, stopSpeaking } from './tts-player';
+import { isPhantomTranscript, isSelfEchoTranscript } from '../shared/stt-hallucination.ts';
 import { ScreenPanel } from './ScreenPanel';
 import { VoiceSession, type BargeInInfo, getVoiceProfile, isSpeakerMatch, recordVoiceSample } from './voice-engine';
 import type { VoiceProfile } from './voice-engine';
@@ -95,6 +96,21 @@ function handleBargeIn(info?: BargeInInfo) {
   const detectToStoppedMs = Math.round(stoppedAt - detectedAt);
   console.info(`[barge-in] speech→detect ${speechToDetectMs}ms, detect→stopped ${detectToStoppedMs}ms`);
   (window.__bargeInLatency ??= []).push({ speechToDetectMs, detectToStoppedMs });
+}
+/** True if this transcript is Whisper noise (prompt leak, subtitle junk) or the bot's own name coming back through the speakers. */
+function isPhantomOrSelfEcho(text: string, settings: Settings): boolean {
+  const names = [settings.customWakeWord ?? '', ...(settings.wakeAliases ?? [])].filter(Boolean);
+  if (isPhantomTranscript(text, { names })) {
+    console.info('[voice] transcript ignored: looks like a speech-to-text hallucination');
+    return true;
+  }
+  const lastStop = getLastStop();
+  const sinceMs = isSpeakingNow() ? 0 : lastStop ? Date.now() - lastStop.at : Number.POSITIVE_INFINITY;
+  if (isSelfEchoTranscript(text, getLastBotSpeech(), sinceMs, { names })) {
+    console.info('[voice] transcript ignored: matches the bot\'s own last words (self-echo)');
+    return true;
+  }
+  return false;
 }
 /** One approval card per risky action. Only a click on these buttons approves; speech never does. */
 function ToolApprovalCards({ approvals, busy }: { approvals: ToolApprovalRequest[]; busy: boolean }) {
@@ -280,6 +296,7 @@ function Overlay({ state }: { state: AppState }) {
         if (!text.trim()) return;
         const currentLive = isOverlayVoiceActiveRef.current;
         const currentSettings = stateRef.current.settings;
+        if (isPhantomOrSelfEcho(text, currentSettings)) return;
 
         if (!currentLive) {
           // Standby: fuzzy-match the assistant's name or aliases; ignore everything else.
@@ -557,6 +574,7 @@ function Chat({ state }: { state: AppState }) {
           setLiveTranscript(text);
         },
         onFinal: text => {
+          if (text.trim() && isPhantomOrSelfEcho(text, settingsRef.current)) { setLiveTranscript(''); return; }
           setUserSubtitle(text);
           setLiveTranscript('');
           if (text.trim() && handleStopCommand(text)) return;

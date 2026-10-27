@@ -214,6 +214,12 @@ async function playItems(
   }
 }
 
+/** What the bot said last (spoken text), so the overlay can recognise its own words coming back through the mic. */
+let lastBotSpeech = '';
+export function getLastBotSpeech(): string {
+  return lastBotSpeech;
+}
+
 export async function speak(
   rawText: string,
   callbacks?: { onEnd?: () => void; onError?: () => void }
@@ -230,6 +236,7 @@ export async function speak(
     return;
   }
   console.info(`[voice] speak: ${sentences.length} chunk(s)`);
+  lastBotSpeech = rawText.slice(0, 600);
 
   const generation = beginPlayback(); // also forgets any older interrupted reply ('new-reply')
   currentReply = { items: sentences, index: 0, resumes: 0, generation };

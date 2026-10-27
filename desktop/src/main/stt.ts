@@ -4,6 +4,7 @@
  */
 import { estimateAudioSeconds } from '../shared/usage.ts';
 import type { HeaderLike, SttUsageSink } from '../shared/usage.ts';
+import { classifyTranscript, segmentsLookLikeSilence } from '../shared/stt-hallucination.ts';
 export type SttLang = 'en' | 'ur' | undefined;
 export interface SttRequest {
   base64: string;
@@ -63,6 +64,8 @@ export function isValidTranscription(text: string): boolean {
   if (WHISPER_HALLUCINATIONS.test(trimmed)) return false;
   const words = trimmed.split(/\s+/).filter(Boolean);
   if (words.length < 2 && !VALID_SHORT.test(trimmed)) return false;
+  // Whisper writing back its own prompt (a list of the assistant's names) or subtitle junk is not speech.
+  if (classifyTranscript(trimmed).drop) return false;
   if (words.length >= 4) {
     const counts = new Map<string, number>();
     for (const w of words) {
@@ -126,7 +129,29 @@ export async function geminiTranscribe(fetchFn: FetchLike, key: string, model: s
   }
 }
 
-export const WHISPER_DEFAULT_PROMPT = 'Pakistani conversation in Roman Urdu and English. Sudo-chan, Sid, suno, ji, kya haal hai, kaise ho, theek hai, mujhe batao, kaam, baat, computer.';
+/**
+ * Whisper `prompt` is a style/spelling prior, not an instruction, and on quiet clips Whisper writes it back as the transcript.
+ * The old prompt began with "Sudo-chan, Sid, ..." and the wake hint added a second list of the same names, so silence came back
+ * as "Sudo-chan, Sido-chan," and woke the bot. Now: natural sentence, no name list, the name at most ONCE and never first.
+ */
+export function whisperPromptFor(primaryName: string): string {
+  return `Roman Urdu and English: kaise ho, theek hai, mujhe computer ka kaam batao. Mujhe ${primaryName} se baat karni hai.`;
+}
+export const WHISPER_DEFAULT_PROMPT = whisperPromptFor('Sudo-chan');
+const WAKE_HINT_NAMES = /by name:?\s*([^.]*)\./i;
+const NAME_LIKE = /\b(?:sudo|sido|sid|suddo|chan)\b/i;
+
+/** Builds the Whisper prompt from the caller's hint without ever sending a list of names or the same name twice. */
+export function buildWhisperPrompt(hint: string | undefined): string {
+  const clause = hint?.match(WAKE_HINT_NAMES);
+  if (clause) {
+    const first = clause[1].split(',').map(n => n.trim()).find(Boolean);
+    return whisperPromptFor(first || 'Sudo-chan').slice(0, 400);
+  }
+  // A free-form hint is kept only if it does not carry a name of its own (the default sentence already has one).
+  const extra = hint && !NAME_LIKE.test(hint) ? `${hint.trim()} ` : '';
+  return `${extra}${WHISPER_DEFAULT_PROMPT}`.slice(0, 400);
+}
 
 async function whisperTranscribe(fetchFn: FetchLike, url: string, key: string, models: string[], req: SttRequest, extraHeaders: Record<string, string>, onResponse?: (res: FetchResponseLike) => void): Promise<{ status: number; text: string }> {
   const lang = normalizeSttLang(req.language);
@@ -138,14 +163,20 @@ async function whisperTranscribe(fetchFn: FetchLike, url: string, key: string, m
     form.append('file', new Blob([bytes], { type: req.mimeType }), `speech.${ext}`);
     form.append('model', model);
     if (lang) form.append('language', lang);
-    form.append('prompt', req.hint ? `${req.hint} ${WHISPER_DEFAULT_PROMPT}`.slice(0, 400) : WHISPER_DEFAULT_PROMPT);
+    form.append('prompt', buildWhisperPrompt(req.hint));
+    // Segment confidence (no_speech_prob / avg_logprob) lets us drop clips Whisper itself thinks are silence.
+    form.append('response_format', 'verbose_json');
     form.append('temperature', '0');
     try {
       const res = await fetchFn(url, { method: 'POST', headers: { Authorization: `Bearer ${key}`, ...extraHeaders }, body: form, signal: AbortSignal.timeout(9000) });
       status = res.status;
       onResponse?.(res);
       if (res.ok) {
-        const data = (await res.json()) as { text?: string };
+        const data = (await res.json()) as { text?: string; segments?: unknown };
+        if (segmentsLookLikeSilence(data.segments)) {
+          console.info('[STT] whisper result rejected: segments look like silence');
+          return { status: 200, text: '' };
+        }
         return { status: 200, text: (data.text ?? '').trim() };
       }
       if (res.status === 429) return { status, text: '' };
@@ -213,6 +244,10 @@ export class SttRouter {
       }
       // Fast mode: Whisper often writes Urdu speech in Arabic script garbage. If we did not ask for Urdu, let Gemini have a go instead.
       if (fast && route.provider === 'whisper' && result.text && hasArabicScript(result.text) && lang !== 'ur') continue;
+      if (result.text) {
+        const verdict = classifyTranscript(result.text);
+        if (verdict.drop) console.info(`[STT] dropped phantom transcript (${verdict.reason})`);
+      }
       if (result.text && isValidTranscription(result.text)) {
         const arabic = hasArabicScript(result.text);
         return { ok: true, text: result.text, provider: route.provider, scriptWarning: arabic && lang !== 'ur' ? true : undefined };
