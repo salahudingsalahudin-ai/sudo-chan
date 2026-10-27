@@ -30,7 +30,7 @@ All landing page copy and scene labels are collected in `content.ts`.
 - Seven chapters create a 910vh scroll journey. ScrollTrigger scrubs the 3D camera and world transitions, while Lenis smooths scrolling.
 - The procedural fallback keeps the page usable without a model asset. The optional GLB can include a rig or use the existing runtime head tracking.
 - Three.js effects are capped at DPR 2. Touch devices hide the custom cursor; reduced-motion preferences suppress UI animation.
-- Latest production build: 142 KB first-load JavaScript. The WebGL scene is code-split and adds about 272 KiB gzip only on desktop browsers that support WebGL.
+- Latest production build: 154 kB first-load JavaScript for `/`. The WebGL scene is code-split (about 250 KiB gzip) and loads only on desktop browsers with WebGL; touch devices, reduced-motion, low-memory/low-core devices and Save-Data connections get the lightweight CSS/SVG companion.
 
 ## Validation
 
@@ -39,4 +39,4 @@ All landing page copy and scene labels are collected in `content.ts`.
 - `npm run build`: compile the production application.
 - Manually check eye tracking, bot interactions, scroll behavior, keyboard access, reduced motion, mobile layout, both themes, and the browser console.
 
-The desktop companion has an early local Electron prototype in [`desktop/`](./desktop/). Run it separately with its setup and preview notes in [`desktop/README.md`](./desktop/README.md); chat replies are local mock text. It is not a released product and it does not capture the screen or call an AI service. Website privacy controls remain previews.
+The desktop companion has an early local Electron prototype in [`desktop/`](./desktop/). Run it separately with its setup and preview notes in [`desktop/README.md`](./desktop/README.md); chat replies are local mock text. It is not a released product and it does not capture the screen or call an AI service. The website describes the desktop app's behavior in `content.ts`: keep it honest (microphone only while listening is on; screen only after click-consent, never saved on disk; files only with tools on and click approval; API keys on the user's computer, not encrypted on Linux). The app is not released: there is no download link, only the waitlist.

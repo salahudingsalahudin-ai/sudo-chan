@@ -1,0 +1,50 @@
+/* Readability and new-section styles. Loaded after globals.css and journey.css. */
+main.journey .scene-copy>p{max-width:min(440px,100%);font-size:clamp(15px,1.15vw,17px);line-height:1.65;opacity:.86}
+main.journey .scene-index{font-size:11px;opacity:.8}
+main.journey .callout{padding:14px 16px}
+main.journey .callout i{font-size:11px}
+main.journey .callout b{font-size:15px;font-weight:550}
+main.journey .callout span{font-size:13px;line-height:1.5;opacity:.82}
+main.journey .nav-note{font-size:11px;letter-spacing:.14em}
+main.journey .waitlist label{font-size:12px;opacity:.85}
+main.journey .waitlist input{font-size:16px}
+main.journey .waitlist button{font-size:13px;min-height:44px}
+main.journey .waitlist small{font-size:12px;opacity:.78}
+main.journey .demo-status{font-size:12px}
+main.journey .scroll-cue span{font-size:11px}
+main.journey .site-footer{font-size:12px}
+
+.hero-cta{display:flex;flex-wrap:wrap;align-items:center;gap:14px;margin-top:22px}
+.coming-soon-badge{display:inline-flex;align-items:center;gap:8px;padding:8px 14px;border:1px solid var(--color-accent);border-radius:99px;color:var(--color-accent);font-size:12px;font-weight:600;letter-spacing:.12em;text-transform:uppercase}
+.coming-soon-badge::before{content:"";width:7px;height:7px;border-radius:50%;background:currentColor;box-shadow:0 0 10px currentColor;animation:soon-pulse 2.4s ease-in-out infinite}
+.hero-cta-link{display:inline-flex;align-items:center;min-height:44px;padding:0 20px;border-radius:99px;background:var(--color-text);color:var(--color-page);font-size:14px;font-weight:550;text-decoration:none;transition:transform .3s var(--ease),background .3s}
+.hero-cta-link:hover,.hero-cta-link:focus-visible{background:var(--color-accent);color:var(--color-accent-contrast);transform:translateY(-2px)}
+.hero-cta-link i{margin-left:8px;font-style:normal}
+@keyframes soon-pulse{50%{opacity:.35}}
+
+.approval-steps{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:26px 0 0;padding:0;list-style:none;max-width:460px;counter-reset:none}
+.approval-steps li{padding:12px 14px;border-left:2px solid var(--color-bot-rim);background:linear-gradient(90deg,#38e8ff14,transparent);font-size:14px;line-height:1.35}
+.approval-steps b{display:block;margin-bottom:2px;color:var(--color-bot-rim);font-size:11px;letter-spacing:.14em;font-weight:600}
+
+.trust-panel{margin-top:26px;max-width:520px;perspective:900px}
+.trust-panel ul{display:grid;gap:10px;margin:0;padding:0;list-style:none}
+.trust-panel li{display:flex;gap:14px;padding:14px 16px;border:1px solid var(--color-border);border-radius:16px;background:color-mix(in srgb,var(--color-surface) 82%,transparent);backdrop-filter:blur(10px);color:var(--color-text);transform:rotateY(-4deg);transform-origin:left center;transition:transform .5s var(--ease),border-color .3s}
+.trust-panel li:hover,.trust-panel li:focus-within{transform:rotateY(0) translateX(4px);border-color:var(--color-accent)}
+.trust-panel svg{flex:none;margin-top:2px;color:var(--color-accent)}
+.trust-panel b{display:flex;flex-wrap:wrap;gap:4px 10px;align-items:baseline;font-size:15px;font-weight:600}
+.trust-panel b span{color:var(--color-accent);font-size:12px;font-weight:600;letter-spacing:.04em}
+.trust-panel p{margin:4px 0 0;color:var(--color-text-muted);font-size:13px;line-height:1.55}
+
+.round-c-section p,.round-c-faq-item p{line-height:1.65}
+
+@media (max-width:760px){
+  main.journey .scene-copy>p{font-size:15px}
+  .approval-steps{grid-template-columns:1fr 1fr;gap:8px}
+  .trust-panel li{transform:none;padding:12px}
+  .hero-cta{margin-top:16px}
+}
+@media (prefers-reduced-motion:reduce){
+  .coming-soon-badge::before{animation:none}
+  .trust-panel li,.hero-cta-link{transition:none;transform:none}
+}
+main.journey.reduced-motion .trust-panel li{transform:none}

@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import './globals.css';
 import './journey.css';
+import './upgrade.css';
 import { content, SUDO_CHAN } from '@/content';
 import { siteUrl } from '@/lib/site';
 
@@ -10,12 +11,12 @@ const description = content.siteDescription;
 export const metadata: Metadata = {
   metadataBase: siteUrl,
   applicationName: SUDO_CHAN,
-  title: `${SUDO_CHAN} — A little closer, when it counts`,
+  title: content.homeTitle,
   description,
   alternates: { canonical: '/' },
   openGraph: {
     type: 'website',
-    title: `${SUDO_CHAN} — A little closer, when it counts`,
+    title: content.homeTitle,
     description,
     siteName: SUDO_CHAN,
     url: '/',
@@ -23,7 +24,7 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: 'summary_large_image',
-    title: `${SUDO_CHAN} — A little closer, when it counts`,
+    title: content.homeTitle,
     description,
     images: ['/opengraph-image'],
   },
