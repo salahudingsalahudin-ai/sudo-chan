@@ -19,6 +19,7 @@ import { migrateProviders, resolveProviderKey, shouldActivate, withProviderEntry
 import type { KeyCodec, ProviderMap } from './provider-keys.js';
 import { SttRouter } from './stt.js';
 import type { SpeechEvent, StopReason } from '../shared/speech-events.js';
+import { installHiddenWindows, runSmoke, smokeApprovalTimeoutMs } from './smoke.js';
 import { overlayShape } from '../shared/overlay-shape.js';
 import { LocalAI, normalizeCloudModel } from './local-ai.js';
 import { ChatSession } from './chat-session.js';
@@ -63,6 +64,9 @@ interface StoreSchema {
 
 const smokeTest = process.argv.includes('--smoke-test');
 if (smokeTest) app.setPath('userData', mkdtempSync(join(tmpdir(), 'sudo-chan-smoke-')));
+// `npm run verify` smoke runs: windows stay invisible, no tray icon (see src/main/smoke.ts). Never active in normal runs.
+const smokeHidden = smokeTest && process.env.SUDO_CHAN_SMOKE_HIDDEN === '1';
+if (smokeHidden) installHiddenWindows();
 app.setName('Sudo-chan');
 // This SVG/CSS companion does not need GPU acceleration. Prefer software
 // rendering on Linux to avoid driver crashes in transparent overlay windows.
@@ -98,7 +102,8 @@ const localAI = new LocalAI();
 
 function encryptApiKey(key: string): { encryptedKey?: string; rawKey?: string } {
   if (!key) return {};
-  if (safeStorage && safeStorage.isEncryptionAvailable()) {
+  // Smoke runs skip the OS keyring: isEncryptionAvailable() can block forever on some Linux setups.
+  if (!smokeTest && safeStorage && safeStorage.isEncryptionAvailable()) {
     try {
       const buffer = safeStorage.encryptString(key);
       return { encryptedKey: buffer.toString('base64') };
@@ -197,6 +202,7 @@ const conversation = new ChatSession(localAI, next => {
 });
 // ---- Tools (files, commands, links) with a click-to-approve card for every risky action ----
 const toolApprovals = new ApprovalManager({
+  timeoutMs: smokeTest ? smokeApprovalTimeoutMs() : undefined,
   emit: request => {
     openChat();
     if (!chat || chat.isDestroyed()) return false;
@@ -978,7 +984,8 @@ function setupIPC() {
 async function start() {
   store = new Store<StoreSchema>({
     defaults: {
-      settings: DEFAULT_SETTINGS,
+      // Smoke runs must never open the real microphone or grab the user's global shortcut.
+      settings: smokeTest ? { ...DEFAULT_SETTINGS, wakeWordEnabled: false, shortcut: 'Control+Alt+Shift+F24' } : DEFAULT_SETTINGS,
       mode: 'local',
       model: 'qwen2.5:0.5b',
       position: null,
@@ -1018,8 +1025,8 @@ async function start() {
     };
   }
   state = { settings: validSettings(saved) ? saved : { ...DEFAULT_SETTINGS }, paused: false, mood: 'calm', speech: '', overlayVisible: true, shortcutAvailable: false, platform: process.platform, displayBackend: process.platform === 'linux' ? nativeWayland ? 'Wayland (experimental)' : wayland ? 'XWayland compatibility' : 'X11' : process.platform, loginSupported: app.isPackaged, voiceCallActive: false, voiceActiveTarget: null };
-  session.defaultSession.setPermissionRequestHandler((_contents, permission, callback) => callback(permission === 'media'));
-  session.defaultSession.setPermissionCheckHandler((_contents, permission) => permission === 'media');
+  session.defaultSession.setPermissionRequestHandler((_contents, permission, callback) => callback(permission === 'media' && !smokeTest));
+  session.defaultSession.setPermissionCheckHandler((_contents, permission) => permission === 'media' && !smokeTest);
   setupIPC();
   overlay = createWindow('overlay'); positionOverlay();
   overlay.setIgnoreMouseEvents(false);
@@ -1034,12 +1041,15 @@ async function start() {
   // overlay while waiting for a cursor sample to make it interactive again.
   state.shortcutAvailable = registerShortcut(state.settings.shortcut);
   const icon = nativeImage.createFromPath(join(directory, '../../build/icon.png'));
-  tray = new Tray(icon.isEmpty() ? nativeImage.createFromDataURL(TRAY_ICON) : icon.resize({ width: 22, height: 22 }));
-  tray.setToolTip('Sudo-chan · Local companion'); tray.on('click', openChat); updateTray();
+  if (!smokeHidden) {
+    tray = new Tray(icon.isEmpty() ? nativeImage.createFromDataURL(TRAY_ICON) : icon.resize({ width: 22, height: 22 }));
+    tray.setToolTip('Sudo-chan · Local companion'); tray.on('click', openChat); updateTray();
+  }
   const adjustDisplay = () => { clearTimeout(displayTimer); displayTimer = setTimeout(() => { positionOverlay(); }, 250); };
   screen.on('display-removed', adjustDisplay); screen.on('display-metrics-changed', adjustDisplay);
   app.on('activate', showOverlay);
   if (smokeTest) console.log('SUDO_CHAN_READY', JSON.stringify({ backend: state.displayBackend, shortcut: state.shortcutAvailable }));
+  if (smokeTest) void runSmoke();
   void checkAI().catch(() => {});
 
   pomodoroTimer = new PomodoroTimer({
