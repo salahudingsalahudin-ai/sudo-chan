@@ -24,6 +24,8 @@ import { overlayShape } from '../shared/overlay-shape.js';
 import { activePanelForState } from '../shared/overlay-panels.js';
 import { decodeKey, encodeKey, keyStoragePlan } from './key-storage.js';
 import { LocalAI, normalizeCloudModel } from './local-ai.js';
+import { UsageTracker } from '../shared/usage.js';
+import { UsageFile } from './usage-store.js';
 import { ChatSession } from './chat-session.js';
 import { ApprovalManager } from './tools/approval.js';
 import { routeApprovalClose, routeApprovalRequest, type ApprovalPort } from '../shared/approval-ui.js';
@@ -110,6 +112,22 @@ let activeSpeech: { id: number; senderId: number } | null = null;
 let pomodoroTimer: PomodoroTimer | undefined;
 let healthMonitor: SystemHealthMonitor | undefined;
 const localAI = new LocalAI();
+/** Free-quota meter: counters in userData/usage.json (no keys). Created on first use so smoke runs use their own userData. */
+let usageMeter: UsageTracker | undefined;
+let usageFile: UsageFile | undefined;
+function usage(): UsageTracker {
+  if (!usageMeter) {
+    usageFile = new UsageFile(join(app.getPath('userData'), 'usage.json'));
+    const file = usageFile;
+    const tracker: UsageTracker = new UsageTracker({ initial: file.read(), onChange: () => file.schedule(() => tracker.serialize()) });
+    usageMeter = tracker;
+  }
+  return usageMeter;
+}
+localAI.usage = {
+  groqChat: (headers, ok) => usage().groqChat(headers, ok),
+  groqChatTokens: tokens => usage().groqChatTokens(tokens),
+};
 
 const keyPlan = keyStoragePlan(process.platform, process.env, smokeTest);
 /** Never blocks: on Linux safeStorage is not used at all (see key-storage.ts). */
@@ -131,7 +149,7 @@ function geminiKey(): string {
 }
 let sttRouter: SttRouter | undefined;
 function stt(): SttRouter {
-  sttRouter ??= new SttRouter({ fetch: (url, init) => fetch(url, init as RequestInit), getKey: id => getProviderKey(id), now: () => Date.now(), getMode: () => state.settings.sttSpeed ?? 'fast' });
+  sttRouter ??= new SttRouter({ fetch: (url, init) => fetch(url, init as RequestInit), getKey: id => getProviderKey(id), now: () => Date.now(), getMode: () => state.settings.sttSpeed ?? 'fast', usage: usage() });
   return sttRouter;
 }
 let azureProvider: AzureTtsProvider | undefined;
@@ -145,11 +163,12 @@ function azure(): AzureTtsProvider {
     getRegion: () => azureEntry()?.region ?? '',
     getVoice: () => state.settings.ttsAzureVoice,
     getRomanRoute: () => state.settings.ttsAzureRomanUrdu,
+    onChars: chars => usage().azureChars(chars),
   });
   return azureProvider;
 }
 function ttsRouter(): TtsRouter {
-  router ??= new TtsRouter({ getKey: geminiKey, getPreferred: () => state.settings.ttsProvider, azure: azure() });
+  router ??= new TtsRouter({ getKey: geminiKey, getPreferred: () => state.settings.ttsProvider, getQuality: () => state.settings.ttsQuality, azure: azure(), usage: usage() });
   return router;
 }
 function decryptApiKey(stored?: { encryptedKey?: string; rawKey?: string }): string {
@@ -912,6 +931,8 @@ function setupIPC() {
     console.info(`[TTS] engine=${result.provider ?? 'none'} voice=${result.voice ?? '-'} lang=${lang} chars=${clean.length} ok=${result.ok} ms=${Date.now() - synthStarted}${result.cached ? ' cached' : ''}${result.ok ? '' : ` status=${result.status ?? '-'}`}`);
     return result.ok ? { ok: true, dataUri: result.dataUri } : { ok: false };
   });
+  // Counters and reset times only (no keys); Settings shows the full list, Chat one calm line.
+  handle(CHANNELS.usage, () => usage().summary({ gemini: Boolean(geminiKey()), groq: Boolean(getProviderKey('groq')), azure: azure().hasKey() }), ['settings', 'chat']);
   handle(CHANNELS.azureGet, () => {
     const key = getProviderKey('azure');
     return {
@@ -1117,7 +1138,7 @@ async function start() {
   overlay = createWindow('overlay'); positionOverlay();
   // Reminders start a few seconds after the windows exist, so a reminder that came due while the app was closed can still be shown and spoken.
   setTimeout(() => reminderService().start(), 4000);
-  app.on('before-quit', () => reminders?.stop());
+  app.on('before-quit', () => { reminders?.stop(); usageFile?.flush(); });
   overlay.setIgnoreMouseEvents(false);
   overlay.on('resize', updateOverlayShape);
   overlay.once('ready-to-show', showOverlay);

@@ -2,6 +2,7 @@ import type { TtsProvider, TtsRequest, TtsResult } from '../shared/voice-interfa
 import { chunkForGoogle, normalizeForSpeech, worthGemini } from '../shared/speech.ts';
 import { pickAzureVoice } from '../shared/azure-tts.ts';
 import type { AzureTtsProvider } from './azure-provider.ts';
+import type { TtsUsageSink } from '../shared/usage.ts';
 
 type FetchFn = typeof fetch;
 
@@ -198,6 +199,10 @@ export interface RouterOptions {
   getPreferred: () => string | undefined;
   /** Optional Azure Speech provider (official REST API). */
   azure?: AzureTtsProvider;
+  /** 'best' (default): Gemini for every reply while quota lasts. 'save': only replies worth a quota-limited call (3+ words). */
+  getQuality?: () => string | undefined;
+  /** Usage meter: counts calls, remembers a 429 until it resets, counts basic-voice fallbacks. */
+  usage?: TtsUsageSink;
   fetchFn?: FetchFn;
   now?: () => number;
 }
@@ -205,7 +210,7 @@ export interface RouterOptions {
 export interface RouterStats { geminiCalls: number; azureCalls: number; googleRequests: number; cacheHits: number; skippedShort: number }
 
 /**
- * Auto chain: Gemini (key, text worth a call, not in quota back-off) -> Azure Speech (key + region, not in
+ * Auto chain: Gemini (key, text worth a call under 'save' quality, not in quota back-off) -> Azure Speech (key + region, not in
  * back-off) -> Google Translate. A forced engine skips the others. Identical requests come from an in-memory cache.
  */
 export class TtsRouter {
@@ -213,6 +218,8 @@ export class TtsRouter {
   private google: GoogleTranslateTtsProvider;
   private azure: AzureTtsProvider | undefined;
   private getPreferred: () => string | undefined;
+  private getQuality: () => string | undefined;
+  private usage: TtsUsageSink | undefined;
   private now: () => number;
   private geminiDownUntil = 0;
   private azureDownUntil = 0;
@@ -224,6 +231,8 @@ export class TtsRouter {
     this.google = new GoogleTranslateTtsProvider(options.fetchFn);
     this.azure = options.azure;
     this.getPreferred = options.getPreferred;
+    this.getQuality = options.getQuality ?? (() => undefined);
+    this.usage = options.usage;
     this.now = options.now ?? Date.now;
   }
 
@@ -235,6 +244,7 @@ export class TtsRouter {
   resetBackoff() {
     this.geminiDownUntil = 0;
     this.azureDownUntil = 0;
+    this.usage?.clearGeminiTtsBlock();
   }
 
   /** Why Azure is being skipped right now, for the settings screen (empty when it is usable). */
@@ -250,21 +260,26 @@ export class TtsRouter {
     const preferred = this.getPreferred() ?? 'auto';
     const wantGemini = (preferred === 'auto' || preferred === 'gemini') && this.gemini.hasKey();
     const wantAzure = (preferred === 'auto' || preferred === 'azure') && Boolean(this.azure?.hasKey());
-    const worth = worthGemini(req.text);
+    // 'best' spends a Gemini call on every reply, short ones too; only 'save' keeps the 3-word rule.
+    const worth = this.getQuality() === 'save' ? worthGemini(req.text) : true;
     if (wantGemini && !worth) this.stats.skippedShort++;
 
     if (wantGemini && worth) {
       // A cached Gemini clip is free, even while Gemini is in back-off.
       const cached = this.cache.get(this.key('gemini', req));
       if (cached) { this.stats.cacheHits++; return { ok: true, dataUri: cached, provider: 'gemini', cached: true }; }
-      if (this.now() >= this.geminiDownUntil) {
+      // A 429 remembered by the usage meter also survives an app restart.
+      if (this.now() >= Math.max(this.geminiDownUntil, this.usage?.geminiTtsBlockedUntil() ?? 0)) {
         this.stats.geminiCalls++;
         const result = await this.gemini.synthesize(req);
         if (result.ok) {
+          this.usage?.geminiTts();
           if (result.dataUri) this.cache.set(this.key('gemini', req), result.dataUri);
           return result;
         }
-        this.geminiDownUntil = this.now() + (result.retryAfterMs ?? (result.status === 429 ? MINUTE : 30_000));
+        const backoff = result.retryAfterMs ?? (result.status === 429 ? MINUTE : 30_000);
+        this.geminiDownUntil = this.now() + backoff;
+        if (result.status === 429) this.usage?.geminiTtsLimit(this.now() + backoff);
       }
     }
 
@@ -282,11 +297,18 @@ export class TtsRouter {
       }
     }
 
+    // Basic voice although a better engine was wanted: the meter counts these so the user sees how often it happens.
+    const fellBack = wantGemini || wantAzure;
     const cachedGoogle = this.cache.get(this.key('google', req));
-    if (cachedGoogle) { this.stats.cacheHits++; return { ok: true, dataUri: cachedGoogle, provider: 'google', cached: true }; }
+    if (cachedGoogle) {
+      this.stats.cacheHits++;
+      if (fellBack) this.usage?.googleFallback();
+      return { ok: true, dataUri: cachedGoogle, provider: 'google', cached: true };
+    }
     this.stats.googleRequests++;
     const result = await this.google.synthesize(req);
     if (result.ok && result.dataUri) this.cache.set(this.key('google', req), result.dataUri);
+    if (result.ok && fellBack) this.usage?.googleFallback();
     return result;
   }
 }

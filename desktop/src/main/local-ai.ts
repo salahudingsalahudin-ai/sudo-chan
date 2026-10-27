@@ -5,6 +5,8 @@ import { runToolLoop, ToolLoopHttpError, ToolsUnsupportedError } from './tools/a
 import type { ToolRuntimeLike } from './tools/types.js';
 import type { VisionTarget } from '../shared/screen-assist.ts';
 import { runVisionChat, VisionError } from './vision-chat.ts';
+import { tokensFromChatPayload } from '../shared/usage.ts';
+import type { ChatUsageSink } from '../shared/usage.ts';
 
 export function normalizeCloudModel(provider: CloudProviderId, model: string): string {
   let clean = model.trim();
@@ -345,6 +347,21 @@ export function classifyModelMeta(name: string, sizeBytes?: number, paramSize?: 
 export class LocalAI {
   constructor(private request: Fetch = fetch) {}
 
+  /** Usage meter hook for Groq chat (request counts, remaining quota from the response headers). Set by the main process. */
+  usage?: ChatUsageSink;
+
+  /** Reports a Groq chat response to the usage meter. A JSON body is read from a clone; a stream is never cloned. */
+  private watchGroq(response: Response): Response {
+    if (!this.usage) return response;
+    try {
+      this.usage.groqChat(response.headers, response.ok);
+      if (response.ok && (response.headers.get('content-type') ?? '').includes('application/json')) {
+        void response.clone().json().then(payload => this.usage?.groqChatTokens(tokensFromChatPayload(payload))).catch(() => {});
+      }
+    } catch { /* the meter must never break a chat turn */ }
+    return response;
+  }
+
   async modelsWithMeta(): Promise<{ names: string[]; meta: Record<string, ModelMeta> }> {
     try {
       const response = await this.request(`${BASE}/api/tags`, { signal: AbortSignal.timeout(6000), redirect: 'error' });
@@ -552,7 +569,10 @@ export class LocalAI {
       try {
         const outcome = await runToolLoop({
           // Each model request has its own 60 s limit; waiting for the user's approval is not counted.
-          fetchFn: (url, init) => this.request(url, { ...init, signal: AbortSignal.any([...(init.signal ? [init.signal] : []), AbortSignal.timeout(60_000)]) }),
+          fetchFn: async (url, init) => {
+            const response = await this.request(url, { ...init, signal: AbortSignal.any([...(init.signal ? [init.signal] : []), AbortSignal.timeout(60_000)]) });
+            return cloud.provider === 'groq' ? this.watchGroq(response) : response;
+          },
           endpoint,
           apiKey,
           model,
@@ -623,6 +643,7 @@ export class LocalAI {
           }),
         });
 
+        if (cloud.provider === 'groq') this.watchGroq(response);
         if (response.status === 429 && retries > 1) {
           console.warn(`[Cloud AI 429] Rate limited on ${model}. Retrying after ${delayMs}ms backoff...`);
           await new Promise(r => setTimeout(r, delayMs));
@@ -675,6 +696,7 @@ export class LocalAI {
           const chunk = JSON.parse(data);
           const chunkError = extractErrorMessage(chunk);
           if (chunkError) throw new LocalAIError(chunkError);
+          if (cloud.provider === 'groq') this.usage?.groqChatTokens(tokensFromChatPayload(chunk));
           const choices = (chunk as { choices?: { delta?: { content?: unknown }; message?: { content?: unknown }; finish_reason?: string }[] })?.choices;
           const finishReason = choices?.[0]?.finish_reason;
           if (finishReason) {
@@ -737,6 +759,11 @@ export class LocalAI {
           ageSeconds: options.vision.ageSeconds,
           signal,
           log: line => console.info(line),
+          // Groq vision turns count too; other providers are left alone. Vision keeps using the global fetch, as before.
+          fetchFn: async (url, init) => {
+            const response = await fetch(url, init);
+            return /^https:\/\/api\.groq\.com\//.test(String(url)) ? this.watchGroq(response) : response;
+          },
         });
         options.vision.onTiming?.(result.ms);
         onText(result.text);

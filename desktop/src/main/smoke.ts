@@ -117,6 +117,12 @@ export async function runSmoke(): Promise<void> {
     const denied = await evalIn<string>(chat, `try { await window.companion.saveCloudConfig({ provider: 'custom', endpoint: 'http://127.0.0.1:1/v1/chat/completions', model: 'x', apiKey: 'k' }); return 'allowed'; } catch (e) { return String(e && e.message || e); }`);
     check('chat window cannot save cloud config (authorize)', /unavailable in this window/i.test(denied), denied.slice(0, 120));
 
+    // Free-usage meter: Settings and Chat get the key-free summary, the overlay does not.
+    const usageSettings = await evalIn<string>(settings, `try { const u = await window.companion.getUsage(); return u.rows.length + ':' + JSON.stringify(u).length; } catch (e) { return 'error ' + String(e && e.message || e); }`);
+    const usageChat = await evalIn<string>(chat, `try { return String((await window.companion.getUsage()).rows.length); } catch (e) { return 'error ' + String(e && e.message || e); }`);
+    const usageOverlay = await evalIn<string>(overlay, `try { await window.companion.getUsage(); return 'allowed'; } catch (e) { return String(e && e.message || e); }`);
+    check('usage meter: settings + chat get 5 rows, overlay is refused', /^5:\d+$/.test(usageSettings) && usageChat === '5' && /unavailable in this window/i.test(usageOverlay), `${usageSettings} / ${usageChat} / ${usageOverlay.slice(0, 60)}`);
+
     // Cloud config against the local fake server (settings window only), then a streamed chat round trip.
     const saved = await evalIn<{ ok: boolean; error?: string }>(settings, `return await window.companion.saveCloudConfig({ provider: 'custom', endpoint: ${JSON.stringify(`${endpoint}/v1/chat/completions`)}, model: 'fake-model', apiKey: 'smoke-test-key' });`);
     check('cloud config accepted by the fake server', saved.ok, saved.error);

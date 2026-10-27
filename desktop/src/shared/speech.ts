@@ -53,7 +53,7 @@ export function emotionStyle(emotion: Emotion, lang: 'ur' | 'en' | 'hi' = 'en'):
   return `Say the following ${base[emotion]}.${HUMAN_DELIVERY}${accent}`;
 }
 
-/** Fewer than 3 words is not worth a quota-limited Gemini call. */
+/** Fewer than 3 words is not worth a quota-limited Gemini call. Only applied when the voice quality setting is 'save'. */
 export function worthGemini(text: string): boolean {
   return text.trim().split(/\s+/).filter(Boolean).length >= 3;
 }

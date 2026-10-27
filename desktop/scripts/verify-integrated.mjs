@@ -82,6 +82,7 @@ function functionBody(source, header) {
     cloudConfig: ['settings'], fetchCloudModels: null, quit: ['settings'], reset: ['settings'], messages: ['chat'],
     welcome: ['overlay'], stop: ['chat', 'overlay'], sendScreen: ['chat', 'overlay'], cancelScreen: ['chat', 'overlay'],
     toolApprovals: ['chat'], toolApprovalReply: ['chat'], toolsStopAll: ['chat', 'overlay', 'settings'],
+    usage: ['settings', 'chat'],
   };
   const registrations = [...index.matchAll(/\n  (handle|ipcMain\.on)\(CHANNELS\.(\w+),/g)].map((m, i, all) => ({
     name: m[2], kind: m[1], text: index.slice(m.index, all[i + 1]?.index ?? index.indexOf('\n}\n', m.index)),
