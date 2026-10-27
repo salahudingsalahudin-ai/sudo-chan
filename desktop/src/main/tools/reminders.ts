@@ -8,6 +8,8 @@ export interface Reminder {
   text: string;
   dueAt: number;
   createdAt: number;
+  /** The task this reminder belongs to (optional). */
+  taskId?: string;
 }
 
 export interface ReminderDeps {
@@ -83,7 +85,7 @@ export class Reminders {
     return [...this.list].sort((a, b) => a.dueAt - b.dueAt);
   }
 
-  add(text: string, when: { inMinutes?: number; atTime?: string }): AddResult {
+  add(text: string, when: { inMinutes?: number; atTime?: string; atMs?: number }, taskId?: string): AddResult {
     this.ensureLoaded();
     const clean = text.replace(/\s+/g, ' ').trim();
     if (!clean) return { ok: false, error: 'The reminder text is empty.' };
@@ -94,6 +96,10 @@ export class Reminders {
     if (typeof when.inMinutes === 'number') {
       if (!Number.isFinite(when.inMinutes) || when.inMinutes < 1 || when.inMinutes > MAX_MINUTES) return { ok: false, error: 'in_minutes must be between 1 and 525600.' };
       dueAt = now + Math.round(when.inMinutes) * 60_000;
+    } else if (typeof when.atMs === 'number') {
+      if (!Number.isFinite(when.atMs) || when.atMs <= now) return { ok: false, error: 'That time has already passed.' };
+      if (when.atMs - now > MAX_MINUTES * 60_000) return { ok: false, error: 'That is more than a year away.' };
+      dueAt = Math.round(when.atMs / 60_000) * 60_000;
     } else if (typeof when.atTime === 'string') {
       dueAt = nextClockTime(when.atTime, now);
       if (dueAt === null) return { ok: false, error: 'at_time must look like 17:30 or 5:30pm.' };
@@ -101,6 +107,7 @@ export class Reminders {
       return { ok: false, error: 'Give either in_minutes or at_time.' };
     }
     const reminder: Reminder = { id: `r-${now.toString(36)}-${++this.counter}`, text: clean, dueAt, createdAt: now };
+    if (taskId) reminder.taskId = taskId;
     this.list.push(reminder);
     this.persist();
     this.schedule();
@@ -115,6 +122,19 @@ export class Reminders {
     this.persist();
     this.schedule();
     return true;
+  }
+
+  /** Cancels every pending reminder that belongs to this task; returns how many. */
+  cancelForTask(taskId: string): number {
+    this.ensureLoaded();
+    const before = this.list.length;
+    this.list = this.list.filter(item => item.taskId !== taskId);
+    const removed = before - this.list.length;
+    if (removed) {
+      this.persist();
+      this.schedule();
+    }
+    return removed;
   }
 
   /** Stops the timer (app quit). Reminders stay stored. */

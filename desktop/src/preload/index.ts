@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from 'electron';
 import { CHANNELS } from '../shared/types.js';
 import type { SpeechEvent } from '../shared/speech-events.js';
 import type { AIState, AppState, ChatState, DesktopAPI, ToolApprovalEvent } from '../shared/types.js';
+import type { TasksView } from '../shared/tasks.js';
 
 const api: DesktopAPI = {
   getState: () => ipcRenderer.invoke(CHANNELS.getState),
@@ -76,5 +77,13 @@ const api: DesktopAPI = {
   getToolApprovals: () => ipcRenderer.invoke(CHANNELS.toolApprovals),
   respondToolApproval: (id, decision) => ipcRenderer.invoke(CHANNELS.toolApprovalReply, { id, decision }),
   stopAllTools: () => ipcRenderer.invoke(CHANNELS.toolsStopAll),
+  getTasks: () => ipcRenderer.invoke(CHANNELS.tasksList),
+  onTasks: callback => {
+    const listener = (_event: Electron.IpcRendererEvent, view: TasksView) => callback(view);
+    ipcRenderer.on(CHANNELS.tasksState, listener);
+    return () => ipcRenderer.removeListener(CHANNELS.tasksState, listener);
+  },
+  addTaskText: text => ipcRenderer.invoke(CHANNELS.tasksAdd, text),
+  taskAction: (id, action) => ipcRenderer.invoke(CHANNELS.tasksAct, { id, action }),
 };
 contextBridge.exposeInMainWorld('companion', api);
