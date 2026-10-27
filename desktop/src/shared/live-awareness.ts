@@ -30,10 +30,13 @@ export function isLiveAwarenessSetting(value: unknown): value is LiveAwarenessSe
 /** `[live] awareness window=on|off|skipped-sensitive` (state only, never a title). */
 export function awarenessLogLine(status: AwarenessStatus): string { return `[live] awareness window=${status}`; }
 
-/** The setting can be switched ON only from the Settings window (a click there is the consent). Turning it off is allowed from anywhere. */
+/**
+ * The setting can be switched ON only from the Settings window or by the overlay question (a click on either is the consent). Turning it off is
+ * allowed from anywhere. 'awareness-prompt' is set inside the main process only: the renderer's claimed source is reduced to dot/settings/chat first.
+ */
 export function awarenessChangeAllowed(previous: LiveAwarenessSetting | undefined, next: LiveAwarenessSetting | undefined, source: string): boolean {
   if (next !== 'window' || previous === 'window') return true;
-  return source === 'settings';
+  return source === 'settings' || source === 'awareness-prompt';
 }
 
 /** Window names are untrusted text (a web page can name its own tab): strip control characters, quotes and newlines, and cut them short. */

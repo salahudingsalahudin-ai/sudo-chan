@@ -114,6 +114,7 @@ function functionBody(source, header) {
     usage: ['settings', 'chat'], updateNotice: ['settings'], clearKeys: ['settings'], keyStorageInfo: ['settings'],
     tasksList: ['chat'], tasksAdd: ['chat'], tasksAct: ['chat'],
     localWakeGet: ['overlay', 'settings'], localWakeSave: ['settings'], localWakeDelete: ['settings'],
+    setVoiceActive: ['overlay', 'chat'], liveAwarenessConsent: ['overlay'],
   };
   const registrations = [...index.matchAll(/\n  (handle|ipcMain\.on)\(CHANNELS\.(\w+),/g)].map((m, i, all) => ({
     name: m[2], kind: m[1], text: index.slice(m.index, all[i + 1]?.index ?? index.indexOf('\n}\n', m.index)),
@@ -193,6 +194,28 @@ function functionBody(source, header) {
 {
   const safe = /requestSingleInstanceLock/.test(index) && /smokeTest\)\s*app\.setPath\('userData'/.test(index);
   add('wiring', 'smoke runs use their own userData (own single-instance lock)', safe ? 'PASS' : 'FAIL', safe ? '' : 'smokeTest must set a temp userData before the lock');
+}
+
+{
+  // Live Talk: ONE place starts/ends/switches it in main, every end on the bot or in the chat goes through the one instant-stop sequence,
+  // and the bot (not the mic dot) is the single Live Talk button. See LIVE-TALK-FLOW.md.
+  const app = stripComments(read('src/renderer/App.tsx'));
+  const oneMainPath = /function setLiveTarget\(/.test(index) && (index.match(/state\.voiceActiveTarget = /g) ?? []).length === 1 && /liveStopLine\(/.test(index) && /liveStartLine\(/.test(index);
+  const stops = /runLiveStop\(/.test(app) && !/setVoiceActive\(false\)/.test(app) && /endOverlayLive\('click'\)/.test(app) && /endChatLive\('click'\)/.test(app);
+  const botButton = /onClick=\{toggleOverlayLive\}/.test(app) && !/onDoubleClick/.test(app);
+  const ok = oneMainPath && stops && botButton;
+  add('wiring', 'Live Talk: one start/stop path in main, one instant-stop sequence in both windows, the bot is the single Live Talk button', ok ? 'PASS' : 'FAIL', ok ? '' : `${oneMainPath ? '' : 'main must change voiceActiveTarget only inside setLiveTarget (and log it); '}${stops ? '' : 'every Live Talk end must call runLiveStop (no bare setVoiceActive(false)); '}${botButton ? '' : 'the bot must toggle Live Talk with a single click and have no double-click handler'}`);
+}
+{
+  // Awareness (window name only): off by default, the switch-on is a click (Settings or the overlay question), the window name never reaches logs, and the
+  // reserved "keep an eye" setting is inert (nothing reads it, so nothing can capture on a timer).
+  const settingsDefaults = /DEFAULT_SETTINGS[^=]*=\s*{([\s\S]*?)\n};/.exec(validation)?.[1] ?? '';
+  const defaultsOff = /\bliveAwareness:\s*'off'/.test(settingsDefaults) && /\bliveKeepAnEye:\s*false\b/.test(settingsDefaults);
+  const gated = /awarenessChangeAllowed\(/.test(index) && /handle\(CHANNELS\.liveAwarenessConsent[\s\S]*?'overlay'\);/.test(index);
+  const inert = !['src/main/index.ts', 'src/main/local-ai.ts', 'src/main/screen-capture.ts', 'src/shared/screen-flow.ts', 'src/shared/live-awareness.ts'].some(f => /liveKeepAnEye/.test(read(f)));
+  const promptLogRedacted = /\[system prompt, \$\{m\.content\.length\} chars\]/.test(read('src/main/local-ai.ts'));
+  const ok = defaultsOff && gated && inert && promptLogRedacted;
+  add('wiring', 'Live Talk awareness: default off, click-only consent, system prompt never logged, "keep an eye" is inert', ok ? 'PASS' : 'FAIL', ok ? '' : `${defaultsOff ? '' : 'liveAwareness must default to off and liveKeepAnEye to false; '}${gated ? '' : 'switching it on must go through awarenessChangeAllowed and the overlay-only consent handler; '}${inert ? '' : 'something reads liveKeepAnEye; '}${promptLogRedacted ? '' : 'the Cloud payload log must not print the system prompt'}`);
 }
 
 // ------------------------------------------------------------------------------------------ 5 smoke run
