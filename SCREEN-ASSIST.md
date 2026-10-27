@@ -5,7 +5,7 @@ When you say her name (or press the 👀 button in chat), Sudo-chan takes **one*
 Branches: `screen` (first version) and `screen2` (this version, based on `integrate`). Off by default.
 
 ## How it works
-1. **Trigger.** Overlay wake word accepted (name in the first words, voice lock passed, listening not paused) **and** Settings → "Let Sudo-chan look at my screen" is ON. Or the 👀 button in the chat header. Nothing else ever captures: no timer, no background capture, not on ordinary Live Talk turns. "Sudo, ruko" only stops; it never captures.
+1. **Trigger.** Overlay wake word accepted (name in the first words, voice lock passed, listening not paused) **and** Settings → "Let Sudo-chan look at my screen" is ON **and** the words point at the screen (`classifyIntent` = screen: "meri screen dekho", "ye kya hai"; see `desktop/INTENT-ROUTING.md`). "Sudo, kaise ho?" or "Sudo, notes.txt bana do" take no screenshot. The same screen phrases also work inside the 30 s Live Talk window. Or the 👀 button in the chat header. Nothing else ever captures: no timer, no background capture, not on ordinary Live Talk turns. "Sudo, ruko" only stops; it never captures.
 2. **Sequence (one state machine, `src/shared/screen-flow.ts`, unit-tested).**
    1. *Consent, once.* First time only. From the wake word a compact dark-glass panel appears **on the desktop bot** with **[Allow] [Not now]** (and she says so aloud). Only a click can answer; there is no voice path to consent (ignored for the first 400 ms to avoid stray clicks, auto "Not now" after 60 s, "ruko"/Stop cancels it). From Settings or the chat button the native dialog is used.
    2. *Cooldown / cache.* Wake word again within 10 s: she re-uses the screenshot she already has (badge "📎 Purani screen par based"); with no cached screenshot she says "thori der baad dobara bolein".
@@ -16,6 +16,9 @@ Branches: `screen` (first version) and `screen2` (this version, based on `integr
 4. **Processing.** Downscaled to at most 1280 px wide JPEG, blank frames rejected, a 220 px thumbnail for the chat.
 5. **Vision.** One non-streaming OpenAI-compatible call with an `image_url` part: active provider's model, then Groq `qwen/qwen3.8-27b`, then Gemini `gemini-flash-lite-latest`. A Groq rate limit (free tier: 7,000 input tokens/minute, an image is about 2,100) is waited out once if the provider asks for <= 6 s, otherwise the next provider is tried. If no provider can take images she says so and does not guess.
 6. **Follow-ups.** The last screenshot is kept **in memory only for 2 minutes**. A follow-up like "aur is error ka fix batao" / "ye kya hai?" (words that point at the screen) re-uses it, with the badge "📎 Purani screen par based" and a prompt line telling her it is N seconds old. Other turns never get an image. It is dropped immediately on Stop / "ruko" / cancel, when the setting is turned off, after 2 minutes, and at app exit. A barge-in (you talk over her to ask the follow-up) keeps it.
+
+### "Dekh ke kaam karo" (screen + task)
+Images and tools are never sent in one request. "Sudo, meri screen dekh ke ye kaam kar do" is a screenshot turn: she describes the screen (the answer stays in the chat history as text; the image stays in memory only) and says the task needs a separate request. Say the task right after ("ab notes.txt bana do"): that turn runs the normal tool loop with her description already in history. With tools ON, commands are never treated as screenshot follow-ups.
 
 ## What you see and hear on the desktop bot
 | Moment | Overlay | Spoken |

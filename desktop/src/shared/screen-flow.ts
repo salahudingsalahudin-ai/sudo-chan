@@ -1,6 +1,7 @@
 import { decideCapture } from './screen-assist.ts';
 import type { ScreenSource } from './screen-assist.ts';
 import type { GuardResult } from './screen-guard.ts';
+import { taskStrength } from './intent.ts';
 
 /**
  * The whole "look at my screen" sequence as one testable state machine, with every side effect injected:
@@ -33,6 +34,8 @@ export interface FlowDeps {
   setStatus(status: FlowStatus, extra?: { countdown?: number; notice?: string }): void;
   capture(): Promise<CaptureOutcome>;
   checkWindows(): Promise<GuardResult>;
+  /** True when the tool loop is on: a command like "notes.txt bana do" must then reach the tools, not a vision follow-up. */
+  toolsEnabled?(): boolean;
 }
 
 export type SkipReason = 'disabled' | 'busy' | 'no-consent' | 'cooldown' | 'sensitive' | 'capture-failed';
@@ -87,14 +90,25 @@ export class ScreenCache {
   }
 }
 
-const STRONG_WORDS = /\b(screen|error|errors|fix|bug|line|code|button|window|tab|file|message|popup|dialog|upar|neeche|yahan|wahan|here|above|below)\b/i;
+// Words that really point at something on a screen. "file", "window", "tab", "message", "fix" are not here: they are everyday task words.
+const STRONG_WORDS = /\b(screen|error|errors|bug|line|code|button|popup|dialog|upar|neeche|yahan|wahan|here|above|below)\b/i;
 const DEICTIC = /\b(is|iska|iski|iske|isko|isme|isse|ye|yeh|yahi|wo|woh|this|that|these|it)\b/i;
 const QUESTION = /\b(kya|kyun|kyu|kaise|kese|matlab|mean|fix|theek|solve|badlo|change|karun|karna|kare|karein|why|what|how|explain|samjhao|batao)\b/i;
 
-/** Does this turn look like a question about the screenshot she just looked at? Deliberately conservative. */
-export function isScreenFollowUp(text: string): boolean {
+/**
+ * Does this turn look like a question about the screenshot she just looked at? Deliberately conservative.
+ * With tools on, a command ("ye file edit kar do", "notes.txt bana do") is never a vision follow-up: that turn has
+ * no tools, so it must go to the normal tool loop. A bare "karo" next to a word that points at the screen
+ * ("upar wali line theek karo") stays a follow-up.
+ */
+export function isScreenFollowUp(text: string, opts: { toolsEnabled?: boolean } = {}): boolean {
   const t = text.trim();
   if (!t) return false;
+  if (opts.toolsEnabled) {
+    const strength = taskStrength(t);
+    if (strength === 'strong') return false;
+    if (strength === 'generic' && !STRONG_WORDS.test(t)) return false;
+  }
   if (STRONG_WORDS.test(t)) return true;
   return DEICTIC.test(t) && QUESTION.test(t);
 }
@@ -139,7 +153,7 @@ export class ScreenFlow {
   followUp(text: string): { shot: Shot; ageSeconds: number } | null {
     const d = this.deps;
     if (!d.isEnabled() || !d.hasConsent()) return null;
-    if (!isScreenFollowUp(text)) return null;
+    if (!isScreenFollowUp(text, { toolsEnabled: d.toolsEnabled?.() === true })) return null;
     const hit = this.cache.get(d.now());
     if (hit) d.setStatus('cached');
     return hit;

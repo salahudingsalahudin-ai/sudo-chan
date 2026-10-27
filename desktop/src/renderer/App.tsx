@@ -13,6 +13,7 @@ import { ConversationWindow, DEFAULT_WAKE_ALIASES, WakeGate, buildWakeHint, matc
 import { approvalHeadline, approvalSecondsLeft, approvalSpokenLine, mergeApprovals, reduceApprovals } from '../shared/approval-ui.ts';
 import { clearInterruptedSpeech, getMutedPreference, hasInterruptedSpeech, resumeInterruptedSpeech, setMutedPreference, speak, stopSpeech } from './speech';
 import { isStopCommand, unclearAction } from '../shared/stop-intent.ts';
+import { routeSpeech } from '../shared/intent.ts';
 import { DEFAULT_BARGE_IN_SENSITIVITY } from '../shared/barge-in.ts';
 import { formatResetLabel } from '../shared/usage.ts';
 import { isSpeakingNow, stopSpeaking } from './tts-player';
@@ -297,7 +298,9 @@ function Overlay({ state }: { state: AppState }) {
           wakeWindow.current.open(performance.now());
           void api?.welcome();
           void api?.setVoiceActive(true, 'overlay');
-          if (currentSettings.screenAssistEnabled) {
+          // Only words that clearly point at the screen ("meri screen dekho", "ye kya hai") start the screenshot flow; "kaise ho" and
+          // "notes.txt bana do" go to the normal chat / tool path. A bare name keeps its old behaviour (see src/shared/intent.ts).
+          if (routeSpeech(match.rest, { screenAssist: Boolean(currentSettings.screenAssistEnabled), afterWake: true }) === 'screen') {
             // If the screenshot cannot be taken (Local mode, cooldown...), still answer what was said.
             // When the reason was already shown and spoken on the overlay (declined, sensitive window, failed capture), do not also send the words as a blind chat message.
             void api?.sendScreen({ text: match.rest, source: 'wake' }).then(result => { if (!result.ok && !result.handled && match.rest) void api?.sendMessage(match.rest, true); });
@@ -307,7 +310,10 @@ function Overlay({ state }: { state: AppState }) {
           // In Live Talk: respond to whatever is spoken, and keep the wake window alive.
           wakeWindow.current.touch(performance.now());
           if (handleStopCommand(text)) return;
-          void api?.sendMessage(text.trim(), true);
+          // "meri screen dekho" inside the 30 s window uses the same consent / countdown / guard flow as the wake word; everything else is chat.
+          if (routeSpeech(text, { screenAssist: Boolean(currentSettings.screenAssistEnabled), afterWake: false }) === 'screen') {
+            void api?.sendScreen({ text: text.trim(), source: 'wake' }).then(result => { if (!result.ok && !result.handled) void api?.sendMessage(text.trim(), true); });
+          } else void api?.sendMessage(text.trim(), true);
         }
       },
     });
@@ -1478,7 +1484,8 @@ function SettingsView({ state }: { state: AppState }) {
         <AISettings/>
         <section id="privacy" className="settings-card privacy-card scroll-reveal">
           <div className="card-heading"><span className="section-icon peach"><Icon name="shield"/></span><div><span className="eyebrow">04 / YOUR SPACE STAYS YOURS</span><h2>Nothing behind the curtain.</h2></div></div>
-          <p>In <strong>Local mode</strong>, your messages never leave this computer — all generation runs via Ollama on device with zero telemetry. In <strong>Cloud mode</strong>, your messages are sent securely via HTTPS directly to your chosen provider (Google Gemini, Groq, OpenAI, or OpenRouter) using your own API key. Keys are encrypted on your device via safeStorage and never sent to Sudo-chan servers. Sudo-chan never accesses your screen, microphone, or disk files.</p>
+          <p>In <strong>Local mode</strong>, your messages never leave this computer — all generation runs via Ollama on device with zero telemetry. In <strong>Cloud mode</strong>, your messages are sent securely via HTTPS directly to your chosen provider (Google Gemini, Groq, OpenAI, or OpenRouter) using your own API key. Keys are encrypted on your device via safeStorage and never sent to Sudo-chan servers.</p>
+          <p><strong>Mic:</strong> only while listening is on. <strong>Screen:</strong> only after you click Allow and only while screen assist is on; the image goes to your cloud model and is never saved. <strong>Files:</strong> only while tools are on, and risky actions ask you first.</p>
           <div className="privacy-facts">
             <span><i/>Local chat stays on your machine</span>
             <span><i/>Cloud uses direct provider HTTPS</span>
