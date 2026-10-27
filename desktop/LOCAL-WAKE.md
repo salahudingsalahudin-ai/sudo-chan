@@ -76,7 +76,7 @@ Renderer: `voice-engine.ts` (new optional `localWake` callback, `decideClip(feat
 Tests: `tests/local-wake.check.mjs` (25), `tests/local-wake-pipeline.check.mjs` (4, real `VoiceSession` + `ClipGate` + `WakeGate` with a fake audio stack), helper `tests/helpers/synth-speech.mjs`.
 
 ## Privacy
-Enrolment records ~2-3 s per take in memory, turns it into 20-60 frames of 24 numbers, and drops the audio. Only those numbers are written (`local-wake.json`, mode 0600, ~22 KB per word). "Delete my voice samples" removes the file. The mic is opened for enrolment/self-test only while a button is held in Settings. No network use of any kind in this feature.
+Enrolment records ~2-3 s per take in memory, turns it into 20-60 frames of 24 numbers, and drops the audio. Only those numbers are written (`local-wake.json`, mode 0600, ~22 KB per word). "Delete my voice samples" removes the file. The mic is opened for enrolment and the self-test only, for one take at a time after you press a button in Settings. No network use of any kind in this feature.
 
 ## Honest risks
 * Synthetic voices are far cleaner than a laptop mic in a room. Expect real recall below the synthetic 100 %; that is what `assist` + the sensitivity slider + the self-test are for. Default stays `off` until the owner validates with real audio.

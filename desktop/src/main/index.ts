@@ -974,8 +974,7 @@ function setupIPC() {
       return { ok: false, error: 'Could not remove the saved keys. Please try again.' };
     }
   }, 'settings');
-  // Counters and reset times only (no keys); Settings shows the full list, Chat one calm line.
-  handle(CHANNELS.usage, () => usage().summary({ gemini: Boolean(geminiKey()), groq: Boolean(getProviderKey('groq')), azure: azure().hasKey() }), ['settings', 'chat']);
+  // On-device wake word profile (feature vectors only, never audio).
   handle(CHANNELS.localWakeGet, () => ({ profile: localWake().read() ?? null, revision: state.localWakeRevision ?? 0 }), ['overlay', 'settings']);
   handle(CHANNELS.localWakeSave, (_e, value: unknown) => {
     if (!localWake().write(value)) return { ok: false, error: 'That voice profile could not be saved.' };
@@ -987,6 +986,8 @@ function setupIPC() {
     state.localWakeRevision = (state.localWakeRevision ?? 0) + 1; publish();
     return removed ? { ok: true } : { ok: false, error: 'Could not delete the file. Remove local-wake.json from the app folder by hand.' };
   }, 'settings');
+  // Counters and reset times only (no keys); Settings shows the full list, Chat one calm line.
+  handle(CHANNELS.usage, () => usage().summary({ gemini: Boolean(geminiKey()), groq: Boolean(getProviderKey('groq')), azure: azure().hasKey() }), ['settings', 'chat']);
   handle(CHANNELS.azureGet, () => {
     const key = getProviderKey('azure');
     return {

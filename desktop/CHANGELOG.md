@@ -11,7 +11,7 @@ Wake mode still depended on a cloud round trip to judge every clip. Now a local 
 - **Settings > Voice:** "Teach her your voice saying Sudo" (5-8 takes, live level meter, quality checks, optional "Sid"), accuracy self-test ("Heard 3/3"), sensitivity, "Delete my voice samples". Nothing on the overlay.
 - **Storage:** `userData/local-wake.json`, mode 0600, atomic, validated on read and write; feature vectors only, never audio. Three IPC handlers (get: overlay+settings; save/delete: settings only).
 - **Log:** `[wake-local] candidates=N rejected=M sent=K mode=...` once a minute, counts only.
-- Tests: `tests/local-wake.check.mjs` (25) + `tests/local-wake-pipeline.check.mjs` (4); one new verify wiring check. Everything is verified on synthetic audio only.
+- Tests: `tests/local-wake.check.mjs` (25) + `tests/local-wake-pipeline.check.mjs` (4); one new verify wiring check. `npm run verify` 38/38, unit tests 491 pass (462 before; two unrelated timing tests flaked under load in earlier runs, a rerun was clean). Everything is verified on synthetic audio only.
 
 ## quota-saver (on top of mic-indicator): wake mode stops burning the free Groq listening allowance
 
