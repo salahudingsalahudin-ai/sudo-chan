@@ -226,7 +226,7 @@ export const content = {
   },
   downloadPage: {
     title: 'Download Sudo-chan',
-    metadataDescription: 'Early prototype builds of the Sudo-chan desktop companion. Linux first; Windows and macOS are coming later.',
+    metadataDescription: 'Early prototype builds of the Sudo-chan desktop companion. Linux first; Windows and macOS are not built yet.',
     backLink: 'Back to Sudo-chan',
     intro: 'Sudo-chan is an early prototype. The first build is for Linux. Windows and macOS are not ready yet: join the waitlist and we will tell you.',
     statusNotice: 'Expect rough edges. Urdu and Roman Urdu recognition is still improving, and the default voice is a simple synthetic one.',
@@ -241,8 +241,8 @@ export const content = {
     platformsTitle: 'Platforms',
     platforms: {
       linux: { name: 'Linux (x86-64)', status: 'First build' },
-      windows: { name: 'Windows', status: 'Coming soon' },
-      macos: { name: 'macOS', status: 'Coming soon' },
+      windows: { name: 'Windows', status: 'Not built yet' },
+      macos: { name: 'macOS', status: 'Not built yet' },
     },
     linuxInstallTitle: 'Installing on Linux',
     linuxInstall: [

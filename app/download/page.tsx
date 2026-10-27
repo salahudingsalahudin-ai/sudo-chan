@@ -87,7 +87,7 @@ export default async function DownloadPage() {
         <section aria-labelledby="platforms-title">
           <h2 id="platforms-title">{page.platformsTitle}</h2>
           <ul className="download-platforms">
-            <li><span>{page.platforms.linux.name}</span><b className={hasLinuxBuild ? 'is-ready' : ''}>{hasLinuxBuild ? page.platforms.linux.status : 'Coming soon'}</b></li>
+            <li><span>{page.platforms.linux.name}</span><b className={hasLinuxBuild ? 'is-ready' : ''}>{hasLinuxBuild ? page.platforms.linux.status : 'Not built yet'}</b></li>
             <li><span>{page.platforms.windows.name}</span><b>{page.platforms.windows.status}</b></li>
             <li><span>{page.platforms.macos.name}</span><b>{page.platforms.macos.status}</b></li>
           </ul>
