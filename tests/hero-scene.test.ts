@@ -81,7 +81,7 @@ describe('voice demo', () => {
       expect(v.level).toBeGreaterThanOrEqual(0);
       expect(v.level).toBeLessThanOrEqual(1);
     }
-    expect([...modes].sort()).toEqual(['idle', 'listening', 'speaking']);
+    expect(Array.from(modes).sort()).toEqual(['idle', 'listening', 'speaking']);
   });
   it('is completely still for reduced motion', () => {
     expect(sampleVoiceDemo(4.2, true)).toEqual({ mode: 'idle', listen: 0, speak: 0, level: 0 });

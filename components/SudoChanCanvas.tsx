@@ -97,8 +97,8 @@ function Rig({ progress, pointer, interactions, quietDayActive, quietDayMoment, 
     } else if (mobile) {
       // Phones and narrow windows: she sits above the text and steps out of the way once the hero is over.
       x = 0;
-      y = 1.15 + bob;
-      scale = 0.46 * Math.max(heroOnly, 0.0001);
+      y = 1.26 + bob;
+      scale = 0.44 * Math.max(heroOnly, 0.0001);
       rotY = 0;
       rotX = 0.04;
       camZ = 7.1;
