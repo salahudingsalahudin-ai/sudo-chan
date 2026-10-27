@@ -108,3 +108,18 @@ test('SttRouter: fast mode asks Whisper before Gemini, accurate asks Gemini firs
     assert.equal(calls[0], first, `${mode} should call ${first} first`);
   }
 });
+
+test('SttRouter fast mode: short rejected Whisper text does not trigger a slow Gemini call', async () => {
+  const { SttRouter } = await import('../src/main/stt.ts');
+  const calls = [];
+  const fetchFn = async (url) => {
+    calls.push(url.includes('groq') ? 'groq' : 'gemini');
+    return url.includes('groq')
+      ? { status: 200, ok: true, json: async () => ({ text: 'Hmm.' }), text: async () => '' }
+      : { status: 200, ok: true, json: async () => ({ candidates: [{ content: { parts: [{ text: 'hello there my friend' }] } }] }), text: async () => '' };
+  };
+  const r = new SttRouter({ fetch: fetchFn, getKey: () => 'k', now: () => 0, getMode: () => 'fast' });
+  const out = await r.transcribe({ base64: 'AAAA', mimeType: 'audio/wav', language: 'auto' });
+  assert.equal(out.ok, false);
+  assert.deepEqual(calls, ['groq']);
+});

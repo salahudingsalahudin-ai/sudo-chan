@@ -208,6 +208,11 @@ export class SttRouter {
         const arabic = hasArabicScript(result.text);
         return { ok: true, text: result.text, provider: route.provider, scriptWarning: arabic && lang !== 'ur' ? true : undefined };
       }
+      // Fast mode: a short rejected Whisper result (one or two words) is almost always noise or a half-heard word;
+      // asking Gemini as well just adds ~2 s of waiting and usually returns nothing. Only longer garbage gets a second opinion.
+      if (fast && route.provider === 'whisper' && result.text.trim().split(/\s+/).filter(Boolean).length < 4) {
+        return { ok: false, error: 'Could not transcribe speech.' };
+      }
       // A valid but empty/garbage transcription: do not burn more quota on other providers for silence.
       if (route.provider === 'gemini') return { ok: false, error: 'Could not transcribe speech.' };
     }
