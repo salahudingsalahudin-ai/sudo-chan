@@ -14,13 +14,13 @@ type CardDef = { title: string; caption: string; icon: CardIcon; accent: string 
 // Short and honest. These mirror the four things the copy promises, nothing more.
 export const CARDS: readonly CardDef[] = [
   { title: 'Voice', caption: 'Urdu and English', icon: 'mic', accent: '#62d9be' },
-  { title: 'Screen', caption: 'Only after you click', icon: 'screen', accent: '#58c8ff' },
+  { title: 'Screen', caption: 'After you click', icon: 'screen', accent: '#58c8ff' },
   { title: 'Tools', caption: 'You approve first', icon: 'tools', accent: '#9678ff' },
-  { title: 'Privacy', caption: 'Keys stay on your PC', icon: 'lock', accent: '#ffc46b' },
+  { title: 'Privacy', caption: 'Keys stay local', icon: 'lock', accent: '#ffc46b' },
 ];
 
-const W = 0.95;
-const H = 0.475;
+const W = 0.84;
+const H = 0.42;
 
 function drawCard(def: CardDef) {
   return (ctx: CanvasRenderingContext2D, w: number, h: number) => {
@@ -31,12 +31,12 @@ function drawCard(def: CardDef) {
     ctx.fill();
     drawIcon(ctx, def.icon, 96, h / 2, 62, def.accent);
     ctx.fillStyle = '#f3fbff';
-    ctx.font = `600 54px ${CARD_FONT}`;
+    ctx.font = `700 58px ${CARD_FONT}`;
     ctx.textBaseline = 'alphabetic';
     ctx.fillText(def.title, 176, h / 2 - 2);
     ctx.fillStyle = '#c3dbe5';
-    ctx.font = `400 31px ${CARD_FONT}`;
-    ctx.fillText(def.caption, 178, h / 2 + 44);
+    ctx.font = `500 37px ${CARD_FONT}`;
+    ctx.fillText(def.caption, 178, h / 2 + 50);
   };
 }
 
@@ -66,10 +66,10 @@ export default function FloatingCards({ weights, reduced }: { weights: MutableRe
       if (!item.group || !item.sharp || !item.soft) return;
       const a = t * 0.2 + (i * Math.PI) / 2;
       const s = Math.sin(a);
-      const x = Math.cos(a) * clamp(viewport.width * 0.13, 0.8, 1.3);
+      const x = Math.cos(a) * clamp(viewport.width * 0.165, 0.9, 1.3);
       const z = s * 1.0 - 0.05;
       // Tilted orbit: cards pass low in front of her body, high behind her head, so they never cover her face.
-      const y = 0.55 - s * 0.62 + Math.sin(t * 0.7 + i * 1.9) * 0.05;
+      const y = 0.12 - s * 0.8 + Math.sin(t * 0.7 + i * 1.9) * 0.05;
       item.group.position.set(x, y, z);
       item.group.rotation.set(0, -Math.cos(a) * 0.38, Math.cos(a) * 0.03);
       const grow = 0.72 + 0.28 * smoothstep(0, 0.8, w);

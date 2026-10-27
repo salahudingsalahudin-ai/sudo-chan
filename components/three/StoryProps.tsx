@@ -50,7 +50,7 @@ export function WakeChip(shared: Shared) {
   usePop(group, 'voice', shared);
   useFrame(() => fadeMaterial(material.current, shared.weights.current.voice));
   return (
-    <group ref={group} position={[0.8, -1.2, 0.45]} rotation={[0, -0.12, 0]} visible={false}>
+    <group ref={group} position={[1.15, -0.85, 0.45]} rotation={[0, -0.12, 0]} visible={false}>
       <mesh><planeGeometry args={[1.3, 0.41]} /><meshBasicMaterial ref={material} map={texture} transparent depthWrite={false} toneMapped={false} /></mesh>
     </group>
   );
@@ -189,16 +189,16 @@ export function ScreenFrame(shared: Shared & { progress: { current: number } }) 
     chipA: makeCanvasTexture(640, 150, (ctx, w, h) => {
       drawGlassCard(ctx, w, h, '#58c8ff', 44);
       ctx.fillStyle = '#58c8ff';
-      roundRectPath(ctx, 28, 34, 240, 82, 38);
+      roundRectPath(ctx, 28, 34, 300, 82, 38);
       ctx.fill();
       ctx.fillStyle = '#04202e';
       ctx.font = `700 33px ${CARD_FONT}`;
       ctx.textAlign = 'center';
-      ctx.fillText('Allow one look', 148, 87);
+      ctx.fillText('Allow one look', 178, 87);
       ctx.textAlign = 'left';
       ctx.fillStyle = '#c3dbe5';
-      ctx.font = `400 28px ${CARD_FONT}`;
-      ctx.fillText('You click. She looks once.', 298, 83);
+      ctx.font = `500 30px ${CARD_FONT}`;
+      ctx.fillText('She looks once.', 356, 85);
     }),
     chipB: makeCanvasTexture(640, 150, (ctx, w, h) => {
       drawGlassCard(ctx, w, h, '#62d9be', 44);
@@ -236,7 +236,7 @@ export function ScreenFrame(shared: Shared & { progress: { current: number } }) 
   });
   const corners: Array<[number, number]> = [[-1, 1], [1, 1], [-1, -1], [1, -1]];
   return (
-    <group ref={group} position={[1.85, 0.45, -0.1]} rotation={[0, -0.3, 0]} visible={false}>
+    <group ref={group} position={[2.05, 0.45, -0.1]} rotation={[0, -0.3, 0]} visible={false}>
       <mesh renderOrder={10}><planeGeometry args={[1.8, 1.02]} /><meshBasicMaterial ref={screenMat} map={textures.stuck} transparent depthWrite={false} toneMapped={false} /></mesh>
       {corners.map(([sx, sy], i) => (
         <group key={i} position={[sx * 0.95, sy * 0.55, 0.02]}>
