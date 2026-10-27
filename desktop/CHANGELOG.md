@@ -1,5 +1,29 @@
 # Changelog (desktop)
 
+## fix-phantom-wake (on top of integrate4): the bot no longer wakes and talks by itself
+
+Live log: 5 replies in ~2 minutes with nobody speaking, every "heard" text was `Sudo-chan, Sido-chan,` and every reply ended in
+`speech:stop reason=barge-in`. Details in `PHANTOM-WAKE.md`.
+
+- **Prompt leak fixed.** The Whisper `prompt` began with the wake names (and the wake hint added a second name list), so on quiet clips
+  Whisper wrote the names back and the wake gate matched. New prompt is one natural sentence with the name once, never first;
+  `buildWhisperPrompt()` reduces the wake hint to a single name and never duplicates it.
+- **Hallucination filter** `src/shared/stt-hallucination.ts` (pure): drops empty text, stock Whisper junk ("Thanks for watching"),
+  names-only transcripts with 2+ names ("Sudo-chan, Sido-chan,", "Sid sudo", "Sid Sid") and copies of our prompt. A single name,
+  "Sid, kaise ho?", "Sid ruko", Urdu script all pass. Applied in `isValidTranscription` (every provider) and again in the overlay and chat
+  `onFinal` with the user's own wake names.
+- **Whisper confidence:** Groq/OpenAI requests use `response_format: verbose_json`; a result whose segments are all
+  `no_speech_prob > 0.6` and `avg_logprob < -1` is treated as silence. No segments (fake servers, old servers) means the text is kept.
+- **Echo-aware barge-in** (`src/shared/barge-in.ts`): the detector keeps a peak-hold echo envelope of the bot's own voice in the mic and
+  needs speech about 1.4 to 2.0 times above it (default 1.7, about +4.6 dB; scales with the existing sensitivity slider) for the usual
+  150-250 ms. First 350 ms of each reply only learn the echo (only a clearly louder voice interrupts). Short bursts that die out are
+  learned as echo peaks. Threshold is capped at 0.3 so shouting always works. A reply that continues the previous sentence skips the warm-up.
+- **Echo tail and clips:** for 600 ms after a reply ends, a new clip must also beat the envelope; a clip that overlapped playback or the
+  tail, did not trigger barge-in and stayed at echo level is dropped and never sent to speech-to-text (`clipIsEcho`).
+- **Overlay safety net:** within 3 s of the bot's own speech, a transcript that is only its name plus words it just said is ignored
+  (`isSelfEchoTranscript`; `getLastBotSpeech()` in `speech.ts`).
+- Tests: `tests/phantom-wake.check.mjs` (27 tests). `npm test` 394 pass; `npm run verify` 37/37.
+
 ## task-agent (on top of integrate3): "mera kaam lena" on files
 
 - **New tool `edit_file`** (path, old_text, new_text): exact, unique match required (0 or several matches give the model a
