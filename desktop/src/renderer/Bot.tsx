@@ -145,7 +145,10 @@ export function Bot({
         {/* Cute white glasses sitting in front of eyes, moving with head */}
         <SudoGlasses visible={glasses} id={id} />
         {isMouthOpen ? (
-          <g className={`bot-mouth-gpt ${isSpeaking ? 'is-talking' : 'is-listening'}`}>
+          <g
+            className={`bot-mouth-gpt ${isSpeaking ? 'is-talking-level' : 'is-listening'}`}
+            style={isSpeaking ? { transform: `scale(${(1 + audioLevel * 0.35).toFixed(3)}, ${(0.4 + Math.min(1, audioLevel) * 1.3).toFixed(3)})`, transition: 'transform 60ms linear' } : undefined}
+          >
             <clipPath id={`${id}-mouth-clip`}>
               <path
                 className="gpt-mouth-cutout"

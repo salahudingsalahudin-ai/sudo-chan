@@ -338,15 +338,45 @@ export function checkWakeIntent(
   return { isWake, isQuestionOrHelp: isWake };
 }
 
+import { BargeInDetector, DEFAULT_BARGE_IN_SENSITIVITY, clipIsEcho } from '../shared/barge-in.ts';
+import { ClipFeatureAccumulator, frameStats } from '../shared/clip-gate.ts';
+import type { ClipFeatures } from '../shared/clip-gate.ts';
+
+export interface BargeInInfo {
+  /** performance.now() when the user's interrupting speech began */
+  speechStartedAt: number;
+  /** performance.now() when the detector fired */
+  detectedAt: number;
+}
+
 export interface VoiceSessionCallbacks {
   isSpeaking?: () => boolean;
+  getBargeInSensitivity?: () => number;
   language?: string;
   onInterim?: (text: string) => void;
   onFinal?: (text: string, features?: { pitch?: number; centroid?: number }) => void;
   onAudioLevel?: (level: number) => void;
   onError?: (error: string) => void;
-  onBargeIn?: () => void;
+  onBargeIn?: (info?: BargeInInfo) => void;
+  /** Return false to drop a finished speech clip without sending it to the cloud (wake-word rate limiting). */
+  shouldTranscribe?: () => boolean;
+  /**
+   * Wake-mode quota saver (src/shared/clip-gate.ts). Called with cheap measurements of a finished clip instead of `shouldTranscribe`
+   * when provided. `send: false` drops the clip locally; `trimMs` caps how much of it is uploaded. Live Talk should answer `{ send: true }`.
+   */
+  decideClip?: (features: ClipFeatures) => { send: boolean; trimMs?: number };
+  /** Only the first N ms of a clip is sent. Wake-word listening needs just the name, not a monologue. */
+  maxClipMs?: number;
+  /** Vocabulary hint for the speech-to-text provider (e.g. the assistant's name and aliases). */
+  sttHint?: string;
+  onTranscribeResult?: (outcome: 'ok' | 'rate-limited' | 'error', info?: { quotaPressure?: number }) => void;
+  /** A finished speech clip produced no usable transcript (not called for clips dropped by shouldTranscribe). */
+  onUnclear?: (info: { clipMs: number }) => void;
 }
+
+const BARGE_IN_BASE_THRESHOLD = 0.009;
+/** Minimum voiced audio (ms) before a clip is sent to speech-to-text. */
+const MIN_VOICED_MS = 220;
 
 /**
  * Continuous Voice Activity Detection (VAD) & Instant Speech Recognizer
@@ -362,9 +392,19 @@ export class VoiceSession {
   private speechChunks: Float32Array[] = [];
   private preRollChunks: Float32Array[] = [];
   private burstPitches: number[] = [];
+  /** Milliseconds of actual speech (above threshold) in the current utterance, excluding pre-roll and trailing silence. */
+  private voicedMs = 0;
+  /** Echo bookkeeping for the current clip: did it overlap the bot's playback (or its echo tail), and how loud was it there? */
+  private clipOverlap = false;
+  private clipBargeFired = false;
+  private clipOverlapPeak = 0;
+  private clipEchoEnvelope = 0;
+  /** Cheap per-clip measurements (level shape, zero crossings, pauses) for the wake-mode quota gate. */
+  private features = new ClipFeatureAccumulator();
   private silenceTimer: any = null;
   private isProcessingTranscribe = false;
   private callbacks: VoiceSessionCallbacks = {};
+  private bargeInDetector = new BargeInDetector({ baseThreshold: BARGE_IN_BASE_THRESHOLD, sensitivity: DEFAULT_BARGE_IN_SENSITIVITY });
 
   setCallbacks(callbacks: VoiceSessionCallbacks) {
     this.callbacks = callbacks;
@@ -383,6 +423,7 @@ export class VoiceSession {
         echoCancellation: true,
         noiseSuppression: true,
         autoGainControl: true,
+        channelCount: 1,
       },
     }).then(stream => {
       if (!this.active) {
@@ -399,7 +440,7 @@ export class VoiceSession {
       this.analyser = analyser;
       source.connect(analyser);
 
-      const processor = ctx.createScriptProcessor(4096, 1, 1);
+      const processor = ctx.createScriptProcessor(1024, 1, 1);
       const muteGain = ctx.createGain();
       muteGain.gain.value = 0;
       this.processor = processor;
@@ -412,13 +453,8 @@ export class VoiceSession {
 
       processor.onaudioprocess = e => {
         if (!this.active) return;
-        if (this.callbacks.isSpeaking?.()) {
-          // Companion is speaking aloud, ignore microphone audio to prevent feedback loop
-          this.preRollChunks = [];
-          return;
-        }
-
         const inputData = e.inputBuffer.getChannelData(0);
+        const frameMs = (inputData.length / sampleRate) * 1000;
         analyser.getFloatTimeDomainData(pcmBuffer);
 
         // Calculate Root Mean Square (RMS) volume
@@ -430,17 +466,62 @@ export class VoiceSession {
         const normalized = Math.min(1, rms * 18); // 0 to 1 level
         this.callbacks.onAudioLevel?.(normalized);
 
+        // While the bot is speaking: keep mic + pre-roll alive and watch for barge-in only.
+        if (this.callbacks.isSpeaking?.()) {
+          const now = performance.now();
+          this.bargeInDetector.setConfig({
+            baseThreshold: BARGE_IN_BASE_THRESHOLD,
+            sensitivity: this.callbacks.getBargeInSensitivity?.() ?? DEFAULT_BARGE_IN_SENSITIVITY,
+          });
+          if (!this.isSpeakingSpeech) {
+            this.preRollChunks.push(new Float32Array(inputData));
+            // Keep ~400ms of audio so the start of the interruption is not clipped
+            const maxChunks = Math.ceil(400 / frameMs);
+            while (this.preRollChunks.length > maxChunks) this.preRollChunks.shift();
+          }
+          if (this.isSpeakingSpeech) this.noteOverlap(rms);
+          if (this.bargeInDetector.feed(rms, frameMs, now)) {
+            const speechStartedAt = this.bargeInDetector.speechStartedAt ?? now;
+            this.isSpeakingSpeech = true;
+            this.speechChunks = [...this.preRollChunks];
+            this.preRollChunks = [];
+            this.burstPitches = [];
+            this.voicedMs = Math.max(0, now - speechStartedAt);
+            this.clipOverlap = true;
+            this.clipBargeFired = true;
+            this.clipOverlapPeak = rms;
+            this.clipEchoEnvelope = this.bargeInDetector.echoEnvelope;
+            this.features.reset();
+            this.callbacks.onBargeIn?.({ speechStartedAt, detectedAt: now });
+            this.callbacks.onInterim?.('🎙️ Sun rahi hoon...');
+          }
+          // After barge-in the bot is stopped; until isSpeaking() flips we just keep recording below
+          if (!this.isSpeakingSpeech) return;
+        } else {
+          this.bargeInDetector.idle(performance.now());
+        }
+
         // Sensitive vocal threshold calibrated for natural laptop distance (covers quiet speech 50-70cm from laptop)
         const speechThreshold = 0.009;
+        // Right after a reply the room still rings with the bot's own voice: starting a clip then needs to beat the echo envelope.
+        const nowMs = performance.now();
+        const tail = !this.callbacks.isSpeaking?.() && this.bargeInDetector.inEchoTail(nowMs);
+        const startThreshold = this.bargeInDetector.idleSpeechThreshold(speechThreshold, nowMs);
 
-        if (rms > speechThreshold) {
+        if (this.isSpeakingSpeech ? rms > speechThreshold : rms > startThreshold) {
           // User is actively speaking
           if (!this.isSpeakingSpeech) {
             this.isSpeakingSpeech = true;
+            this.clipOverlap = tail;
+            this.clipBargeFired = false;
+            this.clipOverlapPeak = tail ? rms : 0;
+            this.clipEchoEnvelope = tail ? this.bargeInDetector.echoEnvelope : 0;
             // Prepend pre-roll audio (~250ms) so first consonants (like "S" in Sudo/Sid) are NEVER clipped
             this.speechChunks = [...this.preRollChunks, new Float32Array(inputData)];
             this.preRollChunks = [];
             this.burstPitches = [];
+            this.voicedMs = 0;
+            this.features.reset();
             this.callbacks.onInterim?.('🎙️ Sun rahi hoon...');
           } else {
             this.speechChunks.push(new Float32Array(inputData));
@@ -451,6 +532,11 @@ export class VoiceSession {
             this.silenceTimer = null;
           }
 
+          this.voicedMs += frameMs;
+          const stats = frameStats(inputData, sampleRate);
+          this.features.push({ rms, peak: stats.peak, zcrPerSec: stats.zcrPerSec, frameMs, voiced: true });
+          if (tail) this.noteOverlap(rms);
+
           // Sample pitch during speech burst (covers human voices from 70Hz to 450Hz)
           const pitch = autoCorrelate(pcmBuffer, sampleRate);
           if (pitch > 65 && pitch < 450) {
@@ -459,23 +545,42 @@ export class VoiceSession {
         } else if (this.isSpeakingSpeech) {
           // Brief pause after speech started
           this.speechChunks.push(new Float32Array(inputData));
+          this.features.push({ rms, peak: 0, zcrPerSec: 0, frameMs, voiced: false });
 
           if (!this.silenceTimer) {
-            // Conversational silence timeout (750ms allows natural speech flow without cutting off mid-sentence)
+            // Conversational silence timeout (500ms keeps replies snappy while still allowing short natural pauses)
             this.silenceTimer = setTimeout(() => {
               this.silenceTimer = null;
               this.isSpeakingSpeech = false;
-              if (this.speechChunks.length > 2 && !this.isProcessingTranscribe) {
+              // Clicks, coughs and fan noise produce tiny bursts; every clip sent to the cloud costs ~2 s and
+              // blocks real speech while it is processed, so require a minimum of actual voiced audio.
+              if (this.voicedMs < MIN_VOICED_MS) {
+                this.speechChunks = [];
+                this.burstPitches = [];
+                this.voicedMs = 0;
+              } else if (clipIsEcho({
+                overlappedPlayback: this.clipOverlap,
+                bargeInFired: this.clipBargeFired,
+                overlapPeakRms: this.clipOverlapPeak,
+                echoEnvelope: this.clipEchoEnvelope,
+                sensitivity: this.callbacks.getBargeInSensitivity?.() ?? DEFAULT_BARGE_IN_SENSITIVITY,
+              })) {
+                // The bot heard itself: never send this to speech-to-text as a user turn.
+                console.info('[barge-in] clip overlapped bot playback at echo level -> dropped, not sent to STT');
+                this.speechChunks = [];
+                this.burstPitches = [];
+                this.voicedMs = 0;
+              } else if (this.speechChunks.length > 8 && !this.isProcessingTranscribe) {
                 const avgPitch = this.burstPitches.length > 0
                   ? Math.round(this.burstPitches.reduce((a, b) => a + b, 0) / this.burstPitches.length)
                   : undefined;
                 void this.dispatchTranscription(sampleRate, this.callbacks, avgPitch);
               }
-            }, 750);
+            }, 500);
           }
         } else {
-          // Standby background ambient: maintain circular pre-roll buffer (up to 4 chunks = ~340ms)
-          if (this.preRollChunks.length >= 4) {
+          // Standby background ambient: maintain circular pre-roll buffer (~340ms)
+          if (this.preRollChunks.length >= Math.ceil(340 / frameMs)) {
             this.preRollChunks.shift();
           }
           this.preRollChunks.push(new Float32Array(inputData));
@@ -486,8 +591,16 @@ export class VoiceSession {
     });
   }
 
+  private noteOverlap(rms: number) {
+    this.clipOverlap = true;
+    if (rms > this.clipOverlapPeak) this.clipOverlapPeak = rms;
+    this.clipEchoEnvelope = Math.max(this.clipEchoEnvelope, this.bargeInDetector.echoEnvelope);
+  }
+
   private async dispatchTranscription(sampleRate: number, callbacks: VoiceSessionCallbacks, burstPitch?: number) {
     this.isProcessingTranscribe = true;
+    const spokenMs = Math.round(this.voicedMs);
+    this.voicedMs = 0;
     try {
       let total = 0;
       for (const c of this.speechChunks) total += c.length;
@@ -500,20 +613,48 @@ export class VoiceSession {
       this.speechChunks = [];
       this.burstPitches = [];
 
-      const wavBlob = encodeWav(merged, sampleRate);
+      let trimMs = callbacks.maxClipMs ?? 0;
+      if (callbacks.decideClip) {
+        const features = this.features.finish({ durationMs: (merged.length / sampleRate) * 1000, overlappedPlayback: this.clipOverlap, bargeInFired: this.clipBargeFired });
+        const decision = callbacks.decideClip(features);
+        if (!decision.send) {
+          callbacks.onInterim?.('');
+          this.isProcessingTranscribe = false;
+          return;
+        }
+        if (decision.trimMs && decision.trimMs > 0) trimMs = trimMs > 0 ? Math.min(trimMs, decision.trimMs) : decision.trimMs;
+      } else if (callbacks.shouldTranscribe && !callbacks.shouldTranscribe()) {
+        callbacks.onInterim?.('');
+        this.isProcessingTranscribe = false;
+        return;
+      }
+      const maxSamples = trimMs > 0 ? Math.floor((trimMs / 1000) * sampleRate) : 0;
+      const clip = maxSamples > 0 && merged.length > maxSamples ? merged.subarray(0, maxSamples) : merged;
+
+      // Length of the actual speech, not of the padded clip: a one-word command is short even with pre-roll and trailing silence.
+      const clipMs = spokenMs;
+      const wavBlob = encodeWav(clip, sampleRate);
       const reader = new FileReader();
       reader.onloadend = async () => {
         const dataUri = reader.result as string;
-        if (typeof window !== 'undefined' && window.companion?.transcribeAudio) {
-          callbacks.onInterim?.('✨ Samajh rahi hoon...');
-          const result = await window.companion.transcribeAudio(dataUri, 'audio/wav', callbacks.language);
-          if (result.ok && result.text) {
-            callbacks.onFinal?.(result.text, { pitch: burstPitch });
-          } else {
-            callbacks.onInterim?.('');
+        try {
+          if (typeof window !== 'undefined' && window.companion?.transcribeAudio) {
+            callbacks.onInterim?.('✨ Samajh rahi hoon...');
+            const result = await window.companion.transcribeAudio(dataUri, 'audio/wav', callbacks.language, callbacks.sttHint);
+            callbacks.onTranscribeResult?.(result.rateLimited ? 'rate-limited' : result.ok || result.error === 'Could not transcribe speech.' ? 'ok' : 'error', { quotaPressure: result.quotaPressure });
+            if (result.ok && result.text) {
+              callbacks.onFinal?.(result.text, { pitch: burstPitch });
+            } else {
+              callbacks.onInterim?.('');
+              callbacks.onUnclear?.({ clipMs });
+            }
           }
+        } catch {
+          callbacks.onInterim?.('');
+          callbacks.onUnclear?.({ clipMs });
+        } finally {
+          this.isProcessingTranscribe = false;
         }
-        this.isProcessingTranscribe = false;
       };
       reader.readAsDataURL(wavBlob);
     } catch {

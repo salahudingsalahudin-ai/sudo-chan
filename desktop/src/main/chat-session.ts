@@ -1,12 +1,16 @@
 import type { ActionResult, ChatMessage, ChatState } from '../shared/types.js';
+import { stripEmotionTags } from '../shared/speech.js';
 import { MAX_MESSAGE_LENGTH } from '../shared/validation.js';
 import { LocalAI, LocalAIError } from './local-ai.js';
 import type { StreamOptions } from './local-ai.js';
+import { formatToolTrace } from './tools/trace.js';
 
 export class ChatSession {
   private messages: ChatMessage[] = [];
   private error = '';
   private revision = 0;
+  /** Compact "what the tools did" note per assistant reply (paths and verbs only). Sent to the model as history, never shown or spoken. */
+  private toolNotes = new Map<string, string>();
   private active?: { controller: AbortController; reply: ChatMessage };
   constructor(private ai: LocalAI, private changed: (state: ChatState) => void) {}
   snapshot(): ChatState { return structuredClone({ messages: this.messages, busy: Boolean(this.active), error: this.error, revision: this.revision }); }
@@ -22,8 +26,10 @@ export class ChatSession {
     }
     this.error = '';
     const reply: ChatMessage = { id: crypto.randomUUID(), role: 'assistant', text: '', status: 'streaming' };
-    this.messages.push({ id: crypto.randomUUID(), role: 'user', text: value.trim() }, reply);
+    const attachment = options?.vision?.thumbnail ? { kind: 'screen' as const, thumbnail: options.vision.thumbnail } : undefined;
+    this.messages.push({ id: crypto.randomUUID(), role: 'user', text: value.trim(), ...(attachment ? { attachment } : {}) }, reply);
     this.messages = this.messages.slice(-100);
+    if (this.toolNotes.size > 100) { const live = new Set(this.messages.map(m => m.id)); for (const id of this.toolNotes.keys()) if (!live.has(id)) this.toolNotes.delete(id); }
     const request = { controller: new AbortController(), reply };
     this.active = request;
     // Bound recent context (voice mode sends last 10 messages for focused spoken responses)
@@ -32,15 +38,23 @@ export class ChatSession {
     const context = this.messages.filter(message => message !== reply && (message.role === 'user' || message.status === 'complete'))
       .slice(historyLimit).reverse().flatMap(message => {
         if (message.text.length > remaining) { remaining = 0; return []; }
-        remaining -= message.text.length;
-        return [{ role: message.role, content: message.text }];
+        const note = message.role === 'assistant' ? this.toolNotes.get(message.id) : undefined;
+        const content = note && note.length <= remaining - message.text.length ? `${message.text}\n${note}` : message.text;
+        remaining -= content.length;
+        return [{ role: message.role, content }];
       }).reverse();
     this.publish();
+    const trace: string[] = [];
     void this.ai.stream(model, context, request.controller.signal, text => {
       if (this.active !== request) return;
-      reply.text += text; this.publish();
-    }, options).then(() => {
-      if (this.active === request) reply.status = 'complete';
+      reply.spoken = (reply.spoken ?? '') + text;
+      reply.text = stripEmotionTags(reply.spoken); this.publish();
+    }, { ...options, onToolNote: note => { trace.push(note); } }).then(() => {
+      if (this.active === request) {
+        reply.status = 'complete';
+        const note = formatToolTrace(trace);
+        if (note) this.toolNotes.set(reply.id, note);
+      }
     }).catch(error => {
       if (this.active !== request) return;
       reply.status = 'error';
@@ -56,5 +70,5 @@ export class ChatSession {
     const request = this.active;
     this.active = undefined; request.reply.status = 'stopped'; request.controller.abort(); this.publish();
   }
-  clear() { this.stop(); this.messages = []; this.error = ''; this.publish(); }
+  clear() { this.stop(); this.messages = []; this.toolNotes.clear(); this.error = ''; this.publish(); }
 }

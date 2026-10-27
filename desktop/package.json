@@ -16,7 +16,8 @@
     "package:win": "npm run build && electron-builder --win nsis",
     "package:mac": "npm run build && electron-builder --mac dmg",
     "test": "node --test tests/*.check.mjs",
-    "postinstall": "install-electron"
+    "postinstall": "install-electron",
+    "verify": "node scripts/verify-integrated.mjs"
   },
   "build": {
     "appId": "app.sudochan.desktop",

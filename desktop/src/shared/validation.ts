@@ -1,4 +1,5 @@
 import type { CloudConfigInput, CloudProviderId, Settings } from './types.js';
+import { isAzureVoice } from './azure-tts.ts';
 
 export const DEFAULT_SETTINGS: Settings = {
   shortcut: 'Control+Space',
@@ -9,17 +10,27 @@ export const DEFAULT_SETTINGS: Settings = {
   voiceLockEnabled: false,
   registeredVoiceSample: '',
   customWakeWord: 'Sudo-chan',
+  wakeWordEnabled: true,
+  wakeAliases: ['Sudo', 'Sid', 'Sudo-chan', 'Suddo', 'Sit'],
   voiceVisualizerMode: 'bot',
   sttProvider: 'whisper',
   sttLanguage: 'auto',
-  ttsProvider: 'google',
+  ttsProvider: 'auto',
+  ttsQuality: 'best',
   ttsVoice: 'default',
+  ttsGeminiVoice: 'Kore',
+  ttsAzureVoice: 'auto',
+  ttsAzureRomanUrdu: 'hi',
   ttsSpeed: 1.0,
   voiceLanguage: 'auto',
   micDeviceId: 'default',
   vadSensitivity: 'medium',
   pushToTalk: false,
   glassesEnabled: true,
+  toolsEnabled: false,
+  screenAssistEnabled: false,
+  screenAssistCountdown: true,
+  bargeInSensitivity: 0.5,
 };
 export const BOT_DIMENSIONS = { small: [190, 230], medium: [220, 260], large: [264, 312] } as const;
 export const MAX_MESSAGE_LENGTH = 2000;
@@ -68,14 +79,25 @@ export function validSettings(value: unknown): value is Settings {
   if (s.voiceLockEnabled !== undefined && typeof s.voiceLockEnabled !== 'boolean') return false;
   if (s.registeredVoiceSample !== undefined && typeof s.registeredVoiceSample !== 'string') return false;
   if (s.customWakeWord !== undefined && (typeof s.customWakeWord !== 'string' || s.customWakeWord.length > 100)) return false;
+  if (s.wakeWordEnabled !== undefined && typeof s.wakeWordEnabled !== 'boolean') return false;
+  if (s.wakeAliases !== undefined && (!Array.isArray(s.wakeAliases) || s.wakeAliases.length > 20 || s.wakeAliases.some(a => typeof a !== 'string' || a.length > 40))) return false;
   if (s.voiceVisualizerMode !== undefined && s.voiceVisualizerMode !== 'bot' && s.voiceVisualizerMode !== 'orb') return false;
   if (s.sttProvider !== undefined && !['auto', 'browser', 'whisper', 'gemini'].includes(s.sttProvider)) return false;
-  if (s.ttsProvider !== undefined && !['google', 'gemini', 'azure', 'elevenlabs'].includes(s.ttsProvider)) return false;
+  if (s.sttSpeed !== undefined && s.sttSpeed !== 'accurate' && s.sttSpeed !== 'fast') return false;
+  if (s.ttsProvider !== undefined && !['auto', 'google', 'gemini', 'azure', 'elevenlabs'].includes(s.ttsProvider)) return false;
+  if (s.ttsQuality !== undefined && s.ttsQuality !== 'best' && s.ttsQuality !== 'save') return false;
   if (s.ttsVoice !== undefined && typeof s.ttsVoice !== 'string') return false;
+  if (s.ttsGeminiVoice !== undefined && (typeof s.ttsGeminiVoice !== 'string' || !/^[A-Za-z]{2,30}$/.test(s.ttsGeminiVoice))) return false;
+  if (s.ttsAzureVoice !== undefined && s.ttsAzureVoice !== 'auto' && !isAzureVoice(s.ttsAzureVoice)) return false;
+  if (s.ttsAzureRomanUrdu !== undefined && s.ttsAzureRomanUrdu !== 'hi' && s.ttsAzureRomanUrdu !== 'ur') return false;
   if (s.ttsSpeed !== undefined && (typeof s.ttsSpeed !== 'number' || s.ttsSpeed < 0.5 || s.ttsSpeed > 2.0)) return false;
   if (s.voiceLanguage !== undefined && !['auto', 'ur-PK', 'en', 'ur'].includes(s.voiceLanguage)) return false;
   if (s.micDeviceId !== undefined && typeof s.micDeviceId !== 'string') return false;
   if (s.glassesEnabled !== undefined && typeof s.glassesEnabled !== 'boolean') return false;
+  if (s.toolsEnabled !== undefined && typeof s.toolsEnabled !== 'boolean') return false;
+  if (s.screenAssistEnabled !== undefined && typeof s.screenAssistEnabled !== 'boolean') return false;
+  if (s.screenAssistCountdown !== undefined && typeof s.screenAssistCountdown !== 'boolean') return false;
+  if (s.bargeInSensitivity !== undefined && (typeof s.bargeInSensitivity !== 'number' || !Number.isFinite(s.bargeInSensitivity) || s.bargeInSensitivity < 0 || s.bargeInSensitivity > 1)) return false;
   return true;
 }
 export function validPosition(value: unknown): value is { x: number; y: number } {

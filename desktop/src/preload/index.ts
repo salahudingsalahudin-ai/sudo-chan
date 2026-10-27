@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import { CHANNELS } from '../shared/types.js';
-import type { AIState, AppState, ChatState, DesktopAPI } from '../shared/types.js';
+import type { SpeechEvent } from '../shared/speech-events.js';
+import type { AIState, AppState, ChatState, DesktopAPI, ToolApprovalEvent } from '../shared/types.js';
 
 const api: DesktopAPI = {
   getState: () => ipcRenderer.invoke(CHANNELS.getState),
@@ -14,17 +15,23 @@ const api: DesktopAPI = {
   hideWindow: () => ipcRenderer.invoke(CHANNELS.hide),
   welcome: () => ipcRenderer.invoke(CHANNELS.welcome),
   setPaused: paused => ipcRenderer.invoke(CHANNELS.pause, paused),
-  saveSettings: settings => ipcRenderer.invoke(CHANNELS.save, settings),
+  saveSettings: (settings, source) => ipcRenderer.invoke(CHANNELS.save, { patch: settings, source }),
   resetPosition: () => ipcRenderer.invoke(CHANNELS.reset),
   setInteractive: interactive => ipcRenderer.send(CHANNELS.interactive, interactive),
-  sendMessage: text => ipcRenderer.invoke(CHANNELS.send, text),
+  setCaptionVisible: visible => ipcRenderer.send(CHANNELS.caption, visible),
+  onReminder: callback => {
+    const listener = (_event: Electron.IpcRendererEvent, reminder: { text: string; late: boolean }) => callback(reminder);
+    ipcRenderer.on(CHANNELS.reminderDue, listener);
+    return () => ipcRenderer.removeListener(CHANNELS.reminderDue, listener);
+  },
+  sendMessage: (text, voice) => ipcRenderer.invoke(CHANNELS.send, voice === undefined ? text : { text, voice }),
   getMessages: () => ipcRenderer.invoke(CHANNELS.messages),
   onChat: callback => {
     const listener = (_event: Electron.IpcRendererEvent, state: ChatState) => callback(state);
     ipcRenderer.on(CHANNELS.chatState, listener);
     return () => ipcRenderer.removeListener(CHANNELS.chatState, listener);
   },
-  stopReply: () => ipcRenderer.invoke(CHANNELS.stop),
+  stopReply: options => ipcRenderer.invoke(CHANNELS.stop, options?.keepScreen === true ? { keepScreen: true } : undefined),
   getAI: () => ipcRenderer.invoke(CHANNELS.ai),
   onAI: callback => {
     const listener = (_event: Electron.IpcRendererEvent, state: AIState) => callback(state);
@@ -42,9 +49,32 @@ const api: DesktopAPI = {
   playSpeech: payload => ipcRenderer.invoke(CHANNELS.playSpeech, payload),
   setVoiceActive: (active, target) => ipcRenderer.invoke(CHANNELS.setVoiceActive, { active, target }),
   setIsSpeaking: speaking => ipcRenderer.invoke(CHANNELS.setIsSpeaking, speaking),
-  transcribeAudio: (base64Audio, mimeType, language) => ipcRenderer.invoke(CHANNELS.transcribeAudio, { base64Audio, mimeType, language }),
+  emitSpeechEvent: event => ipcRenderer.send(CHANNELS.speechEvent, event),
+  onSpeechEvent: callback => {
+    const listener = (_event: Electron.IpcRendererEvent, event: SpeechEvent) => callback(event);
+    ipcRenderer.on(CHANNELS.speechBroadcast, listener);
+    return () => ipcRenderer.removeListener(CHANNELS.speechBroadcast, listener);
+  },
+  transcribeAudio: (base64Audio, mimeType, language, hint) => ipcRenderer.invoke(CHANNELS.transcribeAudio, { base64Audio, mimeType, language, hint }),
   playAudio: dataUri => ipcRenderer.invoke(CHANNELS.playAudio, dataUri),
+  getUsage: () => ipcRenderer.invoke(CHANNELS.usage),
+  getKeyStorageInfo: () => ipcRenderer.invoke(CHANNELS.keyStorageInfo),
+  clearSavedKeys: () => ipcRenderer.invoke(CHANNELS.clearKeys),
+  getAzure: () => ipcRenderer.invoke(CHANNELS.azureGet),
+  saveAzure: config => ipcRenderer.invoke(CHANNELS.azureSave, config),
+  testAzure: sample => ipcRenderer.invoke(CHANNELS.azureTest, sample),
+  sendScreen: payload => ipcRenderer.invoke(CHANNELS.sendScreen, payload),
+  cancelScreen: () => ipcRenderer.invoke(CHANNELS.cancelScreen),
+  screenConsent: granted => ipcRenderer.invoke(CHANNELS.screenConsent, granted === true),
   clearMessages: () => ipcRenderer.invoke(CHANNELS.clear),
   quit: () => ipcRenderer.invoke(CHANNELS.quit),
+  onToolApproval: callback => {
+    const listener = (_event: Electron.IpcRendererEvent, event: ToolApprovalEvent) => callback(event);
+    ipcRenderer.on(CHANNELS.toolApproval, listener);
+    return () => ipcRenderer.removeListener(CHANNELS.toolApproval, listener);
+  },
+  getToolApprovals: () => ipcRenderer.invoke(CHANNELS.toolApprovals),
+  respondToolApproval: (id, decision) => ipcRenderer.invoke(CHANNELS.toolApprovalReply, { id, decision }),
+  stopAllTools: () => ipcRenderer.invoke(CHANNELS.toolsStopAll),
 };
 contextBridge.exposeInMainWorld('companion', api);

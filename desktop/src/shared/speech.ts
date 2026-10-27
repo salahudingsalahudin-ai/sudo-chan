@@ -1,7 +1,140 @@
+export const EMOTIONS = ['neutral', 'warm', 'excited', 'calm', 'curious', 'soft', 'happy'] as const;
+export type Emotion = typeof EMOTIONS[number];
+
+const TAG_ALIASES: Record<string, Emotion> = {
+  neutral: 'neutral', warm: 'warm', friendly: 'warm', excited: 'excited', calm: 'calm', curious: 'curious',
+  soft: 'soft', apologetic: 'soft', sorry: 'soft', sad: 'soft', happy: 'happy', cheerful: 'happy', greeting: 'happy',
+};
+const TAG_PATTERN = /\[\s*(neutral|warm|friendly|excited|calm|curious|soft|apologetic|sorry|sad|happy|cheerful|greeting)\s*\]/gi;
+
+/** Removes [warm]-style emotion tags, including a half-typed tag at the end of a streaming reply. */
+export function stripEmotionTags(text: string): string {
+  if (!text) return '';
+  return text.replace(TAG_PATTERN, '').replace(/\[[a-z]{0,10}$/i, '').replace(/[ \t]{2,}/g, ' ').replace(/^[ \t]+/gm, '');
+}
+
+export interface EmotionSegment { text: string; emotion: Emotion }
+
+/** Splits raw LLM text on emotion tags. A tag applies to the text that follows it; untagged text is neutral. */
+export function parseEmotionTags(text: string): EmotionSegment[] {
+  if (!text) return [];
+  const segments: EmotionSegment[] = [];
+  let emotion: Emotion = 'neutral';
+  let last = 0;
+  const push = (chunk: string) => {
+    const t = chunk.trim();
+    if (t) segments.push({ text: t, emotion });
+  };
+  for (const match of text.matchAll(TAG_PATTERN)) {
+    push(text.slice(last, match.index));
+    emotion = TAG_ALIASES[match[1].toLowerCase()] ?? 'neutral';
+    last = (match.index ?? 0) + match[0].length;
+  }
+  push(text.slice(last));
+  return segments;
+}
+
+const HUMAN_DELIVERY = ' Sound like a real person talking, not reading: vary the pitch naturally, take a soft breath between phrases, leave a short pause at commas and a slightly longer one at the end of a sentence, and never rush.';
+
+/** Natural-language style instruction handed to the TTS model together with the sentence. */
+export function emotionStyle(emotion: Emotion, lang: 'ur' | 'en' | 'hi' = 'en'): string {
+  const base: Record<Emotion, string> = {
+    neutral: 'in a natural, conversational tone with small pauses',
+    warm: 'warmly and kindly, at a natural conversational pace, with small pauses',
+    excited: 'with bright, excited energy, slightly faster, with a smile in the voice',
+    calm: 'calmly and gently, a little slower, with soft pauses',
+    curious: 'with curious, rising intonation as if genuinely interested',
+    soft: 'softly and apologetically, gentle and low in volume',
+    happy: 'cheerfully, like a happy greeting to a friend',
+  };
+  const accent = lang === 'en'
+    ? ''
+    : ' The text is Urdu, possibly written in Roman (Latin) letters: read it as natural spoken Pakistani Urdu, pronounce it as a native Pakistani Urdu speaker would, and never as English.';
+  return `Say the following ${base[emotion]}.${HUMAN_DELIVERY}${accent}`;
+}
+
+/** Fewer than 3 words is not worth a quota-limited Gemini call. Only applied when the voice quality setting is 'save'. */
+export function worthGemini(text: string): boolean {
+  return text.trim().split(/\s+/).filter(Boolean).length >= 3;
+}
+
+const ABBREVIATIONS: Array<[RegExp, string]> = [
+  [/\be\.g\.,?/gi, 'for example,'],
+  [/\bi\.e\.,?/gi, 'that is,'],
+  [/\betc\.?/gi, 'et cetera'],
+  [/\bvs\.?(?=\s)/gi, 'versus'],
+  [/\bapprox\.?(?=\s)/gi, 'approximately'],
+  [/\bDr\./g, 'Doctor'],
+  [/\bMr\./g, 'Mister'],
+  [/\bMrs\./g, 'Missus'],
+  [/\bRAM\b/g, 'ram'],
+  [/&/g, ' and '],
+];
+
+/** Makes text easier for a TTS engine: symbols, abbreviations, runs of punctuation, brackets. */
+export function normalizeForSpeech(text: string): string {
+  let t = text;
+  for (const [pattern, replacement] of ABBREVIATIONS) t = t.replace(pattern, replacement);
+  t = t.replace(/(\d)\s*%/g, '$1 percent');
+  t = t.replace(/\.{2,}|…/g, ', ');            // ellipsis becomes a short pause
+  t = t.replace(/([!?])\1+/g, '$1');          // "!!!" -> "!"
+  t = t.replace(/[()\[\]{}]/g, ', ');          // brackets read as a pause
+  t = t.replace(/\s*[—–]\s*|\s-\s/g, ', ');   // dashes read as a pause
+  t = t.replace(/[*_#~^|<>\\]/g, ' ');
+  t = t.replace(/\s*,(\s*,)+/g, ',').replace(/\s+/g, ' ').replace(/\s+([,.!?])/g, '$1');
+  return t.trim();
+}
+
+/** Splits at the most natural boundary at or before maxLen: sentence end, then comma/semicolon, then a space. */
+export function chunkForGoogle(text: string, maxLen = 180): string[] {
+  const out: string[] = [];
+  let rest = text.trim();
+  while (rest.length > maxLen) {
+    const window = rest.slice(0, maxLen + 1);
+    let cut = Math.max(window.lastIndexOf('. '), window.lastIndexOf('! '), window.lastIndexOf('? '), window.lastIndexOf('۔ '));
+    if (cut < maxLen * 0.4) cut = Math.max(window.lastIndexOf(', '), window.lastIndexOf('; '), window.lastIndexOf('، '));
+    if (cut < maxLen * 0.4) cut = window.lastIndexOf(' ');
+    if (cut <= 0) cut = maxLen - 1;
+    out.push(rest.slice(0, cut + 1).trim());
+    rest = rest.slice(cut + 1).trim();
+  }
+  if (rest) out.push(rest);
+  return out.filter(Boolean);
+}
+
+/**
+ * Groups sentences for synthesis: the first group is a single sentence (fast start); the rest merge
+ * consecutive sentences with the same emotion up to maxLen characters, so one quota-limited request
+ * covers several sentences.
+ */
+export function groupForSynthesis(sentences: SpokenSentence[], maxLen = 250): SpokenSentence[] {
+  const groups: SpokenSentence[] = [];
+  sentences.forEach((sentence, index) => {
+    const last = groups[groups.length - 1];
+    if (index > 1 && last && last.emotion === sentence.emotion && (last.text + ' ' + sentence.text).length <= maxLen) {
+      last.text += ' ' + sentence.text;
+    } else {
+      groups.push({ text: sentence.text, emotion: sentence.emotion });
+    }
+  });
+  return groups;
+}
+
+export interface SpokenSentence { text: string; emotion: Emotion }
+
+/** Tag-aware sentence queue for TTS: emotion per sentence, markdown/emoji/URL/code already removed. */
+export function splitIntoSpokenSentences(raw: string, maxLen = 180): SpokenSentence[] {
+  const out: SpokenSentence[] = [];
+  for (const segment of parseEmotionTags(raw)) {
+    for (const sentence of splitIntoSentences(segment.text, maxLen)) out.push({ text: sentence, emotion: segment.emotion });
+  }
+  return out;
+}
+
 export function cleanTextForSpeech(text: string): string {
   if (!text || typeof text !== 'string') return '';
 
-  let cleaned = text;
+  let cleaned = stripEmotionTags(text);
 
   // 1. Remove fenced code blocks (``` ... ```)
   cleaned = cleaned.replace(/```[\s\S]*?```/g, ' ');

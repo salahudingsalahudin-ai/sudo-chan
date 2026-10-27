@@ -1,6 +1,13 @@
 import { freemem, totalmem } from 'node:os';
 import type { AIMode, CloudProviderId, ModelMeta } from '../shared/types.js';
 import { CLOUD_PRESETS } from '../shared/validation.js';
+import { runToolLoop, ToolLoopHttpError, ToolsUnsupportedError } from './tools/agent-loop.js';
+import type { ToolRuntimeLike } from './tools/types.js';
+import { describeToolCall } from './tools/trace.js';
+import type { VisionTarget } from '../shared/screen-assist.ts';
+import { runVisionChat, VisionError } from './vision-chat.ts';
+import { tokensFromChatPayload } from '../shared/usage.ts';
+import type { ChatUsageSink } from '../shared/usage.ts';
 
 export function normalizeCloudModel(provider: CloudProviderId, model: string): string {
   let clean = model.trim();
@@ -82,13 +89,43 @@ export function getModelsEndpoint(provider: CloudProviderId, endpoint: string): 
 
 const BASE = 'http://127.0.0.1:11434';
 
+function safeJson(text: string): unknown {
+  try { return JSON.parse(text); } catch { return undefined; }
+}
+
+export const TOOLS_PROMPT = [
+  '[TOOLS ARE ON]',
+  'You can act on the user\'s computer ONLY through tool calls:',
+  '- read-only (home folder only): read_file (about 6 KB per call; for a bigger file use start_line/end_line and follow the "call again with start_line=N" footer), list_dir, search_files, get_system_info',
+  '- no click needed, private to this app: save_note, list_notes, read_note (your own notebook), set_reminder (in_minutes or at_time like "17:30"), list_reminders, cancel_reminder',
+  '- need the user to click Allow on screen every time: edit_file, write_file, append_file, run_command (one program, no pipes), open_url, open_app',
+  'Changing files: to change an existing file read the needed part (read_file), then call edit_file with old_text copied EXACTLY (it must match one place only; add neighbouring lines if the tool says it matches several) and new_text. Use write_file ONLY for a new file, with content under about 2500 characters; for more, write the first part and use append_file. Never rewrite a whole existing file with write_file for a small change. Do not re-read a file you already have.',
+  'Lines like [tools: ...] in earlier assistant messages are a log the app added of what tools did (paths only). Use it for context such as "that file", but never write such a line yourself and never speak it.',
+  'Rules: use a tool only when the request needs it. Before a risky action say in one short sentence what you are about to do; the user approves with a button on screen, NOT by voice or by saying "yes".',
+  'If a tool result says blocked, denied, timed out or NOT done, tell the user plainly and do not pretend otherwise. NEVER claim you read, wrote, ran or opened anything unless a tool result confirms it.',
+  'You cannot see the screen on a turn with tools (a screenshot turn has no tools) and you cannot browse the web; secrets (.ssh, .env, passwords, browser data) are off limits.',
+].join('\n');
+
 export function buildSystemPrompt(options?: {
   voice?: boolean;
   model?: string;
   provider?: string;
+  tools?: boolean;
+  /** Tools are enabled but this turn carries a screenshot, which is answered without tools. */
+  toolsPaused?: boolean;
 }): string {
   if (options?.voice) {
-    return "You are Sudo-chan, speaking aloud to your creator and developer Sid. Reply in the user's language, in 1-3 short natural spoken sentences. No markdown, no lists, no emojis. Answer the question directly and warmly in Roman Urdu or English.";
+    return [
+      "You are Sudo-chan, speaking aloud to your creator and developer Sid.",
+      "This is a live voice conversation: Sid speaks into the microphone, speech recognition turns it into the text you see, and your reply is spoken aloud. So you CAN hear Sid this way. Never say that you cannot hear voices or that you only chat by text.",
+      "Reply in the user's language, in 1-3 short natural spoken sentences. No markdown, no lists, no emojis, no URLs.",
+      "Answer the question directly and warmly in Roman Urdu or English.",
+      "Start EVERY sentence with exactly one emotion tag in square brackets, chosen from: [warm] [excited] [calm] [curious] [soft] [happy].",
+      "Use [happy] for greetings, [soft] for apologies, [curious] for questions, [excited] for good news, [calm] for reassurance, [warm] otherwise.",
+      "Example: [happy] Assalam o Alaikum Sid! [curious] Aaj kis cheez par kaam karna hai?",
+      ...(options.toolsPaused ? ["Computer tools are not available on this screenshot turn: answer what is on the screen; if Sid also wants an action done, say it needs a separate request: after your answer he can just say the task again (your description stays in this chat), and never claim you did something."] : []),
+      ...(options.tools ? ["You can use computer tools (files, commands, links) but risky ones need the user to click Allow on screen: say \"please approve on screen\" and never treat a spoken yes as approval. Never claim an action happened unless the tool result confirms it."] : []),
+    ].join(' ');
   }
 
   const modelFact = options?.model ? `- Active AI Model: ${options.model}` : '';
@@ -119,7 +156,12 @@ export function buildSystemPrompt(options?: {
     modelFact,
     providerFact,
     '- Real Desktop Features: Pomodoro focus timer, live system RAM health alert, Live Talk voice companion, cute customizable glasses, quiet standby overlay.',
-    '- Real System Boundaries: Privacy-first desktop companion. Cannot view desktop screen pixels, cannot modify or delete OS files directly, cannot browse the live web.',
+    '- Voice: with Live Talk or the "Sudo/Sid" wake word turned on, the user speaks to you through the microphone (speech recognition converts it to text) and you can answer aloud. Do not claim you cannot hear voice when this is on; if a message arrives as plain text, just answer it.',
+    options?.tools
+      ? '- Real System Boundaries: Privacy-first desktop companion. You can see the screen ONLY on a turn where a screenshot is attached by screen assist; this is NOT such a turn, so you cannot see the screen and must say so instead of guessing. You cannot browse the live web. Files and commands are only possible through the tools below, with the user\'s approval.'
+      : '- Real System Boundaries: Privacy-first desktop companion. Can see the screen of the user ONLY on a turn where a screenshot is attached to the message (when the user enabled screen assist and said your name or pressed the eye button); on every other turn you cannot see the screen and must say so instead of guessing; you cannot modify or delete OS files directly, cannot browse the live web.',
+    options?.toolsPaused ? '- Tools (files, commands, links) are ON in settings but are NOT available on this screenshot turn. Answer what is on the screen; if the user also wants an action done, tell them to say the task again as a separate request right after (your description stays in this chat); never claim you did something.' : '',
+    options?.tools ? `\n${TOOLS_PROMPT}` : '',
   ].filter(Boolean).join('\n');
 }
 
@@ -190,6 +232,12 @@ export interface StreamOptions {
   heavy?: boolean;
   cloud?: StoredCloudConfig;
   voice?: boolean;
+  /** Present only when the user enabled "Let Sudo-chan use tools". */
+  tools?: ToolRuntimeLike;
+  /** Tool turns report a short phrase per finished tool call ("edited ~/a.py"): paths and verbs only, never contents. */
+  onToolNote?: (note: string) => void;
+  /** One screenshot turn: the image goes only to the vision targets, never into history or logs. */
+  vision?: { dataUri: string; thumbnail?: string; targets: VisionTarget[]; fallbackText: string; /** Seconds since a re-used screenshot was taken (undefined/0 = fresh). */ ageSeconds?: number; /** Called with the vision call's duration so main can log one combined [Screen] timing line. */ onTiming?: (visionMs: number) => void };
 }
 type Fetch = typeof fetch;
 export class LocalAIError extends Error {}
@@ -303,6 +351,21 @@ export function classifyModelMeta(name: string, sizeBytes?: number, paramSize?: 
 
 export class LocalAI {
   constructor(private request: Fetch = fetch) {}
+
+  /** Usage meter hook for Groq chat (request counts, remaining quota from the response headers). Set by the main process. */
+  usage?: ChatUsageSink;
+
+  /** Reports a Groq chat response to the usage meter. A JSON body is read from a clone; a stream is never cloned. */
+  private watchGroq(response: Response): Response {
+    if (!this.usage) return response;
+    try {
+      this.usage.groqChat(response.headers, response.ok);
+      if (response.ok && (response.headers.get('content-type') ?? '').includes('application/json')) {
+        void response.clone().json().then(payload => this.usage?.groqChatTokens(tokensFromChatPayload(payload))).catch(() => {});
+      }
+    } catch { /* the meter must never break a chat turn */ }
+    return response;
+  }
 
   async modelsWithMeta(): Promise<{ names: string[]; meta: Record<string, ModelMeta> }> {
     try {
@@ -500,8 +563,60 @@ export class LocalAI {
     if (!model) throw new LocalAIError('Choose a Cloud API model in Settings → Local AI.');
 
     console.log(`[Cloud AI] Stream request model: ${model}`);
+    const streamT0 = Date.now();
 
     const providerLabel = CLOUD_PRESETS[cloud.provider]?.label || cloud.provider;
+    if (options?.tools && options.tools.definitions.length) {
+      const toolSystem = buildSystemPrompt({ voice: options.voice, model, provider: providerLabel, tools: true });
+      // No few-shot examples on tool turns: the tool list is re-sent on every step and Groq limits input tokens per minute
+      // (qwen: 7000), so ~600 tokens of examples per step would trigger 429s after two or three steps.
+      const toolMessages = [{ role: 'system' as const, content: toolSystem }, ...messages];
+      try {
+        const outcome = await runToolLoop({
+          // Each model request has its own 60 s limit; waiting for the user's approval is not counted.
+          fetchFn: async (url, init) => {
+            const response = await this.request(url, { ...init, signal: AbortSignal.any([...(init.signal ? [init.signal] : []), AbortSignal.timeout(60_000)]) });
+            return cloud.provider === 'groq' ? this.watchGroq(response) : response;
+          },
+          endpoint,
+          apiKey,
+          model,
+          messages: toolMessages,
+          tools: options.tools,
+          signal,
+          onText,
+          maxTokens: cloud.provider === 'groq' ? 950 : 1500,
+          // Only requests that may contain a file write/edit get more room; Groq counts the requested tokens against its
+          // 7000 tokens-per-minute budget, so this stays modest.
+          writeMaxTokens: cloud.provider === 'groq' ? 1900 : 3000,
+          onToolResult: (name, args, result) => {
+            const note = describeToolCall(name, args, result);
+            if (note) options.onToolNote?.(note);
+          },
+          onToolCall: name => console.log(`[Tools] model called ${name}`),
+          // Groq limits input tokens per minute per model and tool turns re-send the tool list every step,
+          // so a second model keeps the turn alive when the main one answers 429.
+          fallbackModel: cloud.provider === 'groq' && model !== 'openai/gpt-oss-20b' ? 'openai/gpt-oss-20b' : undefined,
+          onStep: info => console.log(`[Tools] step=${info.step} model=${info.model} ms=${info.ms} status=${info.status} calls=${info.calls.join(',') || '-'}`),
+        });
+        console.log(`[Tools] finished after ${outcome.steps} step(s), ${outcome.toolCalls} tool call(s), ${Date.now() - streamT0} ms total`);
+        return;
+      } catch (error) {
+        if (signal.aborted) throw error;
+        if (error instanceof ToolsUnsupportedError) {
+          console.warn('[Tools] provider rejected tools; continuing with plain chat.');
+        } else if (error instanceof ToolLoopHttpError) {
+          if (error.status === 401 || error.status === 403) throw new LocalAIError('Cloud API key rejected (401/403). Check your key in Settings → Local AI.');
+          if (error.status === 404) throw new LocalAIError('Model not found (404). Click "Auto-Detect Models" in Settings.');
+          if (error.status === 0) throw new LocalAIError('Cloud API returned an empty reply. Please try again.');
+          throw new LocalAIError(`Cloud API request failed (${error.status}): ${extractErrorMessage(safeJson(error.detail)) || error.detail.slice(0, 100) || 'Check your model in Settings.'}`);
+        } else if (error instanceof LocalAIError) {
+          throw error;
+        } else {
+          throw new LocalAIError(`Cloud API error: ${(error as Error)?.message || 'connection failed.'}`);
+        }
+      }
+    }
     const systemPrompt = buildSystemPrompt({
       voice: options?.voice,
       model,
@@ -540,6 +655,7 @@ export class LocalAI {
           }),
         });
 
+        if (cloud.provider === 'groq') this.watchGroq(response);
         if (response.status === 429 && retries > 1) {
           console.warn(`[Cloud AI 429] Rate limited on ${model}. Retrying after ${delayMs}ms backoff...`);
           await new Promise(r => setTimeout(r, delayMs));
@@ -592,10 +708,11 @@ export class LocalAI {
           const chunk = JSON.parse(data);
           const chunkError = extractErrorMessage(chunk);
           if (chunkError) throw new LocalAIError(chunkError);
+          if (cloud.provider === 'groq') this.usage?.groqChatTokens(tokensFromChatPayload(chunk));
           const choices = (chunk as { choices?: { delta?: { content?: unknown }; message?: { content?: unknown }; finish_reason?: string }[] })?.choices;
           const finishReason = choices?.[0]?.finish_reason;
           if (finishReason) {
-            console.log(`[Cloud AI] Stream finish_reason: "${finishReason}"`);
+            console.log(`[Cloud AI] Stream finish_reason: "${finishReason}" ms=${Date.now() - streamT0}`);
             if (finishReason === 'length') {
               console.warn('[Cloud AI] Note: reply reached max_tokens length limit.');
             }
@@ -642,6 +759,32 @@ export class LocalAI {
   }
 
   async stream(model: string, messages: ModelMessage[], signal: AbortSignal, onText: (text: string) => void, options?: StreamOptions) {
+    if (options?.vision) {
+      try {
+        const result = await runVisionChat({
+          targets: options.vision.targets,
+          system: buildSystemPrompt({ voice: options.voice, provider: 'cloud vision', toolsPaused: Boolean(options.tools) }),
+          history: messages,
+          fallbackText: options.vision.fallbackText,
+          imageDataUri: options.vision.dataUri,
+          voice: options.voice,
+          ageSeconds: options.vision.ageSeconds,
+          signal,
+          log: line => console.info(line),
+          // Groq vision turns count too; other providers are left alone. Vision keeps using the global fetch, as before.
+          fetchFn: async (url, init) => {
+            const response = await fetch(url, init);
+            return /^https:\/\/api\.groq\.com\//.test(String(url)) ? this.watchGroq(response) : response;
+          },
+        });
+        options.vision.onTiming?.(result.ms);
+        onText(result.text);
+        return;
+      } catch (error) {
+        if (error instanceof VisionError) throw new LocalAIError(error.message);
+        throw error;
+      }
+    }
     if (options?.mode === 'cloud' && options.cloud) {
       return this.streamCloud(options.cloud, messages, signal, onText, options);
     }

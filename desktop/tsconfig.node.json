@@ -2,7 +2,7 @@
   "compilerOptions": {
     "target": "ES2022", "lib": ["ES2022", "DOM"], "module": "NodeNext",
     "moduleResolution": "NodeNext", "strict": true, "skipLibCheck": true,
-    "esModuleInterop": true, "outDir": "dist", "rootDir": "src", "types": ["node"]
+    "esModuleInterop": true, "allowImportingTsExtensions": true, "rewriteRelativeImportExtensions": true, "outDir": "dist", "rootDir": "src", "types": ["node"]
   },
   "include": ["src/main", "src/preload", "src/shared"]
 }

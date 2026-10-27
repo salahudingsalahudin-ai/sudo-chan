@@ -1,12 +1,29 @@
 import { useEffect, useRef, useState } from 'react';
 import type { FormEvent, ReactNode } from 'react';
-import type { AIState, AppState, BotSize, ChatState, Settings, VoiceLanguage } from '../shared/types';
+import type { AIState, AppState, BotSize, ChatState, Settings, ToolApprovalRequest, VoiceLanguage } from '../shared/types';
 import { DEFAULT_SETTINGS, MAX_MESSAGE_LENGTH } from '../shared/validation';
 import { Bot } from './Bot';
 import { SonicOrb } from './SonicOrb';
 import { AISettings } from './AISettings';
-import { getMutedPreference, setMutedPreference, speak, stopSpeech } from './speech';
-import { VoiceSession, checkWakeIntent, getVoiceProfile, isSpeakerMatch, recordVoiceSample } from './voice-engine';
+import { AzureVoiceSettings } from './AzureVoiceSettings';
+import { UsageSettings } from './UsageSettings';
+import { useLipSync } from './lipsync';
+import { escapeAction, panelPlan } from '../shared/overlay-panels.ts';
+import { ConversationWindow, DEFAULT_WAKE_ALIASES, WakeGate, buildWakeHint, matchWakeWord } from '../shared/wake-word.ts';
+import { ClipGate, WAKE_TRIM_MS, formatGateLine } from '../shared/clip-gate.ts';
+import { approvalHeadline, approvalSecondsLeft, approvalSpokenLine, mergeApprovals, reduceApprovals } from '../shared/approval-ui.ts';
+import { clearInterruptedSpeech, getLastBotSpeech, getMutedPreference, hasInterruptedSpeech, resumeInterruptedSpeech, setMutedPreference, speak, stopSpeech } from './speech';
+import { isStopCommand, unclearAction } from '../shared/stop-intent.ts';
+import { routeSpeech } from '../shared/intent.ts';
+import { RemoveKeysRow, useKeyStorageInfo } from './KeyStorage';
+import { runChatVoiceTurn } from '../shared/chat-voice-turn.ts';
+import { DEFAULT_BARGE_IN_SENSITIVITY } from '../shared/barge-in.ts';
+import { formatResetLabel } from '../shared/usage.ts';
+import { MIC_CONFIRM_MS, changedSettings, micDotPress, micDotView } from '../shared/mic-control.ts';
+import { getLastStop, isSpeakingNow, stopSpeaking } from './tts-player';
+import { isPhantomTranscript, isSelfEchoTranscript } from '../shared/stt-hallucination.ts';
+import { ScreenPanel } from './ScreenPanel';
+import { VoiceSession, type BargeInInfo, getVoiceProfile, isSpeakerMatch, recordVoiceSample } from './voice-engine';
 import type { VoiceProfile } from './voice-engine';
 
 const api = window.companion;
@@ -69,11 +86,158 @@ function useCompanion() {
 function WindowHeader({ subtitle, settings = false }: { subtitle: string; settings?: boolean }) {
   return <header className="window-header"><div className="brand-mark">s<span/></div><div className="header-brand"><b>Sudo-chan</b><span>{subtitle}</span></div><div className="header-actions">{!settings && <button className="icon-button" aria-label="Open settings" onClick={() => void api?.openSettings()}><Icon name="settings"/></button>}<button className="icon-button" aria-label="Hide window" onClick={() => void api?.hideWindow()}><Icon name="close"/></button></div></header>;
 }
+declare global { interface Window { __bargeInLatency?: Array<{ speechToDetectMs: number; detectToStoppedMs: number }> } }
+// Barge-in: user speech detected while the bot talks -> stop audio, clear queue, abort the LLM stream.
+function handleBargeIn(info?: BargeInInfo) {
+  const detectedAt = info?.detectedAt ?? performance.now();
+  stopSpeaking('barge-in');
+  // The user is probably asking a follow-up about the same screen: keep the (in-memory) screenshot.
+  void api?.stopReply({ keepScreen: true });
+  const stoppedAt = performance.now();
+  const speechToDetectMs = Math.round(detectedAt - (info?.speechStartedAt ?? detectedAt));
+  const detectToStoppedMs = Math.round(stoppedAt - detectedAt);
+  console.info(`[barge-in] speech→detect ${speechToDetectMs}ms, detect→stopped ${detectToStoppedMs}ms`);
+  (window.__bargeInLatency ??= []).push({ speechToDetectMs, detectToStoppedMs });
+}
+/** True if this transcript is Whisper noise (prompt leak, subtitle junk) or the bot's own name coming back through the speakers. */
+function isPhantomOrSelfEcho(text: string, settings: Settings): boolean {
+  const names = [settings.customWakeWord ?? '', ...(settings.wakeAliases ?? [])].filter(Boolean);
+  if (isPhantomTranscript(text, { names })) {
+    console.info('[voice] transcript ignored: looks like a speech-to-text hallucination');
+    return true;
+  }
+  const lastStop = getLastStop();
+  const sinceMs = isSpeakingNow() ? 0 : lastStop ? Date.now() - lastStop.at : Number.POSITIVE_INFINITY;
+  if (isSelfEchoTranscript(text, getLastBotSpeech(), sinceMs, { names })) {
+    console.info('[voice] transcript ignored: matches the bot\'s own last words (self-echo)');
+    return true;
+  }
+  return false;
+}
+/** One approval card per risky action. Only a click on these buttons approves; speech never does. */
+function ToolApprovalCards({ approvals, busy }: { approvals: ToolApprovalRequest[]; busy: boolean }) {
+  const [now, setNow] = useState(() => Date.now());
+  const seen = useRef(new Map<string, number>());
+  for (const request of approvals) if (!seen.current.has(request.id)) seen.current.set(request.id, Date.now());
+  useEffect(() => {
+    if (!approvals.length) return;
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [approvals.length]);
+  if (!approvals.length && !busy) return null;
+  const answer = (id: string, decision: 'allow' | 'allow-chat' | 'deny') => { void api?.respondToolApproval(id, decision); };
+  return <div className="tool-cards" role="region" aria-label="Actions waiting for your approval">
+    {approvals.map(request => {
+      const left = Math.max(0, Math.ceil((request.expiresInMs - (now - (seen.current.get(request.id) ?? now))) / 1000));
+      return <article key={request.id} className={`tool-card ${request.elevated ? 'is-elevated' : ''}`} role="alertdialog" aria-label={request.title}>
+        <h3>{request.elevated ? '⚠ ' : ''}Sudo-chan wants to: {request.title}</h3>
+        <pre className="tool-detail">{request.detail}</pre>
+        <div className="tool-actions">
+          <button type="button" className="primary-button" onClick={() => answer(request.id, 'allow')}>Allow once</button>
+          {request.allowForChat && <button type="button" className="soft-button" onClick={() => answer(request.id, 'allow-chat')}>Allow for this chat</button>}
+          <button type="button" className="soft-button" onClick={() => answer(request.id, 'deny')}>Deny</button>
+          <span className="tool-timer">Auto-denies in {left}s</span>
+        </div>
+        <p className="tool-note">Approve with a click only. Saying "yes" out loud does not approve anything.</p>
+      </article>;
+    })}
+    <button type="button" className="text-button tool-stop" onClick={() => void api?.stopAllTools()}>⛔ Stop all actions</button>
+  </div>;
+}
+/** After a barge-in: a stop command stays stopped; anything else is a new request that replaces the old reply. */
+function handleStopCommand(text: string): boolean {
+  clearInterruptedSpeech();
+  if (!isStopCommand(text)) return false;
+  if (isSpeakingNow()) stopSpeaking('stop-button');
+  void api?.stopReply();
+  console.info(`[barge-in] stop command "${text.trim()}" -> stay stopped`);
+  return true;
+}
+/** The interruption could not be understood: carry on where she was, unless it was too short to be anything but a command. */
+function handleUnclear(info: { clipMs: number }) {
+  const action = unclearAction(info.clipMs, hasInterruptedSpeech());
+  if (action === 'none') return;
+  if (action === 'stay-stopped') {
+    clearInterruptedSpeech();
+    console.info(`[barge-in] unclear clip=${info.clipMs}ms -> stay stopped`);
+    return;
+  }
+  const resumed = resumeInterruptedSpeech();
+  console.info(`[barge-in] unclear clip=${info.clipMs}ms -> ${resumed ? 'resume' : 'stay stopped'}`);
+}
+/** Compact approval panel on the desktop bot. Only these buttons (or Esc = deny) answer; speech never does. */
+function OverlayApproval({ request }: { request: ToolApprovalRequest }) {
+  const shownAt = useRef(Date.now());
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    shownAt.current = Date.now();
+    setNow(Date.now());
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [request.id]);
+  const left = approvalSecondsLeft(request, shownAt.current, now);
+  const answer = (decision: 'allow' | 'allow-chat' | 'deny') => { void api?.respondToolApproval(request.id, decision); };
+  return <div className={`overlay-approval ${request.elevated ? 'is-elevated' : ''}`} role="alertdialog" aria-label={request.title} data-interactive>
+    <div className="approval-title">{approvalHeadline(request)}</div>
+    <pre className="approval-detail">{request.detail}</pre>
+    <div className="approval-actions">
+      <button type="button" className="approval-allow" onClick={() => answer('allow')}>Allow once</button>
+      {request.allowForChat && <button type="button" className="approval-chat" onClick={() => answer('allow-chat')}>This chat</button>}
+      <button type="button" className="approval-deny" onClick={() => answer('deny')}>Deny</button>
+    </div>
+    <div className="approval-timer">{left}s mein khud Deny</div>
+  </div>;
+}
 function Overlay({ state }: { state: AppState }) {
   const [arriving, setArriving] = useState(false);
   const [cursorOffset, setCursorOffset] = useState<{ x: number; y: number } | undefined>(undefined);
   const [overlayAudioLevel, setOverlayAudioLevel] = useState(0);
+  // Only the bot the user is actually talking to moves its mouth (overlay = Live Talk on the desktop bot).
+  const lip = useLipSync(state.voiceActiveTarget === 'overlay');
   const lastSpokenOverlayId = useRef<string | null>(null);
+  const [caption, setCaption] = useState<{ you: string; bot: string }>({ you: '', bot: '' });
+  // Tool approval cards also appear on the desktop bot, because that is where the user is talking.
+  const [approvals, setApprovals] = useState<ToolApprovalRequest[]>([]);
+  useEffect(() => {
+    if (!api) return;
+    let alive = true;
+    const off = api.onToolApproval(event => setApprovals(previous => reduceApprovals(previous, event)));
+    void api.getToolApprovals().then(list => { if (alive) setApprovals(previous => mergeApprovals(list, previous)); }).catch(() => {});
+    return () => { alive = false; off(); };
+  }, []);
+  const approval = approvals[0];
+  const spokenApproval = useRef<string | null>(null);
+  useEffect(() => {
+    if (!approval || spokenApproval.current === approval.id) return;
+    spokenApproval.current = approval.id;
+    // One short spoken line; approving still needs a click.
+    if (state.voiceActiveTarget === 'overlay') void speak(approvalSpokenLine(approval)).catch(() => {});
+  }, [approval?.id]);
+  // A reminder came due: it is also a desktop notification; here she says it out loud.
+  useEffect(() => {
+    if (!api) return;
+    return api.onReminder(reminder => { void speak(`${reminder.late ? 'Der se yaad dila rahi hoon: ' : 'Yaad dilana: '}${reminder.text}`).catch(() => {}); });
+  }, []);
+  const toolsWorking = state.toolStatus === 'working';
+  const isOverlayVoiceActiveForCaption = state.voiceActiveTarget === 'overlay';
+  const captionText = toolsWorking ? 'Kaam kar rahi hoon...' : (caption.bot || caption.you);
+  const captionWanted = (isOverlayVoiceActiveForCaption && Boolean(caption.bot || caption.you)) || toolsWorking;
+  // Main resolves the same priority from the published flags (captionVisible etc.), so the native window shape matches this plan.
+  useEffect(() => { api?.setCaptionVisible(captionWanted); }, [captionWanted]);
+  const plan = panelPlan({ approvalPending: Boolean(approval), screenStatus: state.screenStatus, captionWanted, speechWanted: Boolean(state.speech) && !isOverlayVoiceActiveForCaption });
+  // Esc only refuses or cancels the visible prompt: deny the approval, decline the consent, cancel a pending capture.
+  useEffect(() => {
+    const action = escapeAction(plan.active);
+    if (!action) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      if (action === 'deny-approval' && approval) void api?.respondToolApproval(approval.id, 'deny');
+      else if (action === 'decline-consent') void api?.screenConsent(false);
+      else if (action === 'cancel-screen') void api?.cancelScreen();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [plan.active, approval?.id]);
   const isOverlayVoiceActive = state.voiceActiveTarget === 'overlay';
   const overlaySessionRef = useRef<VoiceSession | null>(null);
 
@@ -90,11 +254,39 @@ function Overlay({ state }: { state: AppState }) {
     }
   }, [state.mood]);
 
-  // Continuous Voice Listener for overlay (both Hands-Free Standby Wake-Up & Active Live Talk)
-  // Keeps mic persistent so wake-up words ("Sudo", "Sid") are NEVER missed or clipped!
+  // Wake word + Live Talk listener for the overlay.
+  // Privacy first: the mic is only open when "Listen for my name" is ON (and not paused) or Live Talk is active.
+  const wakeEnabled = state.settings.wakeWordEnabled ?? true;
+  const wakeGate = useRef(new WakeGate(2000));
+  // Quota saver: decides locally whether a wake-mode clip is worth a cloud request (never consulted during Live Talk).
+  const clipGate = useRef(new ClipGate());
+  const wakeWindow = useRef(new ConversationWindow());
+  const wakeOpened = useRef(false);
+  // One log line per decision class a minute, counts only: `[gate] skipped=N sent=M reason=...`.
+  useEffect(() => {
+    const timer = setInterval(() => { for (const line of clipGate.current.flushStats(performance.now())) console.info(formatGateLine(line)); }, 60_000);
+    return () => clearInterval(timer);
+  }, []);
+  const shouldListen = isOverlayVoiceActive || wakeEnabled;
+  // The mic dot: turning the mic OFF takes two clicks within 3 s (the first one only arms it), see shared/mic-control.ts.
+  const [micArmedAt, setMicArmedAt] = useState<number | null>(null);
+  useEffect(() => {
+    if (micArmedAt === null) return;
+    const timer = setTimeout(() => setMicArmedAt(null), MIC_CONFIRM_MS);
+    return () => clearTimeout(timer);
+  }, [micArmedAt]);
+  useEffect(() => setMicArmedAt(null), [wakeEnabled, isOverlayVoiceActive]);
+  const micView = micDotView({ wakeEnabled, liveActive: isOverlayVoiceActive, paused: state.paused, armed: micArmedAt !== null });
+  const pressMicDot = () => {
+    const result = micDotPress({ wakeEnabled, liveActive: isOverlayVoiceActive, armedAt: micArmedAt, now: Date.now() });
+    setMicArmedAt(result.armedAt);
+    if (result.action === 'end-live') void api?.setVoiceActive(false);
+    else if (result.action === 'enable' || result.action === 'disable') void api?.saveSettings({ wakeWordEnabled: result.action === 'enable' }, 'dot');
+  };
+
   useEffect(() => {
     // If Chat window is actively having a voice session, Overlay yields the mic to Chat
-    if (state.voiceActiveTarget === 'chat') {
+    if (state.voiceActiveTarget === 'chat' || !shouldListen) {
       if (overlaySessionRef.current) {
         overlaySessionRef.current.stop();
         overlaySessionRef.current = null;
@@ -111,42 +303,80 @@ function Overlay({ state }: { state: AppState }) {
     session.start({
       isSpeaking: () => Boolean(stateRef.current.isSpeaking),
       language: stateRef.current.settings.voiceLanguage,
+      // Standby only needs the name: short clips, rate-limited, hinted with the name and aliases.
+      maxClipMs: isOverlayVoiceActive ? undefined : WAKE_TRIM_MS,
+      sttHint: isOverlayVoiceActive ? undefined : buildWakeHint(stateRef.current.settings.customWakeWord, stateRef.current.settings.wakeAliases),
+      decideClip: features => {
+        const now = performance.now();
+        const live = isOverlayVoiceActiveRef.current;
+        const decision = clipGate.current.decide(features, { now, live });
+        if (!decision.send) return { send: false };
+        // The old 2 s minimum interval and error back-off still apply in wake mode; a refused clip gives its token back.
+        if (!live && !wakeGate.current.allow(now)) {
+          clipGate.current.refund(decision);
+          return { send: false };
+        }
+        return { send: true, trimMs: live ? undefined : decision.trimMs };
+      },
+      onTranscribeResult: (outcome, info) => {
+        if (!isOverlayVoiceActiveRef.current) wakeGate.current.report(performance.now(), outcome);
+        if (info?.quotaPressure !== undefined) clipGate.current.setQuotaPressure(info.quotaPressure);
+      },
       onAudioLevel: level => {
         setOverlayAudioLevel(level);
       },
-      onBargeIn: () => {
-        stopSpeech();
-        void api?.stopReply();
+      getBargeInSensitivity: () => stateRef.current.settings.bargeInSensitivity ?? DEFAULT_BARGE_IN_SENSITIVITY,
+      onBargeIn: handleBargeIn,
+      onUnclear: info => {
+        if (!isOverlayVoiceActiveRef.current) clipGate.current.noteResult(false);
+        handleUnclear(info);
       },
       onFinal: (text, features) => {
         if (!text.trim()) return;
         const currentLive = isOverlayVoiceActiveRef.current;
         const currentSettings = stateRef.current.settings;
+        if (isPhantomOrSelfEcho(text, currentSettings)) {
+          if (!currentLive) clipGate.current.noteResult(false);
+          return;
+        }
 
         if (!currentLive) {
-          // In Standby: STRICT wake check — bot MUST only activate if user says "sudo", "sid", or custom wake word
-          const intent = checkWakeIntent(text, currentSettings.customWakeWord);
-          if (!intent.isWake) {
-            // Wake name was not spoken, ignore background chatter
-            return;
-          }
+          // Standby: fuzzy-match the assistant's name or aliases; ignore everything else.
+          const match = matchWakeWord(text, currentSettings.customWakeWord, currentSettings.wakeAliases);
+          // The hit rate tunes the quota saver: a run of clips without the name makes it stricter, a hit loosens it.
+          clipGate.current.noteResult(match.matched);
+          if (!match.matched) return;
 
           // If personal voice lock is enabled, additionally verify the speaker is Sid
           const profile = getVoiceProfile();
           if (currentSettings.voiceLockEnabled && profile) {
-            const matchesSid = isSpeakerMatch(features ?? {}, profile);
-            if (!matchesSid) {
-              // Different voice detected while voice lock is active, ignore
-              return;
-            }
+            if (!isSpeakerMatch(features ?? {}, profile)) return;
           }
 
-          // Wake name verified -> activate Live Talk & send command
+          // "Sudo, ruko": a stop command right after the name only stops (speech, reply, pending screenshot); it never captures the screen.
+          if (match.rest && handleStopCommand(match.rest)) return;
+
+          // Name heard: bot reacts, a 30 s conversation window opens where no name is needed.
+          wakeOpened.current = true;
+          wakeWindow.current.open(performance.now());
+          void api?.welcome();
           void api?.setVoiceActive(true, 'overlay');
-          void api?.sendMessage(text.trim());
+          // Only words that clearly point at the screen ("meri screen dekho", "ye kya hai") start the screenshot flow; "kaise ho" and
+          // "notes.txt bana do" go to the normal chat / tool path. A bare name keeps its old behaviour (see src/shared/intent.ts).
+          if (routeSpeech(match.rest, { screenAssist: Boolean(currentSettings.screenAssistEnabled), afterWake: true }) === 'screen') {
+            // If the screenshot cannot be taken (Local mode, cooldown...), still answer what was said.
+            // When the reason was already shown and spoken on the overlay (declined, sensitive window, failed capture), do not also send the words as a blind chat message.
+            void api?.sendScreen({ text: match.rest, source: 'wake' }).then(result => { if (!result.ok && !result.handled && match.rest) void api?.sendMessage(match.rest, true); });
+          }
+          else if (match.rest) void api?.sendMessage(match.rest, true);
         } else {
-          // In Active Live Talk on Desktop: respond to whatever is spoken!
-          void api?.sendMessage(text.trim());
+          // In Live Talk: respond to whatever is spoken, and keep the wake window alive.
+          wakeWindow.current.touch(performance.now());
+          if (handleStopCommand(text)) return;
+          // "meri screen dekho" inside the 30 s window uses the same consent / countdown / guard flow as the wake word; everything else is chat.
+          if (routeSpeech(text, { screenAssist: Boolean(currentSettings.screenAssistEnabled), afterWake: false }) === 'screen') {
+            void api?.sendScreen({ text: text.trim(), source: 'wake' }).then(result => { if (!result.ok && !result.handled) void api?.sendMessage(text.trim(), true); });
+          } else void api?.sendMessage(text.trim(), true);
         }
       },
     });
@@ -157,22 +387,47 @@ function Overlay({ state }: { state: AppState }) {
         overlaySessionRef.current = null;
       }
     };
-  }, [state.voiceActiveTarget === 'chat']);
+  }, [state.voiceActiveTarget === 'chat', shouldListen, isOverlayVoiceActive]);
+
+  // The wake window ends Live Talk that the wake word started (never one the user started by hand).
+  useEffect(() => {
+    if (!isOverlayVoiceActive) {
+      wakeOpened.current = false;
+      wakeWindow.current.close();
+      return;
+    }
+    const timer = setInterval(() => {
+      if (!wakeOpened.current) return;
+      const now = performance.now();
+      if (stateRef.current.isSpeaking) wakeWindow.current.touch(now);
+      else if (!wakeWindow.current.isOpen(now)) {
+        wakeOpened.current = false;
+        void api?.setVoiceActive(false);
+      }
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [isOverlayVoiceActive]);
 
   // Spoken reply playback when conversation updates in overlay mode
   useEffect(() => {
     // ONLY speak in overlay if OVERLAY is the designated active voice target!
+    console.info(`[voice] overlay target=${state.voiceActiveTarget ?? 'none'}`);
     if (!api || state.voiceActiveTarget !== 'overlay') return;
     const unsub = api.onChat(chatState => {
       const last = chatState.messages[chatState.messages.length - 1];
+      // Show what was said and what she answers right on the desktop bot, so the chat window is never needed.
+      const lastUser = [...chatState.messages].reverse().find(m => m.role === 'user');
+      const trim = (t: string) => (t.length > 160 ? `${t.slice(0, 157)}...` : t);
+      setCaption({ you: lastUser ? trim(lastUser.text) : '', bot: last && last.role === 'assistant' ? trim(last.text) : '' });
       if (last && last.role === 'assistant' && last.status === 'complete' && last.text) {
         if (lastSpokenOverlayId.current !== last.id) {
           lastSpokenOverlayId.current = last.id;
-          void speak(last.text);
+          console.info('[voice] overlay got a complete reply, speaking');
+          void speak(last.spoken ?? last.text).catch(error => console.error('[voice] speak failed', String(error)));
         }
       }
     });
-    return () => unsub();
+    return () => { unsub(); setCaption({ you: '', bot: '' }); };
   }, [state.voiceActiveTarget]);
 
   useEffect(() => {
@@ -193,11 +448,22 @@ function Overlay({ state }: { state: AppState }) {
     return () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerleave', leave); };
   }, []);
   return <main className="overlay-room" aria-label="Sudo-chan desktop companion">
-    {state.speech && !isOverlayVoiceActive && <div className="overlay-speech" role="status" data-interactive>{state.speech}</div>}
+    {/* One panel slot: approval > consent > countdown > notice > looking > caption > hint > greeting. See shared/overlay-panels.ts. */}
+    {plan.active === 'approval' && approval && <OverlayApproval request={approval} />}
+    {(plan.active === 'consent' || plan.active === 'countdown' || plan.active === 'notice' || plan.active === 'capturing' || plan.active === 'hint') && <ScreenPanel state={state} speakAloud={isOverlayVoiceActive} />}
+    {plan.active === 'caption' && <div className="overlay-caption" role="status" aria-live="polite" data-interactive>{plan.chip && <span className="caption-chip">{plan.chip === 'cached' ? '📎 Purani screen par based' : '📸 Screen bheji gayi'}</span>}<span className={toolsWorking || caption.bot ? 'caption-bot' : 'caption-you'}>{captionText}</span></div>}
+    {plan.active === 'speech' && <div className="overlay-speech" role="status" data-interactive>{state.speech}</div>}
 
     <div className="overlay-grip" data-interactive title="Drag to make yourself at home" aria-label="Drag companion"><span/><span/><span/></div>
+    {shouldListen && !state.paused && (
+      <div
+        className={`overlay-glow ${lip.speaking ? 'is-speaking' : isOverlayVoiceActive ? 'is-live' : 'is-standby'}`}
+        style={{ ['--glow' as string]: String(Math.min(1, lip.speaking ? lip.level : overlayAudioLevel)) }}
+        aria-hidden="true"
+      />
+    )}
     <div
-      className={`overlay-bot ${arriving ? 'bot-arriving' : ''}`}
+      className={`overlay-bot ${arriving ? 'bot-arriving' : ''} ${micView.mode === 'off' ? 'is-mic-off' : ''}`}
       data-interactive
       aria-label="Say hello to Sudo-chan"
       onClick={() => void api?.welcome()}
@@ -205,8 +471,8 @@ function Overlay({ state }: { state: AppState }) {
     >
       {(state.settings.voiceVisualizerMode ?? 'bot') === 'orb' ? (
         <SonicOrb
-          isSpeaking={state.isSpeaking}
-          audioLevel={overlayAudioLevel}
+          isSpeaking={lip.speaking}
+          audioLevel={lip.speaking ? lip.level : overlayAudioLevel}
           size={140}
           onClick={() => void api?.setVoiceActive(!isOverlayVoiceActive, 'overlay')}
         />
@@ -216,8 +482,8 @@ function Overlay({ state }: { state: AppState }) {
           paused={state.paused}
           cursorOffset={cursorOffset}
           voiceActive={isOverlayVoiceActive}
-          isSpeaking={state.isSpeaking}
-          audioLevel={overlayAudioLevel}
+          isSpeaking={lip.speaking}
+          audioLevel={lip.speaking ? lip.level : overlayAudioLevel}
           glasses={state.settings.glassesEnabled ?? true}
           onToggleVoice={() => void api?.setVoiceActive(!isOverlayVoiceActive, 'overlay')}
           onOpenSettings={() => void api?.openSettings()}
@@ -225,8 +491,11 @@ function Overlay({ state }: { state: AppState }) {
       )}
     </div>
     <div className="overlay-dock" data-interactive>
+      {/* The mic switch is its own button, outside the chat pill, with a gap, so a click on the pill can never reach it. */}
+      <button type="button" className="mic-switch" title={micView.title} aria-label={micView.title} onClick={pressMicDot}>
+        <span className={`mic-dot is-${micView.mode}`} aria-hidden="true"/>
+      </button>
       <button className="companion-pill" onClick={() => void api?.openChat()}>
-        <span className={`presence-dot ${state.paused ? 'is-paused' : ''}`}/>
         {state.paused
           ? 'Taking a breath'
           : isOverlayVoiceActive
@@ -260,8 +529,18 @@ function Chat({ state }: { state: AppState }) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [confirmHeavy, setConfirmHeavy] = useState<string | null>(null);
+  const [toolApprovals, setToolApprovals] = useState<ToolApprovalRequest[]>([]);
   const viewport = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLTextAreaElement>(null);
+  // Set only while a 429 says the realistic (Gemini) voice is out of quota; the chat shows one calm line then.
+  const [voiceLimitUntil, setVoiceLimitUntil] = useState<number | null>(null);
+  useEffect(() => {
+    let alive = true;
+    const check = () => { void api?.getUsage().then(summary => { if (alive) setVoiceLimitUntil(summary.geminiVoiceBlockedUntil); }).catch(() => {}); };
+    check();
+    const timer = setInterval(check, 30_000);
+    return () => { alive = false; clearInterval(timer); };
+  }, [conversation.busy]);
   const alive = useRef(true);
   const sending = submitting || conversation.busy;
   const [muted, setMuted] = useState(getMutedPreference);
@@ -273,6 +552,8 @@ function Chat({ state }: { state: AppState }) {
   const [botSubtitle, setBotSubtitle] = useState('');
   const [liveTranscript, setLiveTranscript] = useState('');
   const [audioLevel, setAudioLevel] = useState(0);
+  // Chat widget Live Talk: only this window's bot lip-syncs, never the overlay.
+  const lip = useLipSync(state.voiceActiveTarget === 'chat');
   const [micMuted, setMicMuted] = useState(false);
   const voiceSessionRef = useRef<VoiceSession | null>(null);
 
@@ -301,6 +582,8 @@ function Chat({ state }: { state: AppState }) {
 
   const isSpeakingRef = useRef(state.isSpeaking);
   isSpeakingRef.current = state.isSpeaking;
+  const settingsRef = useRef(state.settings);
+  settingsRef.current = state.settings;
   const conversationBusyRef = useRef(conversation.busy);
   conversationBusyRef.current = conversation.busy;
 
@@ -328,20 +611,22 @@ function Chat({ state }: { state: AppState }) {
           setLiveTranscript(text);
         },
         onFinal: text => {
+          if (text.trim() && isPhantomOrSelfEcho(text, settingsRef.current)) { setLiveTranscript(''); return; }
           setUserSubtitle(text);
           setLiveTranscript('');
+          if (text.trim() && handleStopCommand(text)) return;
           if (text.trim() && !conversationBusyRef.current) {
             setBotSubtitle('');
-            void api?.sendMessage(text.trim());
+            // Same routing as the overlay: only a clear screen request (and only with screen assist ON) starts the screenshot flow.
+            runChatVoiceTurn(text, Boolean(settingsRef.current.screenAssistEnabled), api);
           }
         },
         onAudioLevel: level => {
           setAudioLevel(level);
         },
-        onBargeIn: () => {
-          stopSpeech();
-          void api?.stopReply();
-        },
+        getBargeInSensitivity: () => settingsRef.current.bargeInSensitivity ?? DEFAULT_BARGE_IN_SENSITIVITY,
+        onBargeIn: handleBargeIn,
+        onUnclear: handleUnclear,
       });
     } else {
       session.stop();
@@ -367,7 +652,7 @@ function Chat({ state }: { state: AppState }) {
     const next = !muted;
     setMuted(next);
     setMutedPreference(next);
-    if (next) stopSpeech();
+    if (next) stopSpeaking('mute');
   };
 
   useEffect(() => {
@@ -378,7 +663,7 @@ function Chat({ state }: { state: AppState }) {
     if (lastMsg && lastMsg.role === 'assistant' && lastMsg.status === 'complete' && lastMsg.text) {
       if (lastSpokenId.current !== lastMsg.id) {
         lastSpokenId.current = lastMsg.id;
-        void speak(lastMsg.text);
+        void speak(lastMsg.spoken ?? lastMsg.text);
       }
     }
   }, [conversation.messages, muted, state.voiceActiveTarget]);
@@ -389,6 +674,13 @@ function Chat({ state }: { state: AppState }) {
     const update = (next: ChatState) => { if (alive.current) setConversation(previous => next.revision >= previous.revision ? next : previous); };
     const unsubscribeChat = api.onChat(update);
     const unsubscribeAI = api.onAI(next => { if (alive.current) setAI(next); });
+    const unsubscribeTools = api.onToolApproval(event => {
+      if (!alive.current) return;
+      setToolApprovals(previous => event.type === 'request'
+        ? [...previous.filter(request => request.id !== event.request.id), event.request]
+        : previous.filter(request => request.id !== event.id));
+    });
+    void api.getToolApprovals().then(list => { if (alive.current) setToolApprovals(list); }).catch(() => {});
     void api.getMessages().then(update).catch(() => setError('Your conversation could not be opened.'));
     const refreshAI = () => { void api.getAI().then(next => { if (alive.current) setAI(next); }).catch(() => {}); };
     const focus = () => { input.current?.focus(); refreshAI(); };
@@ -398,6 +690,7 @@ function Chat({ state }: { state: AppState }) {
       alive.current = false;
       unsubscribeChat();
       unsubscribeAI();
+      unsubscribeTools();
       window.removeEventListener('focus', focus);
     };
   }, []);
@@ -525,6 +818,24 @@ function Chat({ state }: { state: AppState }) {
         <Icon name="spark" size={15} />
       </button>
 
+      {state.settings.screenAssistEnabled && (
+        <button
+          type="button"
+          className="icon-button chat-voice-btn"
+          aria-label="Look at my screen"
+          title="👀 Meri screen dekho (screenshot AI ko bheja jata hai)"
+          disabled={sending}
+          onClick={() => {
+            void api?.sendScreen({ text: draft.trim(), source: 'button' }).then(result => {
+              if (result.ok) setDraft('');
+              else setError(result.error ?? 'Screen capture failed.');
+            });
+          }}
+        >
+          <span aria-hidden="true">👀</span>
+        </button>
+      )}
+
       <button
         type="button"
         className={`icon-button chat-voice-btn ${muted ? 'is-muted' : ''}`}
@@ -539,6 +850,10 @@ function Chat({ state }: { state: AppState }) {
         <Icon name="settings" size={14} />
       </button>
     </div>
+
+    {voiceLimitUntil !== null && voiceLimitUntil > Date.now() && (
+      <div className="chat-usage-note" role="status">Realistic voice limit reached today - using basic voice until {formatResetLabel(voiceLimitUntil, Date.now())}</div>
+    )}
 
     {confirmHeavy && (
       <div className="chat-heavy-banner" role="alert">
@@ -575,7 +890,7 @@ function Chat({ state }: { state: AppState }) {
             className={`viz-toggle-btn ${activeVisualizer === 'bot' ? 'active' : ''}`}
             onClick={() => {
               setActiveVisualizer('bot');
-              void api?.saveSettings({ ...state.settings, voiceVisualizerMode: 'bot' });
+              void api?.saveSettings({ voiceVisualizerMode: 'bot' }, 'chat');
             }}
             title="Sudo-chan Bot Character"
           >
@@ -586,7 +901,7 @@ function Chat({ state }: { state: AppState }) {
             className={`viz-toggle-btn ${activeVisualizer === 'orb' ? 'active' : ''}`}
             onClick={() => {
               setActiveVisualizer('orb');
-              void api?.saveSettings({ ...state.settings, voiceVisualizerMode: 'orb' });
+              void api?.saveSettings({ voiceVisualizerMode: 'orb' }, 'chat');
             }}
             title="ChatGPT Sonic Fluid Orb"
           >
@@ -597,9 +912,9 @@ function Chat({ state }: { state: AppState }) {
         <div className="voice-avatar-stage">
           {activeVisualizer === 'orb' ? (
             <SonicOrb
-              isSpeaking={state.isSpeaking}
+              isSpeaking={lip.speaking}
               isBusy={conversation.busy}
-              audioLevel={audioLevel}
+              audioLevel={lip.speaking ? lip.level : audioLevel}
               size={210}
               onClick={() => setMicMuted(prev => !prev)}
             />
@@ -614,8 +929,8 @@ function Chat({ state }: { state: AppState }) {
                 mood={state.mood}
                 paused={state.paused}
                 voiceActive={true}
-                isSpeaking={state.isSpeaking}
-                audioLevel={audioLevel}
+                isSpeaking={lip.speaking}
+                audioLevel={lip.speaking ? lip.level : audioLevel}
                 glasses={state.settings.glassesEnabled ?? true}
               />
             </>
@@ -695,6 +1010,12 @@ function Chat({ state }: { state: AppState }) {
                     {message.status === 'stopped' && <span>STOPPED</span>}
                     {message.status === 'error' && <span>INCOMPLETE</span>}
                   </span>
+                  {message.attachment && (
+                    <figure className="message-shot">
+                      <img src={message.attachment.thumbnail} alt="Screenshot sent to the AI" />
+                      <figcaption>📸 Ye screen AI provider ko bheji gayi</figcaption>
+                    </figure>
+                  )}
                   {message.text ? (
                     <p>{message.text}</p>
                   ) : message.status === 'streaming' ? (
@@ -715,6 +1036,7 @@ function Chat({ state }: { state: AppState }) {
             </div>
           )}
         </div>
+        <ToolApprovalCards approvals={toolApprovals} busy={Boolean(state.settings.toolsEnabled) && sending} />
         <div className="composer-area">
           {(error || conversation.error) && (
             <div className="chat-error">
@@ -860,6 +1182,7 @@ function SettingsView({ state }: { state: AppState }) {
   const [isError, setIsError] = useState(false);
   const [saving, setSaving] = useState(false);
   const [confirmClear, setConfirmClear] = useState(false);
+  const keyStorage = useKeyStorageInfo();
   const [activeSection, setActiveSection] = useState('presence');
   const settingsScroll = useRef<HTMLDivElement>(null);
 
@@ -880,7 +1203,7 @@ function SettingsView({ state }: { state: AppState }) {
         registeredVoiceSample: result.profile.id,
       };
       setSettings(updated);
-      void api?.saveSettings(updated);
+      void api?.saveSettings({ registeredVoiceSample: result.profile.id }, 'settings');
       setNotice("Sid's voice profile recorded and registered successfully!");
       setIsError(false);
     } catch (e) {
@@ -915,8 +1238,22 @@ function SettingsView({ state }: { state: AppState }) {
     settings.voiceLockEnabled !== state.settings.voiceLockEnabled ||
     settings.registeredVoiceSample !== state.settings.registeredVoiceSample ||
     settings.customWakeWord !== state.settings.customWakeWord ||
+    settings.wakeWordEnabled !== state.settings.wakeWordEnabled ||
+    settings.voiceLanguage !== state.settings.voiceLanguage ||
+    settings.screenAssistEnabled !== state.settings.screenAssistEnabled ||
+    settings.screenAssistCountdown !== state.settings.screenAssistCountdown ||
+    settings.sttSpeed !== state.settings.sttSpeed ||
+    JSON.stringify(settings.wakeAliases) !== JSON.stringify(state.settings.wakeAliases) ||
     settings.voiceVisualizerMode !== state.settings.voiceVisualizerMode ||
-    settings.glassesEnabled !== state.settings.glassesEnabled;
+    settings.glassesEnabled !== state.settings.glassesEnabled ||
+    settings.toolsEnabled !== state.settings.toolsEnabled ||
+    settings.bargeInSensitivity !== state.settings.bargeInSensitivity ||
+    settings.ttsProvider !== state.settings.ttsProvider ||
+    settings.ttsQuality !== state.settings.ttsQuality ||
+    settings.ttsGeminiVoice !== state.settings.ttsGeminiVoice ||
+    settings.ttsAzureVoice !== state.settings.ttsAzureVoice ||
+    settings.ttsAzureRomanUrdu !== state.settings.ttsAzureRomanUrdu ||
+    settings.ttsSpeed !== state.settings.ttsSpeed;
   useEffect(() => setSettings(state.settings), [
     state.settings.botSize,
     state.settings.shortcut,
@@ -926,8 +1263,22 @@ function SettingsView({ state }: { state: AppState }) {
     state.settings.voiceLockEnabled,
     state.settings.registeredVoiceSample,
     state.settings.customWakeWord,
+    state.settings.wakeWordEnabled,
+    state.settings.voiceLanguage,
+    state.settings.screenAssistEnabled,
+    state.settings.screenAssistCountdown,
+    state.settings.sttSpeed,
+    JSON.stringify(state.settings.wakeAliases),
     state.settings.voiceVisualizerMode,
     state.settings.glassesEnabled,
+    state.settings.toolsEnabled,
+    state.settings.bargeInSensitivity,
+    state.settings.ttsProvider,
+    state.settings.ttsQuality,
+    state.settings.ttsGeminiVoice,
+    state.settings.ttsAzureVoice,
+    state.settings.ttsAzureRomanUrdu,
+    state.settings.ttsSpeed,
   ]);
   useEffect(() => {
     const root = settingsScroll.current;
@@ -944,7 +1295,7 @@ function SettingsView({ state }: { state: AppState }) {
   const save = async (event: FormEvent) => {
     event.preventDefault(); if (!api || saving) return;
     setSaving(true); setNotice('');
-    try { const result = await api.saveSettings(settings); setIsError(!result.ok); setNotice(result.ok ? 'All settled. Your space, your way.' : result.error ?? 'Could not save settings.'); }
+    try { const result = await api.saveSettings(changedSettings(state.settings, settings), 'settings'); setIsError(!result.ok); setNotice(result.ok ? 'All settled. Your space, your way.' : result.error ?? 'Could not save settings.'); }
     catch { setIsError(true); setNotice('Could not save. Please try again.'); }
     finally { setSaving(false); }
   };
@@ -956,7 +1307,7 @@ function SettingsView({ state }: { state: AppState }) {
   return <main className="app-window settings-window"><WindowHeader subtitle="Your companion studio" settings/>
     <div className="settings-scroll soft-scroll" ref={settingsScroll}>
       <section className="settings-hero"><div className="settings-hero-copy"><span className="eyebrow"><span className="tiny-star" aria-hidden="true">✧</span>MAKE ROOM FOR A LITTLE MAGIC</span><h1>Quietly <em>yours.</em></h1><p>A little company. A space that feels like you.</p><span className="phase-pill"><span className={`presence-dot ${state.paused ? 'is-paused' : ''}`}/>{state.paused ? 'Taking a breath' : 'Here with you'}<span className="phase-divider"/>LOCAL AI</span></div><div className="settings-hero-stage"><span className="hero-orbit" aria-hidden="true"/><span className="hero-spark" aria-hidden="true">✦</span><div className="settings-hero-bot" data-size={settings.botSize}><Bot mood={state.paused ? 'calm' : 'happy'} paused={state.paused} glasses={settings.glassesEnabled ?? true}/></div><span className="hero-caption">YOUR DESKTOP, A LITTLE WARMER</span></div></section>
-      <nav className="section-tabs" aria-label="Settings sections">{[{ id: 'presence', title: 'Your companion', icon: 'spark' as const }, { id: 'rhythm', title: 'Your rhythm', icon: 'pause' as const }, { id: 'voice-identity', title: 'Voice Identity', icon: 'voice-call' as const }, { id: 'ai', title: 'Local AI', icon: 'chat' as const }, { id: 'privacy', title: 'Your privacy', icon: 'shield' as const }].map(section => <a key={section.id} href={`#${section.id}`} aria-current={activeSection === section.id ? 'location' : undefined} onClick={() => setActiveSection(section.id)}><Icon name={section.icon} size={16}/>{section.title}</a>)}</nav>
+      <nav className="section-tabs" aria-label="Settings sections">{[{ id: 'presence', title: 'Your companion', icon: 'spark' as const }, { id: 'rhythm', title: 'Your rhythm', icon: 'pause' as const }, { id: 'voice-identity', title: 'Voice Identity', icon: 'voice-call' as const }, { id: 'usage', title: 'Free usage', icon: 'spark' as const }, { id: 'ai', title: 'Local AI', icon: 'chat' as const }, { id: 'privacy', title: 'Your privacy', icon: 'shield' as const }].map(section => <a key={section.id} href={`#${section.id}`} aria-current={activeSection === section.id ? 'location' : undefined} onClick={() => setActiveSection(section.id)}><Icon name={section.icon} size={16}/>{section.title}</a>)}</nav>
       <form id="settings-form" onSubmit={save}>
         <section id="presence" className="settings-card scroll-reveal"><div className="card-heading"><span className="section-icon mint"><Icon name="spark"/></span><div><span className="eyebrow">01 / A LITTLE PRESENCE</span><h2>Your companion</h2></div></div>
           <SettingRow title="A comfortable size" description="A small friend, with just enough room to glow."><div className="size-picker" role="group" aria-label="Companion size">{(['small', 'medium', 'large'] as BotSize[]).map(size => <button type="button" key={size} aria-label={size} className={settings.botSize === size ? 'selected' : ''} aria-pressed={settings.botSize === size} onClick={() => setSettings({ ...settings, botSize: size })}><span className={`size-orb size-${size}`}/>{size}</button>)}</div></SettingRow>
@@ -980,6 +1331,12 @@ function SettingsView({ state }: { state: AppState }) {
         </section>
         <section id="rhythm" className="settings-card scroll-reveal"><div className="card-heading"><span className="section-icon lilac"><Icon name="pause"/></span><div><span className="eyebrow">02 / AT YOUR OWN PACE</span><h2>Your rhythm</h2></div></div>
           <SettingRow title="One shortcut away" description="Open your chat from anywhere. Use modifier + key."><label className="shortcut-label"><span className="sr-only">Chat shortcut</span><input aria-describedby="shortcut-help" value={settings.shortcut} onChange={event => setSettings({ ...settings, shortcut: event.target.value })} spellCheck={false}/></label></SettingRow><p id="shortcut-help" className={`field-hint ${!state.shortcutAvailable ? 'warning' : ''}`}>{state.shortcutAvailable ? 'Current shortcut is ready. Example: Control+Shift+Space' : 'The current shortcut is unavailable. Choose another, or open chat from the tray.'}</p>
+          <SettingRow title="Let Sudo-chan use tools" description="Off by default. When on, she can read files in your home folder, and ask to write files, run one program, or open links. Every risky action shows a card and waits for your click (auto-denied after 60 s). Voice never approves. Secrets (.ssh, .env, browser data) are blocked. Every call is logged on this device. Works with cloud models only.">
+            <div className="switch-control"><span>{settings.toolsEnabled ? 'On' : 'Off'}</span><button className="switch" type="button" role="switch" aria-label="Let Sudo-chan use tools" aria-checked={Boolean(settings.toolsEnabled)} onClick={() => setSettings({ ...settings, toolsEnabled: !settings.toolsEnabled })}><span/></button></div>
+          </SettingRow>
+          <SettingRow title="Stop all actions" description="Cancels anything waiting for approval or still running, right now.">
+            <button type="button" className="soft-button" onClick={() => void api?.stopAllTools()}>⛔ Stop all actions</button>
+          </SettingRow>
           <SettingRow title="Start the day together" description={state.loginSupported ? 'Open Sudo-chan when you sign in.' : 'Available after installing the desktop app.'}><div className="switch-control"><span>{settings.launchAtLogin ? 'On' : 'Off'}</span><button className="switch" type="button" role="switch" aria-label="Launch at login" aria-checked={settings.launchAtLogin} disabled={!state.loginSupported} onClick={() => setSettings({ ...settings, launchAtLogin: !settings.launchAtLogin })}><span/></button></div></SettingRow>
           <SettingRow title="Focus Reminder (Pomodoro)" description="Remind you to rest your eyes and drink water after focused work.">
             <div className="switch-control">
@@ -1084,17 +1441,49 @@ function SettingsView({ state }: { state: AppState }) {
               </button>
             </div>
           </SettingRow>
+          <SettingRow title="Listen for my name" description="Off by default. When on, the mic listens locally and only short clips with speech are sent to speech-to-text. Pause any time from the bot's indicator.">
+            <div className="switch-control"><span>{(settings.wakeWordEnabled ?? true) ? 'On' : 'Off'}</span><button className="switch" type="button" role="switch" aria-label="Listen for my name" aria-checked={Boolean(settings.wakeWordEnabled)} onClick={() => setSettings({ ...settings, wakeWordEnabled: !settings.wakeWordEnabled })}><span/></button></div>
+          </SettingRow>
+          <SettingRow title="Let Sudo-chan look at my screen" description="Off by default. When on, saying her name (or pressing the eye button in chat) takes ONE screenshot and sends it to your cloud AI provider so she can explain what you are working on. Never on a timer, never saved. Close password or banking windows first.">
+            <div className="switch-control"><span>{settings.screenAssistEnabled ? 'On' : 'Off'}</span><button className="switch" type="button" role="switch" aria-label="Let Sudo-chan look at my screen" aria-checked={Boolean(settings.screenAssistEnabled)} onClick={() => setSettings({ ...settings, screenAssistEnabled: !settings.screenAssistEnabled })}><span/></button></div>
+          </SettingRow>
+          <SettingRow title="Countdown before the first screenshot" description="Shows 'Screenshot in 3...' with a cancel button before the first capture of a session, so you can close a sensitive window. She also refuses to capture when a password manager, bank, login or private window is visible (only windows that expose accessibility information can be seen).">
+            <div className="switch-control"><span>{(settings.screenAssistCountdown ?? true) ? 'On' : 'Off'}</span><button className="switch" type="button" role="switch" aria-label="Countdown before the first screenshot" aria-checked={settings.screenAssistCountdown ?? true} onClick={() => setSettings({ ...settings, screenAssistCountdown: !(settings.screenAssistCountdown ?? true) })}><span/></button></div>
+          </SettingRow>
           <SettingRow
-            title="Custom Wake Phrase"
-            description="Agar koi aur user baat karna chahta hai, ya fallback ke tor par yeh phrase bolain:"
+            title="Assistant name"
+            description="The name you call her by. Spoken names are matched loosely (small mishearings are fine)."
           >
             <input
               type="text"
               className="wake-word-input"
               value={settings.customWakeWord ?? 'Sudo-chan'}
               onChange={e => setSettings({ ...settings, customWakeWord: e.target.value })}
-              placeholder="e.g. Sudo-chan"
+              placeholder="e.g. Sudo"
             />
+          </SettingRow>
+          <SettingRow
+            title="Name aliases"
+            description="Other ways you call her, comma separated. Very short aliases must match exactly."
+          >
+            <input
+              type="text"
+              className="wake-word-input"
+              value={(settings.wakeAliases ?? DEFAULT_WAKE_ALIASES).join(', ')}
+              onChange={e => setSettings({ ...settings, wakeAliases: e.target.value.split(',').map(a => a.trim()).filter(Boolean).slice(0, 20) })}
+              placeholder="Sudo, Sid, Sudo-chan"
+            />
+          </SettingRow>
+          <SettingRow title="Speech recognition speed" description="Fast answers sooner (about 0.5 s) but may mishear Urdu. Accurate understands Urdu and Roman Urdu better but takes 2-3 s.">
+            <select
+              className="wake-word-input"
+              value={settings.sttSpeed ?? 'fast'}
+              onChange={e => setSettings({ ...settings, sttSpeed: e.target.value as 'accurate' | 'fast' })}
+              aria-label="Speech recognition speed"
+            >
+              <option value="fast">Fast (Whisper first, Gemini if unsure)</option>
+              <option value="accurate">Accurate (Gemini first)</option>
+            </select>
           </SettingRow>
           <SettingRow
             title="Voice Recognition Language"
@@ -1119,6 +1508,26 @@ function SettingsView({ state }: { state: AppState }) {
               🔊 Test Voice Sound
             </button>
           </SettingRow>
+          <SettingRow title="Voice engine" description="Auto tries Gemini first (very natural, but its free tier is only about 10 requests a day), then Azure Speech if you added a key below, then Google (unlimited but flat). A forced engine still falls back to Google if it fails.">
+            <select className="wake-word-input" aria-label="Voice engine" value={settings.ttsProvider ?? 'auto'} onChange={event => setSettings({ ...settings, ttsProvider: event.target.value as Settings['ttsProvider'] })}>
+              <option value="auto">Auto (Gemini, Azure, Google)</option>
+              <option value="gemini">Gemini only</option>
+              <option value="azure">Azure Speech only</option>
+              <option value="google">Google only</option>
+            </select>
+          </SettingRow>
+          <SettingRow title="Gemini voice" description="Voice used by the Gemini engine.">
+            <select className="wake-word-input" aria-label="Gemini voice" value={settings.ttsGeminiVoice ?? 'Kore'} onChange={event => setSettings({ ...settings, ttsGeminiVoice: event.target.value })}>
+              {['Kore', 'Puck', 'Zephyr', 'Aoede', 'Leda', 'Charon', 'Fenrir'].map(voice => <option key={voice} value={voice}>{voice}</option>)}
+            </select>
+          </SettingRow>
+          <AzureVoiceSettings settings={settings} setSettings={setSettings}/>
+          <SettingRow title="Speaking speed" description={`Gemini and Azure voice pace (${(settings.ttsSpeed ?? 1).toFixed(1)}x). Not applied to the Google engine.`}>
+            <label className="shortcut-label"><span className="sr-only">Speaking speed</span><input type="range" min={0.7} max={1.4} step={0.1} value={settings.ttsSpeed ?? 1} onChange={event => setSettings({ ...settings, ttsSpeed: Number(event.target.value) })}/></label>
+          </SettingRow>
+          <SettingRow title="Barge-in sensitivity" description={`How easily you can interrupt Sudo-chan while she speaks (${Math.round((settings.bargeInSensitivity ?? DEFAULT_BARGE_IN_SENSITIVITY) * 100)}%). Raise it for headphones, lower it on speakers.`}>
+            <label className="shortcut-label"><span className="sr-only">Barge-in sensitivity</span><input type="range" min={0} max={100} step={5} value={Math.round((settings.bargeInSensitivity ?? DEFAULT_BARGE_IN_SENSITIVITY) * 100)} onChange={event => setSettings({ ...settings, bargeInSensitivity: Number(event.target.value) / 100 })}/></label>
+          </SettingRow>
           <SettingRow title="Pomodoro Focus Reminders" description={`25 min focus / 5 min break timer. ${state.pomodoro ? `${state.pomodoro.minutesLeft}m ${state.pomodoro.secondsLeft}s remaining` : 'Active'}.`}>
             <button type="button" className="soft-button" onClick={() => void api?.testFeature('break')}>
               🍵 Test Break Bubble
@@ -1130,16 +1539,20 @@ function SettingsView({ state }: { state: AppState }) {
             </button>
           </SettingRow>
         </section>
+        <UsageSettings settings={settings} setSettings={setSettings}/>
         <AISettings/>
         <section id="privacy" className="settings-card privacy-card scroll-reveal">
           <div className="card-heading"><span className="section-icon peach"><Icon name="shield"/></span><div><span className="eyebrow">04 / YOUR SPACE STAYS YOURS</span><h2>Nothing behind the curtain.</h2></div></div>
-          <p>In <strong>Local mode</strong>, your messages never leave this computer — all generation runs via Ollama on device with zero telemetry. In <strong>Cloud mode</strong>, your messages are sent securely via HTTPS directly to your chosen provider (Google Gemini, Groq, OpenAI, or OpenRouter) using your own API key. Keys are encrypted on your device via safeStorage and never sent to Sudo-chan servers. Sudo-chan never accesses your screen, microphone, or disk files.</p>
+          <p>In <strong>Local mode</strong>, your messages never leave this computer — all generation runs via Ollama on device with zero telemetry. In <strong>Cloud mode</strong>, your messages are sent securely via HTTPS directly to your chosen provider (Google Gemini, Groq, OpenAI, or OpenRouter) using your own API key. Keys are never sent to Sudo-chan servers.</p>
+          <p className="key-storage-detail"><strong>How keys are stored:</strong> {keyStorage.detail}</p>
+          <p><strong>Mic:</strong> only while listening is on. <strong>Screen:</strong> only after you click Allow and only while screen assist is on; the image goes to your cloud model and is never saved. <strong>Files:</strong> only while tools are on, and risky actions ask you first.</p>
           <div className="privacy-facts">
             <span><i/>Local chat stays on your machine</span>
             <span><i/>Cloud uses direct provider HTTPS</span>
-            <span><i/>API keys encrypted on this device</span>
+            <span><i/>{keyStorage.fact}</span>
             <span><i/>Chat kept in memory until Quit</span>
           </div>
+          <RemoveKeysRow/>
           <div className="privacy-bottom"><span>Want a fresh start?</span><button className="text-button" type="button" onClick={() => void clear()}>{confirmClear ? 'Confirm clear conversation' : 'Clear conversation'}</button></div>
         </section>
       </form>

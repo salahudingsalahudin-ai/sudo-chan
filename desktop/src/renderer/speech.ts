@@ -1,4 +1,6 @@
-import { cleanTextForSpeech, detectSentenceLanguage, splitIntoSentences } from '../shared/speech';
+import { detectSentenceLanguage, groupForSynthesis, splitIntoSpokenSentences } from '../shared/speech.ts';
+import type { Emotion } from '../shared/speech.ts';
+import { beginPlayback, currentGeneration, decodeDataUri, finishPlayback, markSpeechStart, onStopSpeaking, playBuffer, stopSpeaking } from './tts-player.ts';
 
 const STORAGE_KEY = 'sudo_chan_tts_muted';
 
@@ -71,221 +73,182 @@ export function findBestVoice(): SpeechSynthesisVoice | undefined {
   return voices[0];
 }
 
-let currentAudio: HTMLAudioElement | null = null;
-let currentUtterance: SpeechSynthesisUtterance | null = null;
-let currentPlaybackId = 0;
-let abortPlayback = false;
-
-export function stopAudioPlayback(): void {
-  abortPlayback = true;
-  if (currentAudio) {
-    try {
-      currentAudio.pause();
-      currentAudio.currentTime = 0;
-      currentAudio = null;
-    } catch {}
-  }
-  if (isSpeechSupported()) {
-    try {
-      window.speechSynthesis.cancel();
-      currentUtterance = null;
-    } catch {}
-  }
-}
-
+/** Stops any spoken reply right now (Stop button, mute, barge-in callers use stopSpeaking directly). */
 export function stopSpeech(): void {
-  abortPlayback = true;
-  try {
-    if (typeof window !== 'undefined' && window.companion?.setIsSpeaking) {
-      void window.companion.setIsSpeaking(false);
-    }
-  } catch {}
-  stopAudioPlayback();
+  stopSpeaking('stop-button');
 }
 
-export async function checkVoiceStudio(): Promise<boolean> {
-  try {
-    const res = await fetch('http://localhost:3900/health', {
-      method: 'GET',
-      signal: AbortSignal.timeout(1200),
-    });
-    return res.ok;
-  } catch {
-    return false;
-  }
-}
-
-export async function speakVoiceStudio(text: string): Promise<boolean> {
-  try {
-    const res = await fetch('http://localhost:3900/v1/audio/speech', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: 'tts-1',
-        input: text,
-        voice: 'default',
-        response_format: 'mp3',
-      }),
-      signal: AbortSignal.timeout(8000),
-    });
-    if (!res.ok) return false;
-    const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
-    const audio = new Audio(url);
-    currentAudio = audio;
-    return await new Promise<boolean>(resolve => {
-      audio.onended = () => {
-        URL.revokeObjectURL(url);
-        if (currentAudio === audio) currentAudio = null;
-        resolve(true);
-      };
-      audio.onerror = () => {
-        URL.revokeObjectURL(url);
-        if (currentAudio === audio) currentAudio = null;
-        resolve(false);
-      };
-      audio.play().catch(() => resolve(false));
-    });
-  } catch {
-    return false;
-  }
-}
-
-export async function speakOnlineStream(text: string, lang = 'ur'): Promise<boolean> {
-  try {
-    if (abortPlayback) return false;
-    const clean = text.trim();
-    if (!clean) return false;
-    // High-quality natural voice audio stream without truncation
-    const url = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(clean)}&tl=${lang}&client=tw-ob`;
-    const audio = new Audio(url);
-    currentAudio = audio;
-    return await new Promise<boolean>(resolve => {
-      audio.onended = () => {
-        if (currentAudio === audio) currentAudio = null;
-        resolve(true);
-      };
-      audio.onerror = () => {
-        if (currentAudio === audio) currentAudio = null;
-        resolve(false);
-      };
-      audio.play().then(() => resolve(true)).catch(() => resolve(false));
-    });
-  } catch {
-    return false;
-  }
-}
-
-async function playSingleSentence(sentence: string): Promise<boolean> {
-  if (abortPlayback) return false;
+/** Synthesis happens in the main process (API keys / network); playback happens only in tts-player. */
+async function synthesize(sentence: string, emotion: Emotion): Promise<AudioBuffer | null> {
   const lang = detectSentenceLanguage(sentence);
-
-  // 1. Direct hardware PulseAudio/PipeWire playback via Main Process
-  if (typeof window !== 'undefined' && window.companion?.playSpeech) {
-    try {
-      const result = await window.companion.playSpeech({ text: sentence, lang });
-      if (result.ok) {
-        if (result.dataUri) {
-          return await new Promise<boolean>(resolve => {
-            if (abortPlayback) return resolve(false);
-            const audio = new Audio(result.dataUri);
-            currentAudio = audio;
-            audio.onended = () => {
-              if (currentAudio === audio) currentAudio = null;
-              resolve(true);
-            };
-            audio.onerror = () => {
-              if (currentAudio === audio) currentAudio = null;
-              resolve(false);
-            };
-            audio.play().catch(() => resolve(false));
-          });
-        }
-        return true;
-      }
-    } catch {}
+  try {
+    const result = await window.companion?.playSpeech({ text: sentence, lang, emotion });
+    if (result?.ok && result.dataUri) return await decodeDataUri(result.dataUri);
+  } catch (error) {
+    console.warn('[TTS] synthesis request failed:', (error as Error).message);
   }
+  return null;
+}
 
-  // 2. High-quality natural voice audio stream (works instantly on Linux & all platforms)
-  const streamSpoken = await speakOnlineStream(sentence, lang).catch(() => false);
-  if (streamSpoken) return true;
-
-  // 3. Fallback to browser speech synthesis
-  if (!isSpeechSupported()) return false;
-
-  return await new Promise<boolean>(resolve => {
+function speakWithBrowserVoice(sentence: string, generation: number): Promise<boolean> {
+  if (!isSpeechSupported()) return Promise.resolve(false);
+  return new Promise<boolean>(resolve => {
     try {
-      if (abortPlayback) return resolve(false);
+      if (generation !== currentGeneration()) return resolve(false);
       const utterance = new SpeechSynthesisUtterance(sentence);
-      currentUtterance = utterance;
-
       const voice = findBestVoice();
       if (voice) utterance.voice = voice;
-
       utterance.pitch = 1.08;
       utterance.rate = 1.0;
-
-      utterance.onend = () => {
-        currentUtterance = null;
-        resolve(true);
-      };
-
-      utterance.onerror = () => {
-        currentUtterance = null;
-        resolve(false);
-      };
-
+      utterance.onend = () => resolve(true);
+      utterance.onerror = () => resolve(false);
+      markSpeechStart();
       window.speechSynthesis.speak(utterance);
     } catch {
-      currentUtterance = null;
       resolve(false);
     }
   });
+}
+
+// ---------------------------------------------------------------------------
+// Interrupted-reply memory: a barge-in remembers where she was so that, if the
+// interruption turns out to be unintelligible, she can carry on from there.
+// ---------------------------------------------------------------------------
+interface ReplyItem { text: string; emotion: Emotion }
+interface Interrupted {
+  items: ReplyItem[];
+  index: number;
+  savedAt: number;
+  resumes: number;
+  /** The clip that was playing and how far it had got (exact mid-sentence resume). */
+  partial: { buffer: AudioBuffer; offsetSec: number } | null;
+}
+
+export const RESUME_WINDOW_MS = 20_000;
+export const MAX_RESUMES = 2;
+/** Rewind a little so she restarts a word or two before the cut instead of mid-syllable. */
+const RESUME_REWIND_SEC = 0.4;
+
+let currentReply: { items: ReplyItem[]; index: number; resumes: number; generation: number } | null = null;
+let interrupted: Interrupted | null = null;
+let clock: () => number = () => Date.now();
+
+/** Test hook: replace the clock used for the 20 s resume window. */
+export function setSpeechClockForTests(fn: (() => number) | null): void {
+  clock = fn ?? (() => Date.now());
+}
+
+onStopSpeaking(info => {
+  if (info.reason === 'barge-in') {
+    if (currentReply) {
+      interrupted = {
+        items: currentReply.items,
+        index: currentReply.index,
+        savedAt: clock(),
+        resumes: currentReply.resumes,
+        partial: info.played,
+      };
+      currentReply = null;
+    }
+    return;
+  }
+  if (info.reason === 'finish') return;
+  // Stop button, mute, window closed, a new reply, an error: whatever was interrupted is forgotten.
+  interrupted = null;
+  currentReply = null;
+});
+
+export function clearInterruptedSpeech(): void {
+  interrupted = null;
+}
+
+/** True if a barge-in cut a reply less than 20 s ago and it can still be resumed. */
+export function hasInterruptedSpeech(): boolean {
+  return interrupted !== null && clock() - interrupted.savedAt <= RESUME_WINDOW_MS && interrupted.resumes < MAX_RESUMES;
+}
+
+/**
+ * Continues the reply that a barge-in cut, from the sentence (and, when known, the exact
+ * moment) where it was interrupted. Returns false and stays silent if there is nothing to resume.
+ */
+export function resumeInterruptedSpeech(): boolean {
+  const saved = interrupted;
+  interrupted = null;
+  if (!saved || getMutedPreference()) return false;
+  if (clock() - saved.savedAt > RESUME_WINDOW_MS || saved.resumes >= MAX_RESUMES) return false;
+  const generation = beginPlayback();
+  currentReply = { items: saved.items, index: saved.index, resumes: saved.resumes + 1, generation };
+  void playItems(saved.items, saved.index, generation, saved.partial, undefined);
+  return true;
+}
+
+async function playItems(
+  items: ReplyItem[],
+  start: number,
+  generation: number,
+  partial: Interrupted['partial'],
+  callbacks?: { onEnd?: () => void; onError?: () => void }
+): Promise<void> {
+  let hadSuccess = false;
+  // Synthesize sentence N+1 while sentence N plays so there are no audible gaps.
+  let pending: Promise<AudioBuffer | null> = partial ? Promise.resolve(partial.buffer) : synthesize(items[start].text, items[start].emotion);
+  for (let i = start; i < items.length; i++) {
+    if (currentReply && currentReply.generation === generation) currentReply.index = i;
+    const buffer = await pending;
+    if (generation !== currentGeneration()) return;
+    if (i + 1 < items.length) pending = synthesize(items[i + 1].text, items[i + 1].emotion);
+    const offset = i === start && partial ? Math.max(0, partial.offsetSec - RESUME_REWIND_SEC) : 0;
+    const ok = buffer
+      ? await playBuffer(buffer, generation, offset)
+      : await speakWithBrowserVoice(items[i].text, generation);
+    if (generation !== currentGeneration()) return;
+    if (ok) hadSuccess = true;
+  }
+
+  finishPlayback(generation);
+  if (currentReply && currentReply.generation === generation) currentReply = null;
+  if (hadSuccess) callbacks?.onEnd?.();
+  else {
+    stopSpeaking('error');
+    callbacks?.onError?.();
+  }
+}
+
+/** What the bot said last (spoken text), so the overlay can recognise its own words coming back through the mic. */
+let lastBotSpeech = '';
+export function getLastBotSpeech(): string {
+  return lastBotSpeech;
 }
 
 export async function speak(
   rawText: string,
   callbacks?: { onEnd?: () => void; onError?: () => void }
 ): Promise<void> {
-  if (getMutedPreference()) return;
-
-  const sentences = splitIntoSentences(rawText, 180);
-  if (!sentences.length) return;
-
-  // Stop any active previous speech and increment sequence ID
-  stopSpeech();
-  abortPlayback = false;
-  const playbackId = ++currentPlaybackId;
-
-  try {
-    if (typeof window !== 'undefined' && window.companion?.setIsSpeaking) {
-      void window.companion.setIsSpeaking(true);
-    }
-  } catch {}
-
-  let hadSuccess = false;
-
-  for (const sentence of sentences) {
-    if (abortPlayback || currentPlaybackId !== playbackId) {
-      break;
-    }
-    const ok = await playSingleSentence(sentence);
-    if (ok) hadSuccess = true;
-    if (abortPlayback || currentPlaybackId !== playbackId) {
-      break;
-    }
+  if (getMutedPreference()) {
+    console.info('[voice] speak skipped: voice is muted');
+    return;
   }
 
-  if (currentPlaybackId === playbackId) {
-    try {
-      if (typeof window !== 'undefined' && window.companion?.setIsSpeaking) {
-        void window.companion.setIsSpeaking(false);
-      }
-    } catch {}
-    if (hadSuccess) {
-      callbacks?.onEnd?.();
-    } else {
-      callbacks?.onError?.();
-    }
+  // First sentence alone (fast start), later same-emotion sentences are batched into one request to save Gemini quota.
+  const sentences = groupForSynthesis(splitIntoSpokenSentences(rawText, 180), 450);
+  if (!sentences.length) {
+    console.info(`[voice] speak skipped: nothing speakable in ${rawText.length} chars`);
+    return;
   }
+  console.info(`[voice] speak: ${sentences.length} chunk(s)`);
+  lastBotSpeech = rawText.slice(0, 600);
+
+  const generation = beginPlayback(); // also forgets any older interrupted reply ('new-reply')
+  currentReply = { items: sentences, index: 0, resumes: 0, generation };
+  await playItems(sentences, 0, generation, null, callbacks);
+}
+
+/** Plays one finished clip (for example the Azure test button) through the central player. */
+export async function playDataUriOnce(dataUri: string): Promise<boolean> {
+  const generation = beginPlayback();
+  const buffer = await decodeDataUri(dataUri);
+  if (!buffer || generation !== currentGeneration()) return false;
+  const ok = await playBuffer(buffer, generation);
+  finishPlayback(generation);
+  return ok;
 }
