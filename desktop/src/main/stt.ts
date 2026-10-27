@@ -202,6 +202,8 @@ export class SttRouter {
         this.blockedByRateLimit[route.id] = false;
         continue;
       }
+      // Fast mode: Whisper often writes Urdu speech in Arabic script garbage. If we did not ask for Urdu, let Gemini have a go instead.
+      if (fast && route.provider === 'whisper' && result.text && hasArabicScript(result.text) && lang !== 'ur') continue;
       if (result.text && isValidTranscription(result.text)) {
         const arabic = hasArabicScript(result.text);
         return { ok: true, text: result.text, provider: route.provider, scriptWarning: arabic && lang !== 'ur' ? true : undefined };

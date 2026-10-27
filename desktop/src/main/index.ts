@@ -112,7 +112,7 @@ function geminiKey(): string {
 }
 let sttRouter: SttRouter | undefined;
 function stt(): SttRouter {
-  sttRouter ??= new SttRouter({ fetch: (url, init) => fetch(url, init as RequestInit), getKey: id => getProviderKey(id), now: () => Date.now(), getMode: () => state.settings.sttSpeed });
+  sttRouter ??= new SttRouter({ fetch: (url, init) => fetch(url, init as RequestInit), getKey: id => getProviderKey(id), now: () => Date.now(), getMode: () => state.settings.sttSpeed ?? 'fast' });
   return sttRouter;
 }
 let azureProvider: AzureTtsProvider | undefined;
@@ -457,7 +457,7 @@ function setupIPC() {
     if (result.ok && !state.voiceCallActive) setHappy('Thinking with you.');
     return result;
   }, ['chat', 'overlay']);
-  handle(CHANNELS.stop, () => conversation.stop(), 'chat');
+  handle(CHANNELS.stop, () => conversation.stop(), ['chat', 'overlay']);
   handle(CHANNELS.ai, () => structuredClone(aiState));
   handle(CHANNELS.checkAI, () => checkAI());
   handle(CHANNELS.model, async (_e, value) => {
