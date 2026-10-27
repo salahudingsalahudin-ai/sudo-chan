@@ -1,0 +1,137 @@
+name: Release
+
+# Builds the desktop app on Linux, Windows and macOS when a tag like v0.1.0 is pushed,
+# then creates a DRAFT GitHub Release with the installers and a SHA256SUMS.txt file.
+# Nothing is published automatically: review the draft, then click "Publish release".
+#
+# Builds are UNSIGNED unless you add the optional secrets listed below
+# (see RELEASING.md). Unsigned builds work, but Windows SmartScreen and macOS
+# Gatekeeper will warn users. The website's /download page explains this.
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write # only the final job uses this, to create the draft release
+
+jobs:
+  build:
+    name: Build (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux
+            os: ubuntu-latest
+            builder_args: --linux AppImage deb
+          - name: windows
+            os: windows-latest
+            builder_args: --win nsis
+          - name: macos
+            os: macos-latest
+            builder_args: --mac dmg
+    defaults:
+      run:
+        working-directory: desktop
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check the tag matches desktop/package.json
+        run: |
+          pkg_version="$(node -p "require('./package.json').version")"
+          tag_version="${GITHUB_REF_NAME#v}"
+          if [ "$pkg_version" != "$tag_version" ]; then
+            echo "Tag $GITHUB_REF_NAME does not match desktop/package.json version $pkg_version" >&2
+            exit 1
+          fi
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - run: npm ci
+      - run: npm run build
+      # Tests run in ci.yml on the same commit; run `npm test` locally before tagging (see RELEASING.md).
+
+      - name: Package
+        run: npx electron-builder ${{ matrix.builder_args }} --publish never
+        env:
+          # Unsigned by default: stop electron-builder from hunting for a certificate.
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+          # OPTIONAL code signing. To sign, remove the line above, add these repository
+          # secrets and uncomment the lines you need (never put real values in this file):
+          # WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}                       # Windows .pfx (base64 or URL)
+          # WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+          # CSC_LINK: ${{ secrets.MAC_CSC_LINK }}                           # macOS Developer ID .p12
+          # CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
+          # APPLE_ID: ${{ secrets.APPLE_ID }}                               # notarization
+          # APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          # APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+
+      - name: Collect installers
+        run: |
+          mkdir -p ../dist-release
+          find release -maxdepth 1 -type f \
+            \( -name '*.AppImage' -o -name '*.deb' -o -name '*.exe' -o -name '*.dmg' \) \
+            -exec cp {} ../dist-release/ \;
+          ls -la ../dist-release
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installers-${{ matrix.name }}
+          path: dist-release/*
+          if-no-files-found: error
+
+  draft-release:
+    name: Create draft release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: installers-*
+          merge-multiple: true
+          path: assets
+
+      - name: Checksums
+        working-directory: assets
+        run: |
+          sha256sum * > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Release notes
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          {
+            echo "Sudo-chan ${version} — early prototype."
+            echo
+            # Use the matching CHANGELOG.md section if there is one.
+            awk -v v="$version" '
+              $0 ~ "^## \\[?" v "\\]?" { found=1; next }
+              found && /^## / { exit }
+              found { print }
+            ' CHANGELOG.md
+            echo
+            echo "### Install"
+            echo "- Linux: download the AppImage (chmod +x, then run) or the .deb."
+            echo "- Windows and macOS builds are unsigned: SmartScreen / Gatekeeper will warn you. See https://sudo-chan.vercel.app/download"
+            echo "- Verify downloads against SHA256SUMS.txt."
+          } > RELEASE_NOTES.md
+          cat RELEASE_NOTES.md
+
+      - name: Create draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" assets/* \
+            --draft \
+            --title "Sudo-chan ${GITHUB_REF_NAME#v}" \
+            --notes-file RELEASE_NOTES.md \
+            --verify-tag
