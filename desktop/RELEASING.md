@@ -23,6 +23,8 @@ Artifact names are `Sudo-chan-<version>-<os>-<arch>.<ext>`; the checksum file is
 3. **Changelog.** In `CHANGELOG.md`, make sure there is a `## [x.y.z] - YYYY-MM-DD` section for this version, honest and user-facing. Copy the "Known limitations" list; do not drop it.
 4. **Local checks** (from `desktop/`): `npm run typecheck`, `npm run build`, `npm test`.
 5. **Local package** (Linux): `npm run package:linux`, then run the AppImage or `release/linux-unpacked/sudo-chan`. For a headless check: `release/linux-unpacked/sudo-chan --no-sandbox --smoke-test` should print `SUDO_CHAN_READY` (the app uses its own throw-away userData in smoke mode). Quit any running Sudo-chan first (single-instance lock).
+   - Smoke-run the packaged build the same way `npm run verify` does: `npm run verify -- --packaged=release/linux-unpacked/sudo-chan` (37 checks, own throw-away userData).
+   - **Package from a real `npm ci` checkout.** `desktop/node_modules` must be a real folder, not a symlink to another checkout: electron-builder then silently leaves out runtime dependencies (`electron-store`'s `conf`, `type-fest`, ...) and the app crashes on start. After packaging, `npx asar list release/linux-unpacked/resources/app.asar | grep -c "^/node_modules/conf"` must print 1.
 6. **Tag and push** (this is the step that starts the release build):
    ```
    git tag v0.1.0

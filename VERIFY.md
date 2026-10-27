@@ -7,6 +7,8 @@ npm run verify            # everything, including the real Electron smoke run
 npm run verify -- --skip-smoke   # skip the Electron run (no display, or low memory)
 ```
 
+`npm run verify -- --packaged=release/linux-unpacked/sudo-chan` runs the smoke step against an electron-builder output instead of `electron .` (see desktop/RELEASING.md).
+
 It prints a PASS/FAIL table and exits non-zero on any FAIL. It takes roughly 30-60 s and needs no API keys, no network
 (one optional unit test uses the network and skips itself when offline), no microphone and no speakers.
 
