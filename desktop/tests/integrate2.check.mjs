@@ -16,8 +16,8 @@ const SCREEN = ['consent', 'countdown', 'notice', 'capturing', 'sent', 'cached',
 
 // ---------- panel slot ----------
 
-test('panel slot: priority is approval > consent > countdown > notice > capturing > caption > hint > speech', () => {
-  assert.deepEqual([...PANEL_PRIORITY], ['approval', 'consent', 'countdown', 'notice', 'capturing', 'caption', 'hint', 'speech']);
+test('panel slot: priority is approval > consent > countdown > notice > capturing > awareness > caption > hint > speech', () => {
+  assert.deepEqual([...PANEL_PRIORITY], ['approval', 'consent', 'countdown', 'notice', 'capturing', 'awareness', 'caption', 'hint', 'speech']);
   assert.equal(panelPlan(none).active, null);
   assert.equal(panelPlan({ ...none, speechWanted: true }).active, 'speech');
   assert.equal(panelPlan({ ...none, speechWanted: true, captionWanted: true }).active, 'caption');
