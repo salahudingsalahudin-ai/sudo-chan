@@ -1,5 +1,14 @@
 export const SUDO_CHAN = 'Sudo-chan';
 
+/**
+ * THE ONE SWITCH. Keep this `false` until a real release exists on GitHub (see desktop/RELEASING.md).
+ * false: the site says "Coming soon", shows the waitlist, the /download page returns 404 and no Download link is shown.
+ * true:  the final section becomes an honest Download section and /download is live.
+ */
+export const RELEASE_PUBLISHED: boolean = false;
+export const RELEASES_LATEST_URL = 'https://github.com/salahudingsalahudin-ai/sudo-chan/releases/latest';
+const live = RELEASE_PUBLISHED;
+
 export type BotMood = 'Calm' | 'Curious' | 'Worried' | 'Happy';
 
 export const content = {
@@ -8,7 +17,7 @@ export const content = {
     eyebrow: 'A familiar spark. A shape of your own.',
     heading: 'Make her yours.',
     subline: "Pick a face, a creature or your own picture. She's still Sudo-chan inside.",
-    notice: 'This is a preview of how the desktop app will let you personalize her. The desktop app is not released yet.',
+    notice: live ? 'This is a website preview of personalization. The early desktop version has fewer options (companion size and glasses).' : 'This is a preview of how the desktop app will let you personalize her. The desktop app is not released yet.',
     open: 'Make her yours', close: 'Close personalization', panelTitle: 'Your kind of company',
     character: 'Character', creature: 'Creature', upload: 'Upload my own picture',
     uploadNote: 'PNG or JPG · up to 5 MB · stays on your device',
@@ -33,17 +42,19 @@ export const content = {
     lightModeLabel: 'Switch to dark mode',
     darkModeLabel: 'Switch to light mode',
   },
-  siteDescription: 'Sudo-chan is an anime-style AI companion for your desktop. Say her name and she answers in Urdu or English, helps with your screen after you click to allow it, and runs file tasks only with your approval. Coming soon.',
+  siteDescription: 'Sudo-chan is an anime-style AI companion for your desktop. Say her name and she answers in Urdu or English, helps with your screen after you click to allow it, and runs file tasks only with your approval.' + (live ? ' Early version for Linux.' : ' Coming soon.'),
   homeTitle: 'Sudo-chan: a desktop AI companion that hears you in Urdu and English',
   openGraphImage: {
     kicker: 'SUDO-CHAN',
     titleLineOne: 'Say "Sudo".',
     titleLineTwo: 'She is listening.',
-    description: 'A desktop AI companion for Urdu and English. Coming soon.',
-    alt: 'Sudo-chan: a desktop AI companion. Coming soon.',
+    description: live ? 'A desktop AI companion for Urdu and English. Early version for Linux.' : 'A desktop AI companion for Urdu and English. Coming soon.',
+    alt: live ? 'Sudo-chan: a desktop AI companion. Early version for Linux.' : 'Sudo-chan: a desktop AI companion. Coming soon.',
   },
-  intro: { eyebrow: 'A desktop companion, coming soon', title: `Meet ${SUDO_CHAN}`, line: 'Bas naam lo. Main yahin hoon.' },
-  comingSoon: { badge: 'Coming soon', note: 'The desktop app is not released yet. There is no download. Join the waitlist and we will tell you when there is real news.', cta: 'Join the waitlist' },
+  intro: { eyebrow: live ? 'A desktop companion, early version' : 'A desktop companion, coming soon', title: `Meet ${SUDO_CHAN}`, line: 'Bas naam lo. Main yahin hoon.' },
+  comingSoon: live
+    ? { badge: 'Early version', note: 'An early version for Linux is available to download. Windows and macOS are not built yet.', cta: 'Download' }
+    : { badge: 'Coming soon', note: 'The desktop app is not released yet. There is no download. Join the waitlist and we will tell you when there is real news.', cta: 'Join the waitlist' },
   scenes: [
     { id: 'arrival', number: '01 — HELLO', title: 'Say her name.\nShe answers.', body: 'Sudo-chan is an AI companion that lives on your desktop. Speak Urdu or English, and she talks back.', label: 'AN INTRODUCTION' },
     { id: 'inside', number: '02 — VOICE', title: 'Just say\n“Sudo”.', body: 'Say “Sudo” or “Sid” to wake her. Talk over her any time: she stops and listens. The microphone is on only while listening is on, and you can switch it off.', label: 'VOICE' },
@@ -51,7 +62,9 @@ export const content = {
     { id: 'anatomy', number: '04 — TOOLS', title: 'She asks first.', body: 'With tools on, Sudo-chan can help with file tasks. Risky actions wait for your click. Your voice can never approve them.', label: 'TOOLS WITH APPROVAL' },
     { id: 'demo', number: '05 — SCREEN HELP', title: 'She looks only\nwhen you click.', body: 'Turn on screen help, then click to allow one look. The image goes to the cloud AI model to answer you, and it is never saved on disk.', label: 'SCREEN HELP' },
     { id: 'privacy', number: '06 — PRIVACY', title: 'Your computer,\nyour keys.', body: 'Your API keys stay on your own computer. Here is exactly what she can and cannot touch.', label: 'PRIVACY FIRST' },
-    { id: 'join', number: '07 — COMING SOON', title: 'Not out yet.\nBe first to know.', body: 'The desktop app is not released and there is no download. Leave an email and we will write when she is ready.', label: 'WAITLIST' },
+    live
+      ? { id: 'join', number: '07 — DOWNLOAD', title: 'Early version.\nTry her on Linux.', body: 'A first build for Linux is ready. It is rough in places, and Windows and macOS are not built yet.', label: 'DOWNLOAD' }
+      : { id: 'join', number: '07 — COMING SOON', title: 'Not out yet.\nBe first to know.', body: 'The desktop app is not released and there is no download. Leave an email and we will write when she is ready.', label: 'WAITLIST' },
   ],
   core: [
     { title: 'Wake word', body: 'Say “Sudo” or “Sid”.' },
@@ -101,7 +114,7 @@ export const content = {
     quietDay: {
       number: '08 — A QUIET DAY',
       title: 'A quiet day with Sudo-chan',
-      description: 'An illustration of the rhythm we are aiming for. The desktop app is not released yet.',
+      description: live ? 'An illustration of the rhythm we are aiming for.' : 'An illustration of the rhythm we are aiming for. The desktop app is not released yet.',
       progressLabel: 'Story progress',
       stepLabel: 'A moment at a time',
       moments: [
@@ -153,12 +166,12 @@ export const content = {
       title: 'Questions people ask',
       description: 'Short, honest answers.',
       items: [
-        { question: 'Can I download her?', answer: 'Not yet. The desktop app is not released, so there is no download link. Join the waitlist and we will write when there is real news.' },
+        { question: 'Can I download her?', answer: live ? 'Yes, an early version for Linux (AppImage or .deb) is on the Download section, with checksums so you can verify it. Windows and macOS builds are not made yet.' : 'Not yet. The desktop app is not released, so there is no download link. Join the waitlist and we will write when there is real news.' },
         { question: 'When is the microphone on?', answer: 'Only while listening is on. You can switch it on or off at any time. She wakes when you say “Sudo” or “Sid”, and you can interrupt her whenever you like.' },
         { question: 'What does she see on my screen?', answer: 'Nothing, until you turn on screen help and click to allow a look. The image goes to the cloud AI model to answer you and is never saved on disk.' },
         { question: 'Can she change my files?', answer: 'Only when tools are on. Risky actions need a click from you, and your voice can never approve them.' },
         { question: 'Where are my API keys kept?', answer: 'On your own computer. On Linux they are not encrypted: they are kept in a file that only your user can read.' },
-        { question: 'Which computers will she work on?', answer: 'We have not finalized supported platforms. We will say so here when it is confirmed.' },
+        { question: 'Which computers will she work on?', answer: live ? 'Linux (x86-64) for now. Windows and macOS builds do not exist yet; we will say so here when they do.' : 'We have not finalized supported platforms. We will say so here when it is confirmed.' },
       ],
     },
     delights: {
@@ -169,7 +182,7 @@ export const content = {
       joinLink: 'Join the waitlist',
     },
   },
-  footer: 'Coming soon. Made with care.',
+  footer: live ? 'Early version. Made with care.' : 'Coming soon. Made with care.',
   waitlistPrivacyLink: 'Read our privacy policy',
   privacyPage: {
     title: 'Privacy policy',
@@ -182,7 +195,7 @@ export const content = {
       'To ask us to delete your waitlist email, contact the site owner at salahudingsalahudin@gmail.com. Please include the email address you used to sign up so we can find and remove the right entry.',
     ],
     plannedTitle: 'The Sudo-chan desktop app',
-    plannedNotice: 'The desktop app is not released yet. This section describes how it is built to work, so you know before you install it.',
+    plannedNotice: live ? 'The desktop app is an early version. This section describes how it is built to work.' : 'The desktop app is not released yet. This section describes how it is built to work, so you know before you install it.',
     plannedParagraphs: [
       'Microphone: used only while listening is on. You can switch listening on or off at any time.',
       'Screen: she looks only after you turn on screen help and click to allow it. The image is sent to the cloud AI model to produce an answer, and it is never saved on disk.',
@@ -192,6 +205,25 @@ export const content = {
     backLink: 'Back to Sudo-chan',
   },
   downloadLink: 'Download',
+  /** The home-page Download section (shown instead of the waitlist when RELEASE_PUBLISHED is true). */
+  download: {
+    button: 'Download from GitHub Releases',
+    buttonNote: 'Opens the latest release page. Pick the file that matches your system.',
+    earlyNote: 'This is an early version. Expect rough edges: Urdu and Roman Urdu recognition is still improving, and the default voice is a simple synthetic one. You bring your own API key.',
+    platformsLabel: 'Builds',
+    platforms: [
+      { name: 'Linux (x86-64)', files: 'AppImage or .deb', status: 'Available', ready: true },
+      { name: 'Windows', files: '', status: 'Not built yet', ready: false },
+      { name: 'macOS', files: '', status: 'Not built yet', ready: false },
+    ],
+    verifyTitle: 'Check your download',
+    verifyBody: 'Download SHA256SUMS from the same release, put it next to your file, and run:',
+    verifyCommand: 'sha256sum -c SHA256SUMS --ignore-missing',
+    verifyNote: 'It should print OK for your file. If it does not, delete the file and download again.',
+    unsignedNote: 'The files are not code-signed, so your system may warn you.',
+    moreLink: 'More details and install steps',
+    waitlistLink: 'Want news about Windows and macOS? Join the waitlist',
+  },
   downloadPage: {
     title: 'Download Sudo-chan',
     metadataDescription: 'Early prototype builds of the Sudo-chan desktop companion. Linux first; Windows and macOS are coming later.',
@@ -205,7 +237,7 @@ export const content = {
     releaseNotesLink: 'Release notes on GitHub',
     allReleasesLink: 'All releases on GitHub',
     prereleaseTag: 'Early build',
-    checksumsLink: 'SHA256SUMS.txt',
+    checksumsLink: 'SHA256SUMS',
     platformsTitle: 'Platforms',
     platforms: {
       linux: { name: 'Linux (x86-64)', status: 'First build' },
@@ -222,10 +254,10 @@ export const content = {
     windowsWarning: 'Windows SmartScreen may show "Windows protected your PC". This is normal for unsigned apps. The Windows build is not available yet.',
     macWarning: 'macOS Gatekeeper may say the developer cannot be verified. You would open it from System Settings, Privacy and Security, Open Anyway. The macOS build is not available yet.',
     verifyTitle: 'Check your download',
-    verifyBody: 'Each release includes a SHA256SUMS.txt file. Compare it with your download:',
+    verifyBody: 'Each release includes a SHA256SUMS file. Compare it with your download:',
     verifyCommands: [
-      'Linux: sha256sum -c SHA256SUMS.txt --ignore-missing',
-      'macOS: shasum -a 256 -c SHA256SUMS.txt',
+      'Linux: sha256sum -c SHA256SUMS --ignore-missing',
+      'macOS: shasum -a 256 -c SHA256SUMS',
       'Windows (PowerShell): Get-FileHash .\\Sudo-chan-0.1.0-win-x64.exe -Algorithm SHA256',
     ],
     needTitle: 'What you need',
@@ -236,7 +268,7 @@ export const content = {
       'What you say or type is sent to the cloud AI provider you choose. Their privacy policy applies to that.',
       'Audio is not saved to disk. A voice sample you register for voice lock stays on your computer.',
       'Your API keys stay on your computer. They are not sent to this website. They are not strongly encrypted yet.',
-      'Features that look at your screen or act on your computer are not in this build. When they arrive they will be off by default and will ask first.',
+      'Features that look at your screen or act on your computer (files, commands) are off by default and ask before they act.',
     ],
     privacyLink: 'Website privacy policy',
   },

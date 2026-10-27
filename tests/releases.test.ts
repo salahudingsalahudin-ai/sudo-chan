@@ -18,7 +18,7 @@ const release = (overrides: Record<string, unknown> = {}) => ({
   assets: [
     asset('Sudo-chan-0.1.0-linux-x86_64.AppImage', { digest: `sha256:${'a'.repeat(64)}` }),
     asset('Sudo-chan-0.1.0-linux-amd64.deb'),
-    asset('SHA256SUMS.txt'),
+    asset('SHA256SUMS'),
     asset('notes.zip'),
   ],
   ...overrides,
@@ -39,7 +39,7 @@ describe('release parsing', () => {
     expect(parsed?.prerelease).toBe(true);
     expect(parsed?.assets.map(a => a.platform)).toEqual(['linux-appimage', 'linux-deb']);
     expect(parsed?.assets[0].sha256).toBe('a'.repeat(64));
-    expect(parsed?.checksumsUrl).toContain('SHA256SUMS.txt');
+    expect(parsed?.checksumsUrl).toContain('SHA256SUMS');
   });
 
   it('rejects drafts, odd tags and non-GitHub download links', () => {

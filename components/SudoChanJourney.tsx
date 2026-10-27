@@ -7,13 +7,14 @@ import gsap from 'gsap';
 import { ScrollTrigger } from 'gsap/ScrollTrigger';
 import Lenis from '@studio-freight/lenis';
 import { useReducedMotion } from 'framer-motion';
-import { content } from '@/content';
+import { content, RELEASE_PUBLISHED } from '@/content';
 import type { BotMood } from '@/content';
 import type { BotInteractions } from './SudoChanCanvas';
 import RoundCSections, { LazySlot, MoodPicker, StuckDetectorPreview } from './RoundCSections';
 import WaitlistCount, { refreshWaitlistCount } from './WaitlistCount';
 import ThemeToggle from './ThemeToggle';
 import TrustPanel from './TrustPanel';
+import DownloadPanel from './DownloadPanel';
 import { SudoGlassesSVG } from './SudoGlasses';
 import {
   BLINK_CLOSE_DURATION_MS,
@@ -186,7 +187,7 @@ export default function SudoChanJourney(){
           <HeadingTag>{item.title.split('\n').map((line,j)=><span key={j}>{line}</span>)}</HeadingTag>
           <p>{item.body}</p>
           {i===0&&<div className="hero-cta"><span className="coming-soon-badge">{content.comingSoon.badge}</span><a className="hero-cta-link" href="#join">{content.comingSoon.cta} <i>↗</i></a></div>}
-          {i===0&&<WaitlistCount/>}
+          {i===0&&!RELEASE_PUBLISHED&&<WaitlistCount/>}
           {i===0&&<span className="intro-quote">“{content.intro.line}”</span>}
           {i===0&&<MoodPicker selected={selectedMood} onMoodChange={onMoodChange}/>}
           {i===2&&<div className="feature-callouts">{content.core.map((c,n)=><div key={c.title} className={`callout callout-${n}`}><i>{String(n+1).padStart(2,'0')}</i><b>{c.title}</b><span>{c.body}</span></div>)}</div>}
@@ -194,10 +195,10 @@ export default function SudoChanJourney(){
           {i===4&&<div className="demo-status" ref={demoStatus}><span/><span className="demo-status-label">Example · you clicked Allow</span></div>}
           {i===4&&<LazySlot minHeight={390}><StuckDetectorPreview onMoodChange={onMoodChange} onSpeech={onDemoSpeech}/></LazySlot>}
           {i===5&&<TrustPanel/>}
-          {i===6&&<Waitlist/>}
+          {i===6&&(RELEASE_PUBLISHED?<DownloadPanel/>:<Waitlist/>)}
         </div>
         {i===0&&<a className="scroll-cue" href={`#${content.scenes[1]?.id||'look'}`}><span>SCROLL TO EXPLORE</span><i>↓</i></a>}
-        {i===6&&<footer className="site-footer"><span>© {currentYear} SUDO-CHAN</span><span>{content.footer}</span><a href="/download">{content.downloadLink}</a><a href="/privacy">{content.privacyPage.title}</a><a href="#top">BACK TO TOP ↑</a></footer>}
+        {i===6&&<footer className="site-footer"><span>© {currentYear} SUDO-CHAN</span><span>{content.footer}</span>{RELEASE_PUBLISHED&&<a href="/download">{content.downloadLink}</a>}<a href="/privacy">{content.privacyPage.title}</a><a href="#top">BACK TO TOP ↑</a></footer>}
       </section></Fragment>;
     })}
     <CustomCursor/><div className="scroll-progress" ref={progressBar}/><div className="scene-counter">{String(chapter).padStart(2,'0')} <i>/</i> 10</div>

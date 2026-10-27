@@ -80,7 +80,7 @@ export function parseRelease(raw: unknown): LatestRelease | null {
     for (const item of r.assets as GithubAsset[]) {
       if (!item || typeof item.name !== 'string' || typeof item.browser_download_url !== 'string') continue;
       if (!isGithubUrl(item.browser_download_url)) continue;
-      if (item.name === 'SHA256SUMS.txt') {
+      if (item.name === 'SHA256SUMS' || item.name === 'SHA256SUMS.txt') {
         checksumsUrl = item.browser_download_url;
         continue;
       }

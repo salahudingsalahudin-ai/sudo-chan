@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
-import { content } from '@/content';
+import { notFound } from 'next/navigation';
+import { RELEASE_PUBLISHED, content } from '@/content';
 import { RELEASES_PAGE, fetchLatestRelease, formatBytes, type PlatformId } from '@/lib/releases';
 
 const page = content.downloadPage;
@@ -33,6 +34,8 @@ const platformLabels: Record<PlatformId, string> = {
 };
 
 export default async function DownloadPage() {
+  // Nothing goes live until the owner flips RELEASE_PUBLISHED in content.ts.
+  if (!RELEASE_PUBLISHED) notFound();
   const release = await fetchLatestRelease();
   const hasLinuxBuild = Boolean(release?.assets.some(asset => asset.platform.startsWith('linux')));
 
