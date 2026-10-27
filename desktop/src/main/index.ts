@@ -1084,8 +1084,10 @@ function setupIPC() {
       hint: sttHint || undefined,
     });
     console.info(`[STT] ok=${result.ok} provider=${result.provider ?? '-'} ms=${Date.now() - sttStarted} audioKB=${Math.round(base64.length * 0.75 / 1024)}${clipLevel}${result.ok ? '' : ` err=${result.error}`}`);
-    if (result.ok) return { ok: true, text: result.text, scriptWarning: result.scriptWarning };
-    return { ok: false, error: result.error ?? 'Could not transcribe speech.', fallbackToBrowser: true, rateLimited: Boolean(result.rateLimited) };
+    // A single 0..1 number (never counts or keys) so the voice engine can ration speculative wake-mode clips; see QUOTA-SAVER.md.
+    const quotaPressure = usage().sttQuotaPressure();
+    if (result.ok) return { ok: true, text: result.text, scriptWarning: result.scriptWarning, quotaPressure };
+    return { ok: false, error: result.error ?? 'Could not transcribe speech.', fallbackToBrowser: true, rateLimited: Boolean(result.rateLimited), quotaPressure };
   });
   handle(CHANNELS.playAudio, async (_event, dataUri: unknown) => {
     if (typeof dataUri !== 'string' || !dataUri) return { ok: false, error: 'Invalid audio' };

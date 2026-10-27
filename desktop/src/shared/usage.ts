@@ -2,6 +2,7 @@
  * Free-quota usage meter: pure counters, header parsing and the key-free summary the Settings and Chat windows show.
  * No Electron, no file access, no keys: the main process feeds it events and persists `serialize()` (see main/usage-store.ts).
  */
+import { pressureFromRemaining } from './clip-gate.ts';
 
 /** Anything with a Headers-like `get`; Response.headers, a Map wrapper or a test double. */
 export type HeaderLike = { get(name: string): string | null } | null | undefined;
@@ -390,6 +391,18 @@ export class UsageTracker implements TtsUsageSink, SttUsageSink, ChatUsageSink {
   serialize(): UsageData {
     this.prune();
     return JSON.parse(JSON.stringify(this.data)) as UsageData;
+  }
+
+  /**
+   * How short Groq listening is on requests, 0 (half or more left, or nothing known) .. 1 (none left). Read by the quota saver
+   * (src/shared/clip-gate.ts) so wake-mode listening gets stingier as the daily allowance runs down.
+   */
+  sttQuotaPressure(): number {
+    const snap = this.data.groqStt;
+    const now = this.now();
+    if (!snap || snap.at <= now - 86_400_000) return 0;
+    if (snap.resetRequestsAt !== undefined && snap.resetRequestsAt <= now) return 0;
+    return pressureFromRemaining(snap.remainingRequests, snap.limitRequests);
   }
 
   /** The key-free summary shown in Settings and (one line of it) in Chat. */

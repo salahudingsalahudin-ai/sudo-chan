@@ -1,5 +1,21 @@
 # Changelog (desktop)
 
+## quota-saver (on top of mic-indicator): wake mode stops burning the free Groq listening allowance
+
+Wake mode sent every speech clip to Groq Whisper (~5 requests a minute while idle, 20 of 25 were room talk). Details in `QUOTA-SAVER.md`.
+
+- **`src/shared/clip-gate.ts` (pure):** `ClipGate` decides locally whether a wake-mode clip is worth a cloud request: junk filters
+  (impulse, hiss, steady noise), monologue skip, three token budgets (name-shaped after quiet / other after quiet / right after chatter),
+  busy-room rule, repeat rule, 60 s floor, back-off on clips without the name, loosening on hits. Live Talk and barge-in are never gated.
+- **Quota pressure** (0..1) from Groq's own headers via `UsageTracker.sttQuotaPressure()`, returned inside the existing transcribe reply
+  (`quotaPressure`). No new channel, `authorize()` unchanged.
+- **Voice engine** measures each clip (`ClipFeatureAccumulator`, `frameStats`) and calls the new `decideClip` callback; wake-mode uploads are
+  trimmed to the first 3.5 s (was 4 s). `shouldTranscribe` still works for other callers.
+- **Log:** `[gate] skipped=N sent=M reason=...` once a minute per decision class, counts only. Nothing new on the overlay.
+- Simulated (8 seeds each): quiet room -84% requests, idle room talk -71%, TV with lulls -82%, TV wall to wall -88%; the bare name and
+  "name, pause, request" are always sent. Known cost: "Sudo kaise ho" in one breath in a busy room may need a second try.
+- Tests: `tests/clip-gate.check.mjs` (19) + 1 case in `tests/voice-pipeline.check.mjs`.
+
 ## mic-indicator (on top of fix-phantom-wake): the mic can no longer be switched off by accident
 
 Root cause of "the bot stopped hearing me": the mic dot lived inside the chat-opening pill, so a click meant for the pill turned the

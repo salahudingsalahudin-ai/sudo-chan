@@ -169,7 +169,7 @@ export interface DesktopAPI {
   setIsSpeaking(speaking: boolean): Promise<ActionResult>;
   emitSpeechEvent(event: SpeechEvent): void;
   onSpeechEvent(callback: (event: SpeechEvent) => void): () => void;
-  transcribeAudio(base64Audio: string, mimeType?: string, language?: string, hint?: string): Promise<{ ok: boolean; text?: string; error?: string; fallbackToBrowser?: boolean; rateLimited?: boolean; scriptWarning?: boolean }>;
+  transcribeAudio(base64Audio: string, mimeType?: string, language?: string, hint?: string): Promise<{ ok: boolean; text?: string; error?: string; fallbackToBrowser?: boolean; rateLimited?: boolean; scriptWarning?: boolean; quotaPressure?: number }>;
   playAudio(dataUri: string): Promise<{ ok: boolean; error?: string }>;
   /** Free-quota meter for Settings and Chat. Counters and reset times only, never keys. */
   getUsage(): Promise<UsageSummary>;
