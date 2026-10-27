@@ -8,10 +8,11 @@ Settings → "Let Sudo-chan use tools" (default OFF). Works with the cloud chat 
 
 | Tool | Needs a click? | Notes |
 |---|---|---|
-| `read_file` | no (inside home) | up to 20 KB, binary files refused |
+| `read_file` | no (inside home) | up to ~6 KB per call (optional `start_line`/`end_line`, footer says which `start_line` to call next), binary files refused |
 | `list_dir` | no (inside home) | secret entries are hidden |
 | `search_files` | no (inside home) | by name or text, skips `node_modules`, `.git`, secrets, max 50 hits |
 | `get_system_info` | no | OS, cores, memory, uptime |
+| `edit_file` | **every time** | exact unique `old_text` -> `new_text`; card shows the changed lines as `- old` / `+ new`. See the "Doing a task on your files" section |
 | `write_file`, `append_file` | **every time** | card shows path, new/overwrite, +/- lines, first lines of the content. Writes outside the home folder are refused outright |
 | `run_command` | **every time** | one program + arguments, no shell (pipes, `;`, `&&`, redirects, backticks are rejected). 30 s default timeout (max 120). Output cut to 8 KB. Child environment has everything that looks like a key/token/secret removed |
 | `open_url` | every time (`Allow for this chat` offered) | http/https only |
@@ -95,3 +96,53 @@ Settings -> "Let Sudo-chan use tools" ON, Save. Use Groq. Wake word ON.
 - The bot window is small: very long commands are clipped to about 5 lines in the panel (the chat card shows the full text).
 - Fallback model `gpt-oss-20b` is hard-coded for Groq; other providers have no fallback.
 - Notes and reminders are stored unencrypted in the app data folder.
+
+
+---
+
+# Update (branch `task-agent`): doing a multi-step task on your files ("mera kaam lena")
+
+## What changed
+
+- **`edit_file(path, old_text, new_text)`** for small changes. `old_text` must match the file text EXACTLY ONCE. No match ->
+  the model is told to `read_file` the part again and copy the text exactly; several matches -> it is told the line numbers and
+  to add neighbouring lines. Same path policy as `write_file` (home only, `.ssh`, `.env`, `~/.config/Sudo-chan` ... blocked,
+  symlinks resolved), needs a click every time, and the card shows only the changed lines (`line 12 · -1 / +2 lines`, then
+  `- old` / `+ new`, long blocks shortened). The file is re-checked right before writing (it may have changed while the card
+  was open), written to a temp file next to it and renamed over it (atomic), the file mode is kept, CRLF files keep CRLF. The
+  audit line has the path and line counts, never text.
+- **`read_file` pages.** Default answer is at most ~6 KB (was 20 KB, which was re-sent on every following step and used up
+  Groq's 7000 tokens/minute). Optional `start_line` / `end_line` (1-based). A cut answer ends with
+  `[truncated: showed lines 1-140 of 900. Call read_file again with start_line=141 to continue.]`. Small files are returned
+  whole, exactly as before.
+- **More room only when a write may come.** Groq tool turns use `max_tokens` 1900 (other providers 3000) when the user's message
+  asks for a change (banao, likho, badlo, fix, edit, add, write, create ...) or a file was just read; every other tool answer
+  and all plain chat keep 950 / 1500. The 429 retry and `gpt-oss-20b` fallback are untouched (the fallback request has the same body).
+  `write_file` is described to the model as "new files, under ~2500 characters; use `append_file` for the rest".
+- **The next turn remembers what the tools did.** After a tool turn the chat history gets a compact note on that assistant reply,
+  for example `[tools: read ~/a.py (lines 1-80); edited ~/a.py]` (paths and verbs only, failures named: "edit of ~/a.py denied by
+  user"; commands show only the program name and exit code; max 300 characters, newest kept). It is kept inside `ChatSession`
+  next to the message, NOT in the message text: it is not a chat bubble, not in `spoken`, not in the state sent to the windows.
+  The tool prompt tells the model to use it as context and never to write or speak such a line.
+- Prompt: prefers `edit_file` for changes, `write_file` only for new files, no whole-file rewrite for a small change, page big reads,
+  do not re-read a file already in context.
+
+## Unchanged
+
+6 tool steps per message, one approval click per write/edit/command, voice can never approve, `Stop all actions`, audit log, redaction.
+
+## Voice phrases to try (tools ON, Groq)
+
+1. "Sudo, mere home mein notes.txt padho aur bata isme kya likha hai."
+2. "Sudo, notes.txt mein 'kal' ko 'parson' se badal do." -> card with `- ... kal ...` / `+ ... parson ...`; click Allow.
+3. "Sudo, hello.py banao jo teen tak ginti print kare." -> create card; Allow. Then "ab isko run karo" -> she knows the file; command card; Allow.
+4. "Sudo, hello.py mein ginti paanch tak kar do." -> read, then an edit card for just those lines.
+5. "Sudo, mere bade log file ki aakhri 50 lines padho." (large file: she pages with `start_line`.)
+
+## Known gaps
+
+- The model must still copy `old_text` exactly; with a very repetitive file it may need one more round trip (the error text tells it how).
+- No undo and no backup copy: the card is the checkpoint. The old text is on the card, not stored.
+- A rewrite of a file larger than ~2500 characters is done as `write_file` + `append_file` chunks (each needs a click), not one write.
+- `read_file` looks at the first 1 MB of a file only; the footer says so.
+- Real model behaviour with these tools was not exercised (no provider calls were made); tests use fake responses.
