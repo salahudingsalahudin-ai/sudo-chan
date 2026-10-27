@@ -1,5 +1,24 @@
 # Changelog (desktop)
 
+## live-talk-flow (on top of main 3f87daa): one Live Talk button, one state machine, instant stop, window-name awareness
+
+Details, the full transition table and 8 things to try in `LIVE-TALK-FLOW.md`.
+
+- **The bot is the Live Talk button** (body, orb or antenna, one click to start, one click to stop). The round dot stays the name-standby switch (tooltips now say so);
+  the double-click on the bot that opened the chat is gone (it would have toggled twice). Chat window: the old header icon is removed, the composer has one
+  **Voice** button ("Live Talk here"), typing never opens the mic, the stage button is **End Live Talk**, the chat stays up while Live Talk is on in it.
+- **One state machine** (`src/shared/live-talk.ts`): OFF / STANDBY / LIVE-OVERLAY / LIVE-CHAT + SPEAKING, only one live target at a time, wake word and the 30 s
+  window only for a Live Talk her name opened, stop words cut her when busy and end Live Talk when she is idle, `wakeWordEnabled` is never changed by Live Talk.
+- **Instant stop** (`runLiveStop`, both windows): audio cut synchronously (`stop-button`, `speech:stop` once), no resume replay, `VoiceSession.cancelPending()` drops
+  the half-recorded clip and ignores a speech-to-text answer still in flight, mic closed unless standby is wanted, cloud reply/tools/screenshot aborted, state published.
+  Main has one `setLiveTarget()` that logs `[live] start target=...` / `[live] stop reason=click|stopword|window|quit|error|timeout|switch`.
+- **Awareness layer 1** (`src/shared/live-awareness.ts`, new setting `liveAwareness` 'off'|'window', default off, click-only consent through a new overlay panel or the Settings
+  switch): the focused window's app name and title (AT-SPI, no pixels) go into the system prompt of Live Talk turns only; sensitive windows skipped silently; at most one
+  window list per 5 s; never in history, never logged. The Cloud payload log no longer prints the system prompt. Layer 3 is plumbing only (`liveKeepAnEye`, inert).
+- **Speed:** spoken replies capped at 450 tokens. New IPC `liveAwarenessConsent` (overlay only); `setVoiceActive` is limited to the overlay and chat windows and takes an optional reason.
+- **Tests / verify:** `tests/live-talk.check.mjs` (30), `tests/live-talk-session.check.mjs` (4), `tests/live-awareness.check.mjs` (20); two new `npm run verify` wiring checks;
+  panel priority test and dot tooltip lengths updated.
+
 ## integrate6 review (planner + local-wake + installer-release merged onto main 3c689fb)
 
 Details in `INTEGRATE6.md`. The three branches were merged with hand-resolved conflicts and then reviewed together.

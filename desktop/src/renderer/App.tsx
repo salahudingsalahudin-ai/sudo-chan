@@ -316,8 +316,8 @@ function Overlay({ state }: { state: AppState }) {
   const toggleOverlayLive = () => {
     if (isOverlayVoiceActiveRef.current) { endOverlayLive('click'); return; }
     wakeOpened.current = false; // started by hand: the 30 s conversation window does not apply
-    void api?.welcome();
     void api?.setVoiceActive(true, 'overlay');
+    void api?.welcome(); // a little wave (visual only: no spoken greeting, no extra voice quota)
   };
   // Live Talk ended from outside (the other window took over, quit...): cut whatever this window was saying or hearing, no replay.
   const wasOverlayLive = useRef(false);

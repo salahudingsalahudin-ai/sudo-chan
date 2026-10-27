@@ -1268,3 +1268,6 @@ body[data-window=overlay]{overflow:hidden}.overlay-room{position:relative;width:
 .tasks-add input{flex:1;min-width:0;padding:5px 8px;border-radius:7px;background:#182936;border:1px solid #2e4352;color:#e8f1f5;font-size:11px}
 .tasks-add button{padding:4px 10px;border-radius:7px;border:1px solid #365e57;background:#173733;color:#88e9d3;font-size:11px}
 .tasks-note{margin:6px 0 0;font-size:11px;color:#f7d2a3}
+
+/* The bot is the Live Talk button: it should look clickable. The round dot beside the pill is only the name-standby switch. */
+.overlay-bot[role=button]{cursor:pointer}
