@@ -233,6 +233,7 @@ function Overlay({ state }: { state: AppState }) {
   // Spoken reply playback when conversation updates in overlay mode
   useEffect(() => {
     // ONLY speak in overlay if OVERLAY is the designated active voice target!
+    console.info(`[voice] overlay target=${state.voiceActiveTarget ?? 'none'}`);
     if (!api || state.voiceActiveTarget !== 'overlay') return;
     const unsub = api.onChat(chatState => {
       const last = chatState.messages[chatState.messages.length - 1];
@@ -243,7 +244,8 @@ function Overlay({ state }: { state: AppState }) {
       if (last && last.role === 'assistant' && last.status === 'complete' && last.text) {
         if (lastSpokenOverlayId.current !== last.id) {
           lastSpokenOverlayId.current = last.id;
-          void speak(last.spoken ?? last.text);
+          console.info('[voice] overlay got a complete reply, speaking');
+          void speak(last.spoken ?? last.text).catch(error => console.error('[voice] speak failed', String(error)));
         }
       }
     });

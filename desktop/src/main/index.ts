@@ -274,6 +274,14 @@ function createWindow(kind: WindowKind) {
     webPreferences: { preload: join(directory, '../preload/index.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true, webSecurity: true, spellcheck: false, devTools: !app.isPackaged },
   });
   windowKinds.set(win, kind);
+  // Forward renderer warnings/errors and our own "[voice]" breadcrumbs to the main log (no secrets are ever logged there).
+  win.webContents.on('console-message', (...args: unknown[]) => {
+    const first = args[0] as { message?: string; level?: string | number } | undefined;
+    const message = typeof first === 'object' && first && 'message' in first ? String(first.message) : String(args[2] ?? '');
+    const level = typeof first === 'object' && first && 'level' in first ? first.level : args[1];
+    const loud = level === 'warning' || level === 'error' || level === 2 || level === 3;
+    if (loud || message.startsWith('[voice]')) console.info(`[renderer:${kind}] ${message.slice(0, 300)}`);
+  });
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   win.webContents.on('will-navigate', event => event.preventDefault());
   win.webContents.on('will-attach-webview', event => event.preventDefault());

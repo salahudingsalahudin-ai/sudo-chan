@@ -218,11 +218,18 @@ export async function speak(
   rawText: string,
   callbacks?: { onEnd?: () => void; onError?: () => void }
 ): Promise<void> {
-  if (getMutedPreference()) return;
+  if (getMutedPreference()) {
+    console.info('[voice] speak skipped: voice is muted');
+    return;
+  }
 
   // First sentence alone (fast start), later same-emotion sentences are batched into one request to save Gemini quota.
   const sentences = groupForSynthesis(splitIntoSpokenSentences(rawText, 180), 450);
-  if (!sentences.length) return;
+  if (!sentences.length) {
+    console.info(`[voice] speak skipped: nothing speakable in ${rawText.length} chars`);
+    return;
+  }
+  console.info(`[voice] speak: ${sentences.length} chunk(s)`);
 
   const generation = beginPlayback(); // also forgets any older interrupted reply ('new-reply')
   currentReply = { items: sentences, index: 0, resumes: 0, generation };
