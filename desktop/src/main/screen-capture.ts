@@ -4,7 +4,7 @@ import { portalScreenshot } from './portal-screenshot.ts';
 import { isBlankFrame, MAX_IMAGE_WIDTH, targetSize, THUMBNAIL_WIDTH } from '../shared/screen-assist.ts';
 
 export type CaptureResult =
-  | { ok: true; dataUri: string; thumbnail: string; width: number; height: number }
+  | { ok: true; dataUri: string; thumbnail: string; width: number; height: number; /** Portal call + file read, and decode/resize/JPEG, in ms. */ portalMs: number; resizeMs: number }
   | { ok: false; reason: string };
 
 /**
@@ -12,6 +12,7 @@ export type CaptureResult =
  * and delete the portal's PNG immediately. Nothing is written to disk by us and nothing is logged.
  */
 export async function captureScreen(): Promise<CaptureResult> {
+  const startedAt = Date.now();
   const shot = await portalScreenshot();
   if (!shot.ok) return { ok: false, reason: shot.reason };
   let file: Buffer;
@@ -22,6 +23,8 @@ export async function captureScreen(): Promise<CaptureResult> {
   } finally {
     await unlink(shot.path).catch(() => { /* already gone */ });
   }
+  const portalMs = Date.now() - startedAt;
+  const resizeStartedAt = Date.now();
   const image = nativeImage.createFromBuffer(file);
   const size = image.getSize();
   if (!size.width || !size.height) return { ok: false, reason: 'decode-failed' };
@@ -35,5 +38,7 @@ export async function captureScreen(): Promise<CaptureResult> {
     thumbnail: 'data:image/jpeg;base64,' + thumb.toJPEG(60).toString('base64'),
     width: target.width,
     height: target.height,
+    portalMs,
+    resizeMs: Date.now() - resizeStartedAt,
   };
 }

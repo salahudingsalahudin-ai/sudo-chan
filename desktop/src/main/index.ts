@@ -452,6 +452,7 @@ function registerShortcut(shortcut: string) {
 // The sequence (consent once, cooldown/cache, sensitive-window guard, first-capture countdown, capture, cancel)
 // lives in shared/screen-flow.ts so it can be unit-tested; this file only supplies the Electron side effects.
 let screenStatusTimer: ReturnType<typeof setTimeout> | undefined;
+let lastCaptureTimings: { portalMs: number; resizeMs: number } | null = null;
 let consentResolver: ((granted: boolean) => void) | null = null;
 let consentShownAt = 0;
 function setScreenStatus(status: FlowStatus, extra?: { countdown?: number; notice?: string }) {
@@ -514,9 +515,9 @@ const screenFlow = new ScreenFlow({
     for (const win of hidden) win.hide();
     if (hidden.length) await new Promise(resolve => setTimeout(resolve, 350));
     try {
-      const started = Date.now();
       const shot = await captureScreen();
-      console.info(`[Screen] capture+resize=${Date.now() - started}ms ok=${shot.ok}${shot.ok ? '' : ` reason=${shot.reason}`}`);
+      lastCaptureTimings = shot.ok ? { portalMs: shot.portalMs, resizeMs: shot.resizeMs } : null;
+      if (!shot.ok) console.info(`[Screen] capture failed reason=${shot.reason}`);
       return shot.ok ? { ok: true as const, shot: { dataUri: shot.dataUri, thumbnail: shot.thumbnail } } : { ok: false as const, reason: shot.reason };
     } finally {
       for (const win of hidden) if (!win.isDestroyed()) win.showInactive();
@@ -571,9 +572,14 @@ async function sendWithScreen(value: unknown) {
     if ((result.reason === 'busy' || result.reason === 'cooldown') && text) return sendChat(text, isVoice);
     return { ok: false, error: result.notice, handled: true };
   }
-  console.info(`[Screen] guard=${result.timings.guardMs}ms capture=${result.timings.captureMs}ms total-before-vision=${result.timings.totalMs}ms cached=${result.cached}`);
   const prompt = text || DEFAULT_SCREEN_PROMPT;
-  const sent = sendChat(prompt, isVoice, { dataUri: result.shot.dataUri, thumbnail: result.shot.thumbnail, targets, fallbackText: prompt, ageSeconds: result.cached ? result.ageSeconds : 0 });
+  const timingsBeforeVision = result.timings;
+  const captureTimings = result.cached ? null : lastCaptureTimings;
+  // One line per screen turn, no content: capture (portal) / resize / guard (parallel with capture) / vision / total.
+  const logTimings = (visionMs: number) => console.info(
+    `[Screen] capture=${captureTimings?.portalMs ?? 0}ms resize=${captureTimings?.resizeMs ?? 0}ms guard=${timingsBeforeVision.guardMs}ms vision=${visionMs}ms total=${timingsBeforeVision.totalMs + visionMs}ms cached=${result.cached}`,
+  );
+  const sent = sendChat(prompt, isVoice, { dataUri: result.shot.dataUri, thumbnail: result.shot.thumbnail, targets, fallbackText: prompt, ageSeconds: result.cached ? result.ageSeconds : 0, onTiming: logTimings });
   if (sent.ok && !result.cached) setScreenStatus('sent');
   if (sent.ok && source === 'wake' && !state.voiceCallActive) openChat();
   return sent;
@@ -586,7 +592,7 @@ function followUpVision(text: string, targets: VisionTarget[]): StreamOptions['v
   if (aiState.mode !== 'cloud' || !targets.length) return undefined;
   const hit = screenFlow.followUp(text);
   if (!hit) return undefined;
-  return { dataUri: hit.shot.dataUri, thumbnail: undefined, targets, fallbackText: text, ageSeconds: hit.ageSeconds };
+  return { dataUri: hit.shot.dataUri, thumbnail: undefined, targets, fallbackText: text, ageSeconds: hit.ageSeconds, onTiming: visionMs => console.info(`[Screen] follow-up on a ${hit.ageSeconds}s old screenshot vision=${visionMs}ms`) };
 }
 async function saveSettings(candidate: unknown) {
   if (!validSettings(candidate)) return { ok: false, error: 'Choose a valid shortcut and companion size.' };
