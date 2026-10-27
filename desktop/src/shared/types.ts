@@ -103,7 +103,7 @@ export interface DesktopAPI {
   saveSettings(settings: Settings): Promise<ActionResult>;
   resetPosition(): Promise<void>;
   setInteractive(interactive: boolean): void;
-  sendMessage(text: string): Promise<ActionResult>;
+  sendMessage(text: string, voice?: boolean): Promise<ActionResult>;
   getMessages(): Promise<ChatState>;
   onChat(callback: (state: ChatState) => void): () => void;
   stopReply(): Promise<void>;

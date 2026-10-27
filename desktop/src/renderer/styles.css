@@ -1125,7 +1125,11 @@ body[data-window=overlay]{overflow:hidden}.overlay-room{position:relative;width:
 .azure-fields.azure-error{outline:1px solid rgba(255,120,120,.55);border-radius:10px;padding:4px}
 
 /* Caption on the desktop bot during Live Talk: what you said and what she answers */
-.overlay-caption{max-height:46%;overflow:hidden;text-align:left}.overlay-caption .caption-you{color:#6b8c92;font-size:9px;margin-bottom:3px}.overlay-caption .caption-bot{color:#2e5560}
+/* Compact caption that always stays inside the small overlay window: reply clamped to 3 lines, what you said to 1 line */
+.overlay-caption{top:3px;left:6px;width:calc(100% - 12px);max-height:35%;padding:6px 9px;overflow:hidden;text-align:left;border-radius:12px;background:#ffffffee;backdrop-filter:blur(4px);font-size:10px;line-height:1.35}
+.overlay-caption::after{display:none}
+.overlay-caption .caption-you{color:#7d98a0;font-size:8.5px;margin-bottom:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.overlay-caption .caption-bot{color:#2e5560;font-weight:550;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
 
 /* Mic status dot in the overlay pill: green pulse = listening for the name, blue = Live Talk, grey = mic off */
 .presence-dot.is-listening{animation:micPulse 2.4s ease-in-out infinite}

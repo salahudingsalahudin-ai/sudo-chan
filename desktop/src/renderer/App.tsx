@@ -193,12 +193,12 @@ function Overlay({ state }: { state: AppState }) {
           wakeWindow.current.open(performance.now());
           void api?.welcome();
           void api?.setVoiceActive(true, 'overlay');
-          if (match.rest) void api?.sendMessage(match.rest);
+          if (match.rest) void api?.sendMessage(match.rest, true);
         } else {
           // In Live Talk: respond to whatever is spoken, and keep the wake window alive.
           wakeWindow.current.touch(performance.now());
           if (handleStopCommand(text)) return;
-          void api?.sendMessage(text.trim());
+          void api?.sendMessage(text.trim(), true);
         }
       },
     });
@@ -432,7 +432,7 @@ function Chat({ state }: { state: AppState }) {
           if (text.trim() && handleStopCommand(text)) return;
           if (text.trim() && !conversationBusyRef.current) {
             setBotSubtitle('');
-            void api?.sendMessage(text.trim());
+            void api?.sendMessage(text.trim(), true);
           }
         },
         onAudioLevel: level => {
