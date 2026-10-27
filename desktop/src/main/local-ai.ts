@@ -118,7 +118,7 @@ export function buildSystemPrompt(options?: {
       "Start EVERY sentence with exactly one emotion tag in square brackets, chosen from: [warm] [excited] [calm] [curious] [soft] [happy].",
       "Use [happy] for greetings, [soft] for apologies, [curious] for questions, [excited] for good news, [calm] for reassurance, [warm] otherwise.",
       "Example: [happy] Assalam o Alaikum Sid! [curious] Aaj kis cheez par kaam karna hai?",
-      ...(options.toolsPaused ? ["Computer tools are not available on this screenshot turn: if Sid wants an action done, tell him to ask again without the screenshot, and never claim you did something."] : []),
+      ...(options.toolsPaused ? ["Computer tools are not available on this screenshot turn: answer what is on the screen; if Sid also wants an action done, say it needs a separate request: after your answer he can just say the task again (your description stays in this chat), and never claim you did something."] : []),
       ...(options.tools ? ["You can use computer tools (files, commands, links) but risky ones need the user to click Allow on screen: say \"please approve on screen\" and never treat a spoken yes as approval. Never claim an action happened unless the tool result confirms it."] : []),
     ].join(' ');
   }
@@ -155,7 +155,7 @@ export function buildSystemPrompt(options?: {
     options?.tools
       ? '- Real System Boundaries: Privacy-first desktop companion. You can see the screen ONLY on a turn where a screenshot is attached by screen assist; this is NOT such a turn, so you cannot see the screen and must say so instead of guessing. You cannot browse the live web. Files and commands are only possible through the tools below, with the user\'s approval.'
       : '- Real System Boundaries: Privacy-first desktop companion. Can see the screen of the user ONLY on a turn where a screenshot is attached to the message (when the user enabled screen assist and said your name or pressed the eye button); on every other turn you cannot see the screen and must say so instead of guessing; you cannot modify or delete OS files directly, cannot browse the live web.',
-    options?.toolsPaused ? '- Tools (files, commands, links) are ON in settings but are NOT available on this screenshot turn. If the user wants an action done, tell them to ask again without the screenshot (say your name or type it again); never claim you did something.' : '',
+    options?.toolsPaused ? '- Tools (files, commands, links) are ON in settings but are NOT available on this screenshot turn. Answer what is on the screen; if the user also wants an action done, tell them to say the task again as a separate request right after (your description stays in this chat); never claim you did something.' : '',
     options?.tools ? `\n${TOOLS_PROMPT}` : '',
   ].filter(Boolean).join('\n');
 }

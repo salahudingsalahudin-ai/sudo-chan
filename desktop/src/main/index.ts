@@ -547,6 +547,7 @@ const screenFlow = new ScreenFlow({
   now: () => Date.now(),
   sleep: ms => new Promise<void>(resolve => setTimeout(resolve, ms)),
   isEnabled: () => Boolean(state.settings.screenAssistEnabled),
+  toolsEnabled: () => state.settings.toolsEnabled === true,
   countdownEnabled: () => state.settings.screenAssistCountdown !== false,
   hasConsent: () => Boolean(store.get('screenAssistConsent')),
   saveConsent: () => { store.set('screenAssistConsent', true); },

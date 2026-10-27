@@ -190,6 +190,37 @@ test('follow-up detection is conservative', () => {
   }
 });
 
+test('with tools on, a task command is never a vision follow-up; real follow-ups still are', () => {
+  const tools = { toolsEnabled: true };
+  for (const task of ['ye file edit kar do', 'notes.txt bana do', 'ye file khol do', 'is message ko delete kar do', 'ye window band karo', 'save kar do', 'reminder lagao', 'ye kaam kar do', 'script chalao']) {
+    assert.equal(isScreenFollowUp(task, tools), false, `tools on: ${task}`);
+  }
+  for (const yes of ['aur is error ka fix batao', 'ye kya hai?', 'ye line kya karti hai', 'aur neeche?', 'upar wali line theek karo', 'is code mein kya galat hai', 'screen par kya likha hai', 'what does this mean']) {
+    assert.equal(isScreenFollowUp(yes, tools), true, `tools on: ${yes}`);
+  }
+  // Tools off keeps the older, wider behaviour for plain word pointers.
+  assert.equal(isScreenFollowUp('upar wali line theek karo'), true);
+  // "file" / "message" / "window" / "tab" alone no longer make a vision follow-up.
+  for (const no of ['ye file edit kar do', 'file save karo', 'message bhej do', 'window band karo', 'tab khol do']) assert.equal(isScreenFollowUp(no, tools), false, no);
+  assert.equal(isScreenFollowUp('file dekho'), false);
+});
+
+test('ScreenFlow.followUp asks the toolsEnabled dep: a command is not attached to the old screenshot', async () => {
+  const { flow, clock } = makeFlow({ consent: true, countdown: false });
+  await flow.request('wake');
+  clock.now += 10_000;
+  assert.ok(flow.followUp('ye line kya karti hai'));
+  assert.equal(flow.followUp('ye file edit kar do'), null, 'no file/message/window word makes this a follow-up any more');
+  const withTools = new ScreenFlow({
+    now: () => clock.now, sleep: async () => {}, isEnabled: () => true, countdownEnabled: () => false, hasConsent: () => true, saveConsent() {}, askConsent: async () => true,
+    cancelConsent() {}, setStatus() {}, capture: async () => ({ ok: true, shot: SHOT }), checkWindows: async () => ({ status: 'clear' }), toolsEnabled: () => true,
+  });
+  await withTools.request('wake');
+  assert.ok(withTools.followUp('aur is error ka fix batao'));
+  assert.equal(withTools.followUp('notes.txt bana do'), null);
+  assert.equal(withTools.followUp('ye error fix karo') !== null, true, 'a bare karo next to a screen word stays a follow-up');
+});
+
 test('sensitive window: nothing leaves, nothing is cached', async () => {
   const { flow, calls } = makeFlow({ consent: true, countdown: false, guard: { status: 'sensitive', matched: 'bank' } });
   const result = await flow.request('wake');
