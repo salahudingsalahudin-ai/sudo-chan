@@ -1180,9 +1180,23 @@ body[data-window=overlay]{overflow:hidden}.overlay-room{position:relative;width:
 @keyframes glowBreathe{0%,100%{filter:brightness(.85)}50%{filter:brightness(1.1)}}
 @media (prefers-reduced-motion:reduce){.overlay-glow.is-standby{animation:none}}
 
-/* The mic dot in the overlay pill is the on/off switch for the desktop bot's microphone */
-.presence-dot.mic-toggle{cursor:pointer;width:11px;height:11px;outline-offset:3px}
-.presence-dot.mic-toggle:hover{filter:brightness(1.15)}
+/* The mic switch on the desktop bot: its own 26px button NEXT TO the chat pill (never inside it), 8px away from it.
+   Shapes differ, not only colours: listening = filled green dot with glow, Live Talk = blue dot with a ring,
+   resting = hollow amber ring, OFF = small dim dot with a diagonal slash. "armed" = first click to turn off, waiting for the second. */
+.overlay-dock{gap:8px;left:8%;width:84%}
+.mic-switch{flex-shrink:0;width:26px;height:26px;padding:0;display:grid;place-items:center;border-radius:50%;background:#f9fdfdf5;border:1px solid #d4e5e6;box-shadow:0 4px 12px #325b6810;cursor:pointer}
+.mic-switch:hover{background:#fff;box-shadow:0 4px 14px #325b6820}
+.mic-dot{position:relative;display:block;width:12px;height:12px;border-radius:50%;transition:background .2s ease,box-shadow .2s ease,opacity .2s ease}
+.mic-dot.is-listening{background:#2fc986;box-shadow:0 0 0 3px #2fc98630;animation:micPulseGreen 2.4s ease-in-out infinite}
+.mic-dot.is-live{background:#4aa8ff;box-shadow:0 0 0 2px #fff,0 0 0 4px #4aa8ff88}
+.mic-dot.is-paused{background:transparent;border:2.5px solid #d9a94f;box-shadow:0 0 0 3px #d9a94f22}
+.mic-dot.is-off,.mic-dot.is-armed{background:#a9b8bc;opacity:.8;box-shadow:none;width:10px;height:10px}
+.mic-dot.is-armed{background:#e9a53a;opacity:1;animation:micArmed .6s ease-in-out infinite alternate}
+.mic-dot.is-off::after,.mic-dot.is-armed::after{content:'';position:absolute;left:50%;top:50%;width:2px;height:20px;border-radius:1px;background:#3f565c;box-shadow:0 0 0 1px #f9fdfd;transform:translate(-50%,-50%) rotate(45deg)}
+.overlay-bot.is-mic-off{filter:drop-shadow(0 4px 10px #31596a12) saturate(.55) opacity(.82)}
+@keyframes micPulseGreen{0%,100%{box-shadow:0 0 0 3px #2fc98626}50%{box-shadow:0 0 0 5px #2fc98650}}
+@keyframes micArmed{from{box-shadow:0 0 0 2px #e9a53a33}to{box-shadow:0 0 0 5px #e9a53a66}}
+@media (prefers-reduced-motion:reduce){.mic-dot.is-listening,.mic-dot.is-armed{animation:none}}
 
 /* Compact tool-approval panel on the desktop bot: same dark glass as the caption, buttons only (speech never approves) */
 .overlay-approval{position:absolute;top:2%;left:4%;width:92%;max-height:56%;z-index:5;box-sizing:border-box;padding:8px 9px 7px;border-radius:14px;overflow:hidden;

@@ -16,6 +16,7 @@ export function overlayShape(width: number, height: number, panel: boolean | Ove
     region(.08, .18, .92, .9), // Bot, halo and shadow.
     region(.3, .08, .7, .22), // Native drag grip.
     region(.02, .83, .98, .99), // Chat pill and gear, including small/paused mode.
+    region(.04, .81, .4, .99), // Mic switch: its own button left of the chat pill (.overlay-dock > .mic-switch). Kept explicit so it stays clickable.
   ];
   const kind: OverlayPanel | null = typeof panel === 'string'
     ? (panel === ('approval' as string) || panel in PANEL_HEIGHT ? panel : 'caption')
