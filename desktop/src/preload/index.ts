@@ -18,6 +18,7 @@ const api: DesktopAPI = {
   saveSettings: settings => ipcRenderer.invoke(CHANNELS.save, settings),
   resetPosition: () => ipcRenderer.invoke(CHANNELS.reset),
   setInteractive: interactive => ipcRenderer.send(CHANNELS.interactive, interactive),
+  setCaptionVisible: visible => ipcRenderer.send(CHANNELS.caption, visible),
   sendMessage: (text, voice) => ipcRenderer.invoke(CHANNELS.send, voice === undefined ? text : { text, voice }),
   getMessages: () => ipcRenderer.invoke(CHANNELS.messages),
   onChat: callback => {
