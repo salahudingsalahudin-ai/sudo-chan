@@ -62,6 +62,11 @@ export function describeToolCall(name: string, rawArgs: unknown, result: string)
       const app = cleanPath(args.name).split('/').pop() || '?';
       return fail ? null : `opened app ${app}`;
     }
+    case 'start_task': {
+      // Only the id (from the result), never the title or notes: enough for "ye kaam" / "us task" follow-ups.
+      const id = /^Started (t\d{1,9}):/.exec(result)?.[1];
+      return fail || !id ? null : `started task ${id}`;
+    }
     default:
       return null;
   }
