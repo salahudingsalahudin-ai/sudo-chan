@@ -19,6 +19,12 @@ First public prototype: the desktop companion for Linux, plus the website with a
 - Speech recognition: Fast (Whisper first) or Accurate (Gemini first), chosen in Settings.
 - Voice output: Google voice by default, with optional Gemini or Azure Speech voices if you add a key. Gemini's free quota is small.
 - Only the bot you are talking to moves its mouth.
+- Optional "On-device name check" (Settings > Voice, off by default): teach her your voice saying "Sudo" once; a small check on your computer then marks clips that sound like her name before anything goes to the cloud. It keeps numbers derived from your voice (never audio) in a file on your computer, and you can delete them in Settings.
+
+### Daily planner
+- A small "Aaj ka kaam" bar in the chat window shows today's plan; check tasks off, or add one in your own words ("kal 5 baje report bhejna", "in 2 hours call Ali"). Your tasks stay in a file on your computer.
+- With "Let Sudo-chan use tools" on, you can also say it: "aaj mera kya kaam hai", "ye kaam list mein daal do", "mera agla kaam utha lo". She only starts a task (marks it in progress); doing the work still needs your click.
+- Optional reminders for a task; finishing the task cancels its reminder.
 
 ### Installing and updates
 - Linux packages: an AppImage and a `.deb`, with a `SHA256SUMS` file so you can check your download. Windows and macOS packages are configured but have not been built or tested yet.

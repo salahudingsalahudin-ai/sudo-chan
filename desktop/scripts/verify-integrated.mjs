@@ -88,6 +88,24 @@ function functionBody(source, header) {
   add('wiring', 'on-device wake word: default off, profile file 0600 and validated, stores no audio', ok ? 'PASS' : 'FAIL', ok ? '' : `${offByDefault ? '' : 'localWake default is not off; '}${mode600 ? '' : 'store must write mode 0o600 through parseProfile; '}${noAudioStored ? '' : 'stored template shape mentions audio'}`);
 }
 {
+  // Merge tripwire: a Settings field that is missing from the Settings page's "unsaved changes" test or its re-sync list is silently dropped (integrate6 review).
+  const iface = /export interface Settings \{([\s\S]*?)\n\}/.exec(types)?.[1] ?? '';
+  const keys = [...iface.matchAll(/^  (\w+)\??:/gm)].map(m => m[1]);
+  const unused = ['sttProvider', 'sttLanguage', 'ttsVoice', 'micDeviceId', 'vadSensitivity', 'pushToTalk']; // no screen edits these
+  const app = read('src/renderer/App.tsx');
+  const block = /const dirty = ([\s\S]*?);\n\s*useEffect\(\(\) => setSettings\(state\.settings\), \[([\s\S]*?)\]\);/.exec(app);
+  const missing = block ? keys.filter(k => !unused.includes(k) && (!new RegExp(`settings\\.${k}\\b`).test(block[1]) || !new RegExp(`state\\.settings\\.${k}\\b`).test(block[2]))) : keys;
+  add('wiring', 'every editable Settings field is in the unsaved-changes test and the re-sync list', block && missing.length === 0 ? 'PASS' : 'FAIL', block ? missing.join(', ') : 'dirty/useEffect block not found in App.tsx');
+}
+{
+  // Token budget: tool turns offer notes/reminders/tasks only when the talk is about them (tools/tool-gate.ts), and the execute path stays whole.
+  const ai = stripComments(read('src/main/local-ai.ts'));
+  const gate = read('src/main/tools/tool-gate.ts');
+  const wired = /wantsPlannerTools\(messages\)/.test(ai) && /tools:\s*toolRuntime,/.test(ai) && /plannerTools\s*\}\)/.test(ai);
+  const keepsExecute = /execute:\s*\(name, args, callId, signal\) => runtime\.execute\(/.test(gate);
+  add('wiring', 'tool turns send notes/reminders/tasks tools only when relevant (Groq token budget)', wired && keepsExecute ? 'PASS' : 'FAIL', wired ? (keepsExecute ? '' : 'withoutPlannerTools must still call the full runtime') : 'streamCloud must gate the tool list with wantsPlannerTools');
+}
+{
   // Every handler must be limited to the window kinds we intend. Extra kinds are allowed only where listed.
   const expect = {
     cloudConfig: ['settings'], fetchCloudModels: null, quit: ['settings'], reset: ['settings'], messages: ['chat'],

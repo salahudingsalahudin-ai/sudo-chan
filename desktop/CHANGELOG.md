@@ -1,5 +1,19 @@
 # Changelog (desktop)
 
+## integrate6 review (planner + local-wake + installer-release merged onto main 3c689fb)
+
+Details in `INTEGRATE6.md`. The three branches were merged with hand-resolved conflicts and then reviewed together.
+
+- **Token budget on tool turns:** the file/command tools are always offered, but the 13 notes / reminders / tasks tools (about 1,100 tokens of definitions) and their
+  prompt lines (about 200 tokens) are sent only when the latest message or the exchange just before it talks about tasks, reminders, notes or the day's plan
+  (`src/main/tools/tool-gate.ts`, English / Roman Urdu / Urdu script, errs towards offering). Every tool step re-sends this list and Groq's free tier allows about
+  7,000 input tokens a minute for the main model, so a plain "read this file" turn now costs roughly a third less per step. The tool runtime itself is unchanged
+  (a hidden tool called anyway still goes through policy, approval and audit). The default prompt text (`TOOLS_PROMPT`) is unchanged.
+- **Tests / verify:** `tests/integrate6.check.mjs` (10: settings fields in the unsaved-changes test and re-sync list, patch merge and validation of the three new
+  settings, IPC uniqueness / window kinds / preload, lazy startup, tool gate, prompt size, real `LocalAI` request, packaging file list). Two new `npm run verify`
+  wiring checks (Settings fields in App.tsx; tool gate wired). Numbers are in `INTEGRATE6.md`.
+- Changelog: blank lines between the merged sections, stale local-wake test counts marked as per-branch numbers.
+
 ## planner (on top of integrate5): "Aaj ka kaam" daily planner and "mera kaam utha lo"
 
 Details, phrases to try and known gaps in `PLANNER.md`.
@@ -18,6 +32,7 @@ Details, phrases to try and known gaps in `PLANNER.md`.
   wiring list knows the new channels. No overlay UI, no popups, no new notifications.
 - **Tests:** `tests/tasks.check.mjs` (96: dates, plan, validation, panel actions, in 4 time zones), `tests/tasks-store.check.mjs` (28: file, recovery, caps, tools,
   policy/audit, reminders link, IPC wiring, prompt); 6 new checks in the real Electron smoke run.
+
 ## local-wake (on top of main 3c689fb): on-device "is that my name?" check before the cloud
 
 Wake mode still depended on a cloud round trip to judge every clip. Now a local check marks clips as wake-word candidates first. Details, research and scoring in `LOCAL-WAKE.md`; real-voice check in `TEST-LOCAL-WAKE.md`.
@@ -29,7 +44,8 @@ Wake mode still depended on a cloud round trip to judge every clip. Now a local 
 - **Settings > Voice:** "Teach her your voice saying Sudo" (5-8 takes, live level meter, quality checks, optional "Sid"), accuracy self-test ("Heard 3/3"), sensitivity, "Delete my voice samples". Nothing on the overlay.
 - **Storage:** `userData/local-wake.json`, mode 0600, atomic, validated on read and write; feature vectors only, never audio. Three IPC handlers (get: overlay+settings; save/delete: settings only).
 - **Log:** `[wake-local] candidates=N rejected=M sent=K mode=...` once a minute, counts only.
-- Tests: `tests/local-wake.check.mjs` (25) + `tests/local-wake-pipeline.check.mjs` (4); one new verify wiring check. `npm run verify` 38/38, unit tests 491 pass (462 before; two unrelated timing tests flaked under load in earlier runs, a rerun was clean). Everything is verified on synthetic audio only.
+- Tests: `tests/local-wake.check.mjs` (25) + `tests/local-wake-pipeline.check.mjs` (4); one new verify wiring check. (per branch, before the merge) `npm run verify` 38/38, unit tests 491 pass (462 before; two unrelated timing tests flaked under load in earlier runs, a rerun was clean). Everything is verified on synthetic audio only.
+
 ## installer-release (on top of main 3c689fb): packaging, update check wired in
 
 - **Packaging** (`package.json` `build`): AppImage + deb for Linux, nsis (Windows) and dmg (macOS, x64 + arm64) configured but NOT built or tested here.
