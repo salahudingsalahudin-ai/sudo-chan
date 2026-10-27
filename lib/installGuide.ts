@@ -173,7 +173,7 @@ export const TROUBLE: readonly TroubleItem[] = [
 ];
 
 export const INSTALL_COPY = {
-  earlyNote: 'This is an early version. Expect rough edges: Urdu and Roman Urdu recognition is still improving, the default voice is a simple synthetic one, and you bring your own AI key. It has been tested on one Linux computer so far.',
+  earlyNote: 'Expect rough edges: Urdu and Roman Urdu recognition is still improving, the default voice is a simple synthetic one, and you bring your own AI key. It has been tested on one Linux computer so far.',
   unsignedNote: 'The Linux files are not code-signed. Signing costs money and is planned for later. A checksum (step 3) tells you your copy matches the file we published; it does not prove who made it, so only download from this page or the project releases on GitHub.',
   apparmorNote: 'Ubuntu 24.04 restricts some features Electron apps use. The .deb installs an AppArmor profile for that, so prefer the .deb on 24.04. The AppImage starts itself with --no-sandbox there, which means less isolation. We have not tested either on 24.04 yet.',
   checksumWhy: 'A checksum is a fingerprint of a file. If even one letter of the file changes, the fingerprint changes. Comparing it catches a broken download or a file somebody swapped. SHA256SUMS lists the right fingerprints for this release.',

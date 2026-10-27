@@ -104,7 +104,7 @@ describe('install guide page (rendered with the switch on, independent of the co
   it('renders all four steps with anchors', () => {
     for (const n of [1, 2, 3, 4]) expect(html).toContain(`id="step-${n}"`);
     expect(html).toContain('href="#step-2"');
-    expect(html).toContain('Install Sudo-chan in 4 steps');
+    expect(text).toContain('Install Sudo-chan in 4 steps');
     expect(html).toContain('Something went wrong?');
   });
 

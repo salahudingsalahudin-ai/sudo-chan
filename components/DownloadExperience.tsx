@@ -20,6 +20,7 @@ function Mascot() {
           <circle cx="100" cy="100" r="82" fill="none" stroke="currentColor" strokeOpacity=".5" strokeWidth="1.5" />
           <circle cx="100" cy="100" r="92" fill="none" stroke="currentColor" strokeOpacity=".22" strokeWidth="1" strokeDasharray="2 7" />
         </g>
+        <path d="M46 200c3-22 22-36 54-36s51 14 54 36z" fill="#e3e8f6" /><path d="M86 164l14 16 14-16" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
         <path d="M44 112c-2-44 22-70 56-70s58 26 56 70c-2 26-8 36-14 44H58c-6-8-12-18-14-44Z" fill="url(#im-hair)" />
         <path d="M56 106c0-26 18-44 44-44s44 18 44 44c0 28-20 48-44 48s-44-20-44-48Z" fill="url(#im-skin)" />
         <path d="M54 96c6-26 24-40 46-40s40 14 46 40c-12-12-26-18-46-18s-34 6-46 18Z" fill="url(#im-hair)" />
@@ -49,7 +50,7 @@ export default function DownloadExperience({ release }: { release: GuideRelease 
           <section className={styles.hero} aria-labelledby="install-title">
             <div className={styles.heroCopy}>
               <p className={styles.eyebrow}>Early version · Linux</p>
-              <h1 id="install-title">Install Sudo-chan in 4 steps</h1>
+              <h1 id="install-title">Install <span className={styles.nowrap}>Sudo-chan</span> in 4 steps</h1>
               <p className={styles.lead}>Choose your computer, download one file, check it is genuine, then install and open her. No account needed.</p>
             </div>
             <Mascot />

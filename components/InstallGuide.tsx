@@ -225,14 +225,14 @@ export default function InstallGuide({ release }: { release: GuideRelease }) {
             <div className={styles.option} data-recommended={recommended === 'deb'}>
               <div className={styles.optionHead}><h3>.deb package</h3>{recommended === 'deb' && <span className={styles.tag}>Suggested for you</span>}</div>
               <p className={styles.fileName}>{names.deb}</p>
-              <p className={styles.optionText}>For Ubuntu, Debian and friends. Your system installs and removes it like any other app. {debSize}.</p>
-              <a className={styles.dlButton} href={debHref} rel="noopener">{ICON.download}<span>Download .deb</span><small>{debSize}</small></a>
+              <p className={styles.optionText}>For Ubuntu, Debian and friends. Your system installs and removes it like any other app. Size: {debSize}.</p>
+              <a className={styles.dlButton} href={debHref} rel="noopener">{ICON.download}<span>Download .deb</span></a>
             </div>
             <div className={styles.option} data-recommended={false}>
               <div className={styles.optionHead}><h3>AppImage</h3></div>
               <p className={styles.fileName}>{names.appImage}</p>
-              <p className={styles.optionText}>One file, no install. For other distributions, or if you do not want to use apt. {appImageSize}.</p>
-              <a className={styles.dlButton} href={appImageHref} rel="noopener">{ICON.download}<span>Download AppImage</span><small>{appImageSize}</small></a>
+              <p className={styles.optionText}>One file, no install. For other distributions, or if you do not want to use apt. Size: {appImageSize}.</p>
+              <a className={styles.dlButton} href={appImageHref} rel="noopener">{ICON.download}<span>Download AppImage</span></a>
             </div>
           </div>
           <p className={styles.small}>
@@ -308,7 +308,6 @@ export default function InstallGuide({ release }: { release: GuideRelease }) {
               </details>
             ))}
           </div>
-          <p className={styles.honest}>{INSTALL_COPY.earlyNote}</p>
           <ul className={styles.footerLinks}>
             <li><a href={release.latestUrl} rel="noopener">All files on GitHub</a></li>
             <li><Link href="/privacy">Privacy policy</Link></li>
