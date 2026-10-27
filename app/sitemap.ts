@@ -4,6 +4,7 @@ import { siteUrl } from '@/lib/site';
 export default function sitemap(): MetadataRoute.Sitemap {
   return [
     { url: new URL('/', siteUrl).toString(), changeFrequency: 'monthly', priority: 1 },
+    { url: new URL('/download', siteUrl).toString(), changeFrequency: 'weekly', priority: 0.6 },
     { url: new URL('/privacy', siteUrl).toString(), changeFrequency: 'yearly', priority: 0.3 },
   ];
 }

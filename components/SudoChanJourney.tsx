@@ -197,7 +197,7 @@ export default function SudoChanJourney(){
           {i===6&&<Waitlist/>}
         </div>
         {i===0&&<a className="scroll-cue" href={`#${content.scenes[1]?.id||'look'}`}><span>SCROLL TO EXPLORE</span><i>↓</i></a>}
-        {i===6&&<footer className="site-footer"><span>© {currentYear} SUDO-CHAN</span><span>{content.footer}</span><a href="/privacy">{content.privacyPage.title}</a><a href="#top">BACK TO TOP ↑</a></footer>}
+        {i===6&&<footer className="site-footer"><span>© {currentYear} SUDO-CHAN</span><span>{content.footer}</span><a href="/download">{content.downloadLink}</a><a href="/privacy">{content.privacyPage.title}</a><a href="#top">BACK TO TOP ↑</a></footer>}
       </section></Fragment>;
     })}
     <CustomCursor/><div className="scroll-progress" ref={progressBar}/><div className="scene-counter">{String(chapter).padStart(2,'0')} <i>/</i> 10</div>
