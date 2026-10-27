@@ -15,3 +15,7 @@ In the dev console of the chat window, `window.__bargeInLatency` holds the measu
 10. **Voice quality.** Settings → Voice: try each Gemini voice and the Google fallback on an English and a Roman Urdu sentence. Note how natural it sounds and whether Urdu is acceptable. Also set your Gemini key wrong on purpose and confirm she still speaks (fallback).
 
 Speakers only: if she interrupts herself (echo), lower "Barge-in sensitivity" in Settings.
+
+## Resume after an unclear interruption
+11. **Mumble interrupts, she resumes.** While she speaks a long answer, interrupt with a long mumble or noise (about 2 seconds, nothing recognisable). She stops, and a moment after the recogniser gives up she continues from about where she was cut (a word or two before). Console: `[barge-in] unclear clip=...ms -> resume`.
+12. **"ruko ruko" stays stopped.** Interrupt with "ruko ruko" (or "stop", "bas karo", "chup"). She stops and stays silent; her text is not sent as a chat message. Console: `[barge-in] stop command "ruko ruko" -> stay stopped`. A very short unclear sound (< 1 s) also stays stopped.

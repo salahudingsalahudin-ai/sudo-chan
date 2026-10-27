@@ -363,6 +363,8 @@ export interface VoiceSessionCallbacks {
   /** Vocabulary hint for the speech-to-text provider (e.g. the assistant's name and aliases). */
   sttHint?: string;
   onTranscribeResult?: (outcome: 'ok' | 'rate-limited' | 'error') => void;
+  /** A finished speech clip produced no usable transcript (not called for clips dropped by shouldTranscribe). */
+  onUnclear?: (info: { clipMs: number }) => void;
 }
 
 const BARGE_IN_BASE_THRESHOLD = 0.009;
@@ -381,6 +383,8 @@ export class VoiceSession {
   private speechChunks: Float32Array[] = [];
   private preRollChunks: Float32Array[] = [];
   private burstPitches: number[] = [];
+  /** Milliseconds of actual speech (above threshold) in the current utterance, excluding pre-roll and trailing silence. */
+  private voicedMs = 0;
   private silenceTimer: any = null;
   private isProcessingTranscribe = false;
   private callbacks: VoiceSessionCallbacks = {};
@@ -465,6 +469,7 @@ export class VoiceSession {
             this.speechChunks = [...this.preRollChunks];
             this.preRollChunks = [];
             this.burstPitches = [];
+            this.voicedMs = Math.max(0, now - speechStartedAt);
             this.callbacks.onBargeIn?.({ speechStartedAt, detectedAt: now });
             this.callbacks.onInterim?.('🎙️ Sun rahi hoon...');
           }
@@ -485,6 +490,7 @@ export class VoiceSession {
             this.speechChunks = [...this.preRollChunks, new Float32Array(inputData)];
             this.preRollChunks = [];
             this.burstPitches = [];
+            this.voicedMs = 0;
             this.callbacks.onInterim?.('🎙️ Sun rahi hoon...');
           } else {
             this.speechChunks.push(new Float32Array(inputData));
@@ -494,6 +500,8 @@ export class VoiceSession {
             clearTimeout(this.silenceTimer);
             this.silenceTimer = null;
           }
+
+          this.voicedMs += frameMs;
 
           // Sample pitch during speech burst (covers human voices from 70Hz to 450Hz)
           const pitch = autoCorrelate(pcmBuffer, sampleRate);
@@ -532,6 +540,8 @@ export class VoiceSession {
 
   private async dispatchTranscription(sampleRate: number, callbacks: VoiceSessionCallbacks, burstPitch?: number) {
     this.isProcessingTranscribe = true;
+    const spokenMs = Math.round(this.voicedMs);
+    this.voicedMs = 0;
     try {
       let total = 0;
       for (const c of this.speechChunks) total += c.length;
@@ -552,21 +562,30 @@ export class VoiceSession {
       const maxSamples = callbacks.maxClipMs ? Math.floor((callbacks.maxClipMs / 1000) * sampleRate) : 0;
       const clip = maxSamples > 0 && merged.length > maxSamples ? merged.subarray(0, maxSamples) : merged;
 
+      // Length of the actual speech, not of the padded clip: a one-word command is short even with pre-roll and trailing silence.
+      const clipMs = spokenMs;
       const wavBlob = encodeWav(clip, sampleRate);
       const reader = new FileReader();
       reader.onloadend = async () => {
         const dataUri = reader.result as string;
-        if (typeof window !== 'undefined' && window.companion?.transcribeAudio) {
-          callbacks.onInterim?.('✨ Samajh rahi hoon...');
-          const result = await window.companion.transcribeAudio(dataUri, 'audio/wav', callbacks.language, callbacks.sttHint);
-          callbacks.onTranscribeResult?.(result.rateLimited ? 'rate-limited' : result.ok || result.error === 'Could not transcribe speech.' ? 'ok' : 'error');
-          if (result.ok && result.text) {
-            callbacks.onFinal?.(result.text, { pitch: burstPitch });
-          } else {
-            callbacks.onInterim?.('');
+        try {
+          if (typeof window !== 'undefined' && window.companion?.transcribeAudio) {
+            callbacks.onInterim?.('✨ Samajh rahi hoon...');
+            const result = await window.companion.transcribeAudio(dataUri, 'audio/wav', callbacks.language, callbacks.sttHint);
+            callbacks.onTranscribeResult?.(result.rateLimited ? 'rate-limited' : result.ok || result.error === 'Could not transcribe speech.' ? 'ok' : 'error');
+            if (result.ok && result.text) {
+              callbacks.onFinal?.(result.text, { pitch: burstPitch });
+            } else {
+              callbacks.onInterim?.('');
+              callbacks.onUnclear?.({ clipMs });
+            }
           }
+        } catch {
+          callbacks.onInterim?.('');
+          callbacks.onUnclear?.({ clipMs });
+        } finally {
+          this.isProcessingTranscribe = false;
         }
-        this.isProcessingTranscribe = false;
       };
       reader.readAsDataURL(wavBlob);
     } catch {

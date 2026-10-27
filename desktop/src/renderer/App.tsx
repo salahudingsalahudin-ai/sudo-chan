@@ -8,9 +8,10 @@ import { AISettings } from './AISettings';
 import { AzureVoiceSettings } from './AzureVoiceSettings';
 import { useLipSync } from './lipsync';
 import { ConversationWindow, DEFAULT_WAKE_ALIASES, WakeGate, buildWakeHint, matchWakeWord } from '../shared/wake-word.ts';
-import { getMutedPreference, setMutedPreference, speak, stopSpeech } from './speech';
+import { clearInterruptedSpeech, getMutedPreference, hasInterruptedSpeech, resumeInterruptedSpeech, setMutedPreference, speak, stopSpeech } from './speech';
+import { isStopCommand, unclearAction } from '../shared/stop-intent.ts';
 import { DEFAULT_BARGE_IN_SENSITIVITY } from '../shared/barge-in.ts';
-import { stopSpeaking } from './tts-player';
+import { isSpeakingNow, stopSpeaking } from './tts-player';
 import { VoiceSession, type BargeInInfo, getVoiceProfile, isSpeakerMatch, recordVoiceSample } from './voice-engine';
 import type { VoiceProfile } from './voice-engine';
 
@@ -86,6 +87,27 @@ function handleBargeIn(info?: BargeInInfo) {
   console.info(`[barge-in] speech→detect ${speechToDetectMs}ms, detect→stopped ${detectToStoppedMs}ms`);
   (window.__bargeInLatency ??= []).push({ speechToDetectMs, detectToStoppedMs });
 }
+/** After a barge-in: a stop command stays stopped; anything else is a new request that replaces the old reply. */
+function handleStopCommand(text: string): boolean {
+  clearInterruptedSpeech();
+  if (!isStopCommand(text)) return false;
+  if (isSpeakingNow()) stopSpeaking('stop-button');
+  void api?.stopReply();
+  console.info(`[barge-in] stop command "${text.trim()}" -> stay stopped`);
+  return true;
+}
+/** The interruption could not be understood: carry on where she was, unless it was too short to be anything but a command. */
+function handleUnclear(info: { clipMs: number }) {
+  const action = unclearAction(info.clipMs, hasInterruptedSpeech());
+  if (action === 'none') return;
+  if (action === 'stay-stopped') {
+    clearInterruptedSpeech();
+    console.info(`[barge-in] unclear clip=${info.clipMs}ms -> stay stopped`);
+    return;
+  }
+  const resumed = resumeInterruptedSpeech();
+  console.info(`[barge-in] unclear clip=${info.clipMs}ms -> ${resumed ? 'resume' : 'stay stopped'}`);
+}
 function Overlay({ state }: { state: AppState }) {
   const [arriving, setArriving] = useState(false);
   const [cursorOffset, setCursorOffset] = useState<{ x: number; y: number } | undefined>(undefined);
@@ -149,6 +171,7 @@ function Overlay({ state }: { state: AppState }) {
       },
       getBargeInSensitivity: () => stateRef.current.settings.bargeInSensitivity ?? DEFAULT_BARGE_IN_SENSITIVITY,
       onBargeIn: handleBargeIn,
+      onUnclear: handleUnclear,
       onFinal: (text, features) => {
         if (!text.trim()) return;
         const currentLive = isOverlayVoiceActiveRef.current;
@@ -174,6 +197,7 @@ function Overlay({ state }: { state: AppState }) {
         } else {
           // In Live Talk: respond to whatever is spoken, and keep the wake window alive.
           wakeWindow.current.touch(performance.now());
+          if (handleStopCommand(text)) return;
           void api?.sendMessage(text.trim());
         }
       },
@@ -248,6 +272,13 @@ function Overlay({ state }: { state: AppState }) {
     {state.speech && !isOverlayVoiceActive && <div className="overlay-speech" role="status" data-interactive>{state.speech}</div>}
 
     <div className="overlay-grip" data-interactive title="Drag to make yourself at home" aria-label="Drag companion"><span/><span/><span/></div>
+    {shouldListen && !state.paused && (
+      <div
+        className={`overlay-glow ${lip.speaking ? 'is-speaking' : isOverlayVoiceActive ? 'is-live' : 'is-standby'}`}
+        style={{ ['--glow' as string]: String(Math.min(1, lip.speaking ? lip.level : overlayAudioLevel)) }}
+        aria-hidden="true"
+      />
+    )}
     <div
       className={`overlay-bot ${arriving ? 'bot-arriving' : ''}`}
       data-interactive
@@ -279,8 +310,15 @@ function Overlay({ state }: { state: AppState }) {
     <div className="overlay-dock" data-interactive>
       <button className="companion-pill" onClick={() => void api?.openChat()}>
         <span
-          className={`presence-dot ${state.paused ? 'is-paused' : isOverlayVoiceActive ? 'is-live' : shouldListen ? 'is-listening' : 'is-off'}`}
-          title={isOverlayVoiceActive ? 'Live Talk' : shouldListen ? 'Listening for your name' : 'Not listening'}
+          className={`presence-dot mic-toggle ${state.paused ? 'is-paused' : isOverlayVoiceActive ? 'is-live' : shouldListen ? 'is-listening' : 'is-off'}`}
+          role="button"
+          tabIndex={0}
+          title={isOverlayVoiceActive ? 'Live Talk (click to end)' : shouldListen ? 'Mic on, listening for your name (click to turn off)' : 'Mic off (click to turn on)'}
+          onClick={event => {
+            event.stopPropagation();
+            if (isOverlayVoiceActive) void api?.setVoiceActive(false);
+            else void api?.saveSettings({ ...state.settings, wakeWordEnabled: !wakeEnabled });
+          }}
         />
         {state.paused
           ? 'Taking a breath'
@@ -389,6 +427,7 @@ function Chat({ state }: { state: AppState }) {
         onFinal: text => {
           setUserSubtitle(text);
           setLiveTranscript('');
+          if (text.trim() && handleStopCommand(text)) return;
           if (text.trim() && !conversationBusyRef.current) {
             setBotSubtitle('');
             void api?.sendMessage(text.trim());
@@ -399,6 +438,7 @@ function Chat({ state }: { state: AppState }) {
         },
         getBargeInSensitivity: () => settingsRef.current.bargeInSensitivity ?? DEFAULT_BARGE_IN_SENSITIVITY,
         onBargeIn: handleBargeIn,
+        onUnclear: handleUnclear,
       });
     } else {
       session.stop();
@@ -1189,12 +1229,12 @@ function SettingsView({ state }: { state: AppState }) {
           <SettingRow title="Speech recognition speed" description="Fast answers sooner (about 0.5 s) but may mishear Urdu. Accurate understands Urdu and Roman Urdu better but takes 2-3 s.">
             <select
               className="wake-word-input"
-              value={settings.sttSpeed ?? 'accurate'}
+              value={settings.sttSpeed ?? 'fast'}
               onChange={e => setSettings({ ...settings, sttSpeed: e.target.value as 'accurate' | 'fast' })}
               aria-label="Speech recognition speed"
             >
+              <option value="fast">Fast (Whisper first, Gemini if unsure)</option>
               <option value="accurate">Accurate (Gemini first)</option>
-              <option value="fast">Fast (Whisper first)</option>
             </select>
           </SettingRow>
           <SettingRow
