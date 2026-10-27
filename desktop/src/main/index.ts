@@ -18,6 +18,9 @@ import { displayBackend } from '../shared/display-backend.js';
 import { migrateProviders, resolveProviderKey, shouldActivate, stripAllKeys, withProviderEntry } from './provider-keys.js';
 import type { KeyCodec, ProviderMap } from './provider-keys.js';
 import { SttRouter } from './stt.js';
+import { wavClipStats } from '../shared/clip-stats.js';
+import { BOT_ECHO_GUARD_MS } from '../shared/stt-retry.js';
+import type { ClipInfo } from '../shared/stt-retry.js';
 import type { SpeechEvent, StopReason } from '../shared/speech-events.js';
 import { installHiddenWindows, runSmoke, smokeApprovalTimeoutMs } from './smoke.js';
 import { overlayShape } from '../shared/overlay-shape.js';
@@ -111,6 +114,8 @@ let displayTimer: ReturnType<typeof setTimeout> | undefined;
 let resetInterval: ReturnType<typeof setInterval> | undefined;
 let state: AppState;
 let activeSpeech: { id: number; senderId: number } | null = null;
+/** When the bot's speech last started or stopped (ms); the STT retry never fires while the mic can still hear the bot. */
+let lastSpeechEventAt = 0;
 let pomodoroTimer: PomodoroTimer | undefined;
 let healthMonitor: SystemHealthMonitor | undefined;
 const localAI = new LocalAI();
@@ -352,6 +357,7 @@ function parseSpeechEvent(value: unknown): SpeechEvent | null {
 function applySpeechEvent(evt: SpeechEvent) {
   for (const win of BrowserWindow.getAllWindows()) if (!win.isDestroyed()) win.webContents.send(CHANNELS.speechBroadcast, evt);
   if (evt.type === 'level') return;
+  lastSpeechEventAt = Date.now();
   const speaking = evt.type === 'start';
   if (evt.type === 'stop') activeSpeech = null;
   if (Boolean(state.isSpeaking) !== speaking) { state.isSpeaking = speaking; publish(); }
@@ -1070,20 +1076,22 @@ function setupIPC() {
     // Gemini first (best on Urdu / Roman Urdu), then Groq Whisper, then OpenAI; keys come from per-provider storage.
     const sttStarted = Date.now();
     let clipLevel = '';
+    let clip: ClipInfo | undefined;
     try {
-      const pcm = Buffer.from(base64, 'base64');
-      const samples = Math.floor((pcm.length - 44) / 2);
-      let peak = 0, sum = 0;
-      for (let i = 0; i < samples; i++) { const v = Math.abs(pcm.readInt16LE(44 + i * 2)) / 32768; if (v > peak) peak = v; sum += v * v; }
-      clipLevel = samples > 0 ? ` sec=${(samples / 16000).toFixed(1)} peak=${peak.toFixed(2)} rms=${Math.sqrt(sum / samples).toFixed(3)}` : '';
+      const stats = wavClipStats(Buffer.from(base64, 'base64'));
+      if (stats) {
+        clipLevel = ` sec=${stats.seconds.toFixed(1)} peak=${stats.peak.toFixed(2)} rms=${stats.rms.toFixed(3)} voiced=${stats.voicedMs}`;
+        clip = { seconds: stats.seconds, rms: stats.rms, voicedMs: stats.voicedMs, botActive: activeSpeech !== null || Boolean(state.isSpeaking) || Date.now() - lastSpeechEventAt < BOT_ECHO_GUARD_MS };
+      }
     } catch { /* level logging is best effort */ }
     const result = await stt().transcribe({
       base64,
       mimeType: typeof mimeType === 'string' ? mimeType : 'audio/wav',
       language: typeof language === 'string' ? language : undefined,
       hint: sttHint || undefined,
+      clip,
     });
-    console.info(`[STT] ok=${result.ok} provider=${result.provider ?? '-'} ms=${Date.now() - sttStarted} audioKB=${Math.round(base64.length * 0.75 / 1024)}${clipLevel}${result.ok ? '' : ` err=${result.error}`}`);
+    console.info(`[STT] ok=${result.ok} provider=${result.provider ?? '-'}${result.retried ? ' retried=1' : ''} ms=${Date.now() - sttStarted} audioKB=${Math.round(base64.length * 0.75 / 1024)}${clipLevel}${result.ok ? '' : ` err=${result.error}`}`);
     // A single 0..1 number (never counts or keys) so the voice engine can ration speculative wake-mode clips; see QUOTA-SAVER.md.
     const quotaPressure = usage().sttQuotaPressure();
     if (result.ok) return { ok: true, text: result.text, scriptWarning: result.scriptWarning, quotaPressure };

@@ -1,3 +1,5 @@
+import { aliasForMatching } from './transcript-normalize.ts';
+
 export const DEFAULT_ASSISTANT_NAME = 'Sudo';
 export const DEFAULT_WAKE_ALIASES = ['Sudo', 'Sid', 'Sudo-chan', 'Suddo', 'Sit'];
 export const WAKE_WINDOW_MS = 30_000;
@@ -55,13 +57,9 @@ export function buildWakeHint(name: string | undefined, aliases: string[] | unde
   return `Short voice command. The speaker may call the assistant by name: ${wakeVocabulary(name, aliases).join(', ')}.`;
 }
 
-export function matchWakeWord(transcript: string, name: string | undefined, aliases: string[] | undefined): WakeMatch {
-  const words = transcript.trim().split(/\s+/).filter(Boolean);
-  const none: WakeMatch = { matched: false, rest: transcript.trim() };
-  if (!words.length) return none;
-  const vocabulary = wakeVocabulary(name, aliases).map(alias => ({ alias, key: normalizeWord(alias) }));
+/** Looks for a name among the first few words. Returns how many words the name used, or null. */
+function scanForName(words: string[], vocabulary: Array<{ alias: string; key: string }>): { alias: string; end: number } | null {
   const limit = Math.min(words.length, WAKE_MAX_LEADING_WORDS);
-
   for (let i = 0; i < limit; i++) {
     // Single word, and two words glued together ("sudo chan" -> "sudochan").
     const candidates: Array<{ text: string; length: number }> = [];
@@ -72,13 +70,26 @@ export function matchWakeWord(transcript: string, name: string | undefined, alia
       for (const { alias, key } of vocabulary) {
         // Glued word pairs are only accepted with at most one typo, otherwise "sudo what" would look like "sudochan".
         const tolerance = candidate.length === 2 ? Math.min(1, allowedDistance(key)) : allowedDistance(key);
-        if (editDistance(candidate.text, key) <= tolerance) {
-          return { matched: true, alias, rest: words.slice(i + candidate.length).join(' ').trim() };
-        }
+        if (editDistance(candidate.text, key) <= tolerance) return { alias, end: i + candidate.length };
       }
     }
   }
-  return none;
+  return null;
+}
+
+export function matchWakeWord(transcript: string, name: string | undefined, aliases: string[] | undefined): WakeMatch {
+  const words = transcript.trim().split(/\s+/).filter(Boolean);
+  const none: WakeMatch = { matched: false, rest: transcript.trim() };
+  if (!words.length) return none;
+  const vocabulary = wakeVocabulary(name, aliases).map(alias => ({ alias, key: normalizeWord(alias) }));
+  // The text as spoken first; then the same words with Urdu / Hindi script and Roman spelling variants of the names re-spelled
+  // ("सुडो" -> "sudo"). The alias pass keeps the word count, so `rest` is always cut from the ORIGINAL words.
+  let hit = scanForName(words, vocabulary);
+  if (!hit) {
+    const aliasWords = aliasForMatching(transcript.trim()).split(/\s+/).filter(Boolean);
+    if (aliasWords.length === words.length) hit = scanForName(aliasWords, vocabulary);
+  }
+  return hit ? { matched: true, alias: hit.alias, rest: words.slice(hit.end).join(' ').trim() } : none;
 }
 
 /** Cloud-call limiter: at most one clip per interval, with silent exponential back-off on failures. */

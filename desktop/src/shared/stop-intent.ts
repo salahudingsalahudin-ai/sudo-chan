@@ -4,6 +4,8 @@
  * contain a stop word ("ruko mujhe ek sawal poochna hai") are NOT stop commands.
  */
 
+import { aliasForMatching } from './transcript-normalize.ts';
+
 const MAX_WORDS = 4;
 
 // Spelling variants speech-to-text commonly produces, after collapsing repeated letters.
@@ -45,7 +47,7 @@ function isStopWord(word: string): boolean {
   return STOP_WORD_PATTERNS.some(pattern => pattern.test(word));
 }
 
-export function isStopCommand(text: string): boolean {
+function isStopCommandAs(text: string): boolean {
   if (!text || /\?|؟/.test(text)) return false;
   const words = normalize(text);
   if (!words.length || words.length > MAX_WORDS) return false;
@@ -63,6 +65,16 @@ export function isStopCommand(text: string): boolean {
     else if (!FILLERS.has(word)) return false;
   }
   return sawStop;
+}
+
+/**
+ * The text as spoken first, then with Urdu / Hindi script and Roman spelling variants re-spelled ("रुको" -> "ruko").
+ * The second pass can only add matches.
+ */
+export function isStopCommand(text: string): boolean {
+  if (isStopCommandAs(text)) return true;
+  const aliased = aliasForMatching(text ?? '');
+  return aliased !== text && isStopCommandAs(aliased);
 }
 
 /** An interruption this short is almost certainly a command word ("ruko") that the recogniser missed, not a real question. */

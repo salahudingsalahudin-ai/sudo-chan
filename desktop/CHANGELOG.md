@@ -16,6 +16,24 @@ Wake mode sent every speech clip to Groq Whisper (~5 requests a minute while idl
   "name, pause, request" are always sent. Known cost: "Sudo kaise ho" in one breath in a busy room may need a second try.
 - Tests: `tests/clip-gate.check.mjs` (19) + 1 case in `tests/voice-pipeline.check.mjs`.
 
+## urdu-stt (on top of mic-indicator): Urdu / Roman Urdu / Hindi-script transcripts now match, one-word commands survive
+
+About half of the quiet-mic Roman Urdu clips came back empty or in a script the wake / stop / intent logic did not match.
+Audit and reasoning in `URDU-STT.md`; recording test in `TEST-URDU.md`.
+
+- **Found in code:** one-word commands ("ruko", "bas", "Sudo." with punctuation) were rejected as invalid; "ruko ruko ruko ruko" was
+  rejected as repeated garbage; fast mode never asked Gemini after an empty Whisper answer.
+- **Transcript normaliser** (`src/shared/transcript-normalize.ts`): Urdu-script, Devanagari and Roman variants of wake names, stop
+  words, yes/no and screen/task verbs -> canonical Roman words, for matching only. `wake-word`, `stop-intent`, `intent` and the
+  phantom filter try the original text first, then the aliased text (can only add matches). Display / chat text is never rewritten.
+- **One retry for empty results of clear speech** (>= 1.2 s, above idle level, bot silent, Groq quota >= 25 %), different strategy
+  (other provider, or Whisper without prompt / forced language). Counted in the usage meter. Hallucination-filtered results are never retried.
+- **Borderline silence band:** a quiet 3+ word sentence is kept when Whisper's no_speech_prob is 0.6-0.85 and avg_logprob above -1.6;
+  the "Sudo-chan, Sido-chan," prompt leak is still rejected. Numbers are reasoned, not measured.
+- **Diagnostics:** `[STT] whisper model= lang= segs= nsp= logprob=`, `voiced=` in the clip line, `retried=1`.
+- **Self-check:** `scripts/stt-check.mjs` + `TEST-URDU.md` (20 phrases). Not run (needs real audio and keys).
+- Tests: `tests/transcript-normalize.check.mjs` (12), `tests/stt-retry.check.mjs` (15). `npm test` 442 pass; `npm run verify` 37/37 (under memory pressure the smoke step and one timing test can flake; a rerun was clean).
+
 ## mic-indicator (on top of fix-phantom-wake): the mic can no longer be switched off by accident
 
 Root cause of "the bot stopped hearing me": the mic dot lived inside the chat-opening pill, so a click meant for the pill turned the

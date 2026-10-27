@@ -6,6 +6,8 @@
  * the tool loop instead of a screenshot turn that has tools paused. Pure: no Electron, no disk, no network.
  */
 
+import { aliasForMatching } from './transcript-normalize.ts';
+
 export type Intent = 'screen' | 'task' | 'chat';
 
 export interface ClassifyOptions {
@@ -173,14 +175,14 @@ function romanIsPointing(tokens: string[]): boolean {
  * How task-like an utterance is: 'strong' = a specific command verb ("bana do", "khol do", "delete notes.txt"),
  * 'generic' = only "kar do / karo" without an object, 'none' = no command at all.
  */
-export function taskStrength(text: string): 'strong' | 'generic' | 'none' {
+function taskStrengthAs(text: string): 'strong' | 'generic' | 'none' {
   const norm = normalizeIntentText(text ?? '');
   if (!norm) return 'none';
   const cue = hasTaskCue(norm, norm.split(' '));
   return cue.strong ? 'strong' : cue.generic ? 'generic' : 'none';
 }
 
-export function classifyIntent(text: string, opts: ClassifyOptions = {}): Intent {
+function classifyIntentAs(text: string, opts: ClassifyOptions): Intent {
   const norm = normalizeIntentText(text ?? '');
   if (!norm) return 'chat';
   const tokens = norm.split(' ');
@@ -210,6 +212,23 @@ export function classifyIntent(text: string, opts: ClassifyOptions = {}): Intent
     if (wordCount <= 8 && WHAT_DO_YOU_SEE.some(p => p.test(norm))) return 'screen';
   }
   return 'chat';
+}
+
+/** Text as spoken first; then the same words with Urdu / Hindi script and Roman spelling variants re-spelled. Only adds matches. */
+export function taskStrength(text: string): 'strong' | 'generic' | 'none' {
+  const first = taskStrengthAs(text);
+  if (first === 'strong') return first;
+  const aliased = aliasForMatching(text ?? '');
+  if (aliased === text) return first;
+  const second = taskStrengthAs(aliased);
+  return second === 'strong' || first === 'none' ? second : first;
+}
+
+export function classifyIntent(text: string, opts: ClassifyOptions = {}): Intent {
+  const first = classifyIntentAs(text, opts);
+  if (first !== 'chat') return first;
+  const aliased = aliasForMatching(text ?? '');
+  return aliased === text ? first : classifyIntentAs(aliased, opts);
 }
 
 /**
