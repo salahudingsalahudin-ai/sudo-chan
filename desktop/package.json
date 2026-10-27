@@ -2,7 +2,7 @@
   "name": "sudo-chan-desktop",
   "version": "0.1.0",
   "private": true,
-  "description": "A quiet, friendly desktop companion. Phase 1 local preview.",
+  "description": "A quiet, friendly desktop AI companion. Early prototype.",
   "author": {
     "name": "Sid",
     "email": "noreply@sudo-chan.vercel.app"
@@ -36,6 +36,7 @@
     "files": [
       "dist/**/*",
       "package.json",
+      "assets/icon.png",
       "!**/*.map",
       "!**/*.test.*",
       "!**/*.check.mjs",
