@@ -41,7 +41,7 @@ const windowOf = kind => BrowserWindow.getAllWindows().find(w => !w.isDestroyed(
 const page = (win, body) => win.webContents.executeJavaScript(`(async () => { ${body} })()`, true);
 const shots = [];
 async function shot(win, name) {
-  await sleep(450); // let transitions settle
+  await sleep(750); // let transitions and smooth scrolling settle
   const image = await win.webContents.capturePage();
   const file = join(outDir, `${name}.png`);
   writeFileSync(file, image.toPNG());
@@ -82,9 +82,9 @@ const fakeMic = (win, mode) => page(win, `
   };
   return 'ok';`);
 
+async function drive() {
 try {
-  await import('../dist/main/index.js');
-  await app.whenReady();
+  console.log('[shots] app ready; userData =', app.getPath('userData'));
   const win = await until(() => { const w = windowOf('settings'); return w && w.isVisible() ? w : null; }, 60000, 'the wizard window (first run)');
   win.webContents.on('console-message', () => {});
   await until(async () => (await heading(win)).length > 0, 20000, 'the first wizard screen');
@@ -186,7 +186,7 @@ try {
 
   // finish for real: the window must close and the app must go back to normal
   await primary(win);
-  await sleep(800);
+  await sleep(2000);
   const state = await page(windowOf('overlay'), 'return await window.companion.getState();');
   console.log(`[shots] after finishing: setupActive=${state.setupActive} onboardingDone=${state.settings.onboardingDone} wakeWordEnabled=${state.settings.wakeWordEnabled} tools=${state.settings.toolsEnabled} screen=${state.settings.screenAssistEnabled} awareness=${state.settings.liveAwareness}`);
   console.log(`[shots] done: ${shots.length} screenshots in ${outDir}`);
@@ -202,3 +202,7 @@ try {
   cleanup();
   app.exit(1);
 }
+}
+// Electron emits 'ready' only after the entry module finished loading, so never `await app.whenReady()` here (it would wait forever).
+await import('../dist/main/index.js');
+app.whenReady().then(drive);

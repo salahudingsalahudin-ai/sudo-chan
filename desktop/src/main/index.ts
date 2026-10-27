@@ -849,7 +849,10 @@ async function saveSettings(patch: unknown, source: string = 'unknown') {
   if (candidate.launchAtLogin && !state.loginSupported) return { ok: false, error: 'Install the app before enabling launch at login.' };
   const previous = state.settings;
   const changed = candidate.shortcut !== previous.shortcut;
-  if ((changed || !state.shortcutAvailable) && !registerShortcut(candidate.shortcut)) return { ok: false, error: 'That shortcut is already in use or unavailable. Your previous shortcut is unchanged.' };
+  // Only choosing a NEW shortcut can fail the save. An unchanged shortcut that is still unavailable (Ctrl+Space is often taken by the input-method switcher on a
+  // fresh Linux install) must not stop other settings, such as the setup wizard's choices, from being saved: it is retried here and stays marked unavailable.
+  const registered = (changed || !state.shortcutAvailable) ? registerShortcut(candidate.shortcut) : true;
+  if (changed && !registered) return { ok: false, error: 'That shortcut is already in use or unavailable. Your previous shortcut is unchanged.' };
   try {
     if (candidate.launchAtLogin !== previous.launchAtLogin) setLaunchAtLogin(candidate.launchAtLogin);
     store.set('settings', candidate);
@@ -859,7 +862,7 @@ async function saveSettings(patch: unknown, source: string = 'unknown') {
     return { ok: false, error: 'Settings could not be saved. Please try again.' };
   }
   if (changed && state.shortcutAvailable) globalShortcut.unregister(previous.shortcut);
-  state.settings = candidate; state.shortcutAvailable = true;
+  state.settings = candidate; state.shortcutAvailable = registered;
   const micLine = micChangeLine(previous.wakeWordEnabled, candidate.wakeWordEnabled, source);
   if (micLine) console.info(micLine);
   // Turning tools off cancels anything waiting for approval or still running.

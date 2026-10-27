@@ -79,6 +79,7 @@ export function SetupWizard({ state }: { state: AppState }) {
   const c = copyFor(wiz.language);
   const keyInfo = useKeyStorageInfo();
   const headingRef = useRef<HTMLHeadingElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
   const [busy, setBusy] = useState(false);
 
   // ---- choices made on the way
@@ -122,7 +123,10 @@ export function SetupWizard({ state }: { state: AppState }) {
   }, [wiz]);
 
   // ---- focus and announcements
-  useEffect(() => { headingRef.current?.focus({ preventScroll: true }); }, [wiz.step]);
+  useEffect(() => {
+    scrollRef.current?.scrollTo({ top: 0, behavior: 'instant' });
+    headingRef.current?.focus({ preventScroll: true });
+  }, [wiz.step]);
   // First Esc inside a text field clears it; Esc anywhere else is handled by the window (App): it closes setup and records it.
   useEffect(() => {
     const onKey = (event: globalThis.KeyboardEvent) => {
@@ -275,7 +279,7 @@ export function SetupWizard({ state }: { state: AppState }) {
       {wiz.step !== 'done' && <button type="button" className="wiz-link wiz-skip-all" onClick={dismiss}>{c.common.skipAll}</button>}
     </header>
 
-    <div className="wiz-scroll soft-scroll">
+    <div className="wiz-scroll soft-scroll" ref={scrollRef}>
       <section className="wiz-stage" key={wiz.step}>
         <Mascot step={wiz.step} state={state} flags={{ micBlocked, micListening: micStatus === 'testing' || (micOk && micLevel > 0.02), liveOn }}/>
         <p className="wiz-eyebrow" aria-hidden="true">{stepLine}</p>
@@ -291,15 +295,15 @@ export function SetupWizard({ state }: { state: AppState }) {
     </div>
 
     <footer className="wiz-footer">
-      <div className="wiz-footer-left">
-        {wiz.step !== 'welcome' && <button type="button" className="wiz-ghost" onClick={goBack}>{c.common.back}</button>}
-      </div>
       <ol className="wiz-dots" aria-label={c.common.progress}>
         {ONBOARDING_STEPS.map(step => <li key={step} className={`${stepIndex(step) < progress.index ? 'is-past' : ''} ${step === wiz.step ? 'is-current' : ''} ${wiz.skipped.includes(step) ? 'is-skipped' : ''}`} aria-current={step === wiz.step ? 'step' : undefined}><span className="sr-only">{c.common.stepNames[step]}</span></li>)}
       </ol>
-      <div className="wiz-footer-right">
-        {canSkip && <button type="button" className="wiz-link" onClick={skipStep}>{c.common.skipStep}</button>}
-        <button type="button" className="primary-button wiz-primary" disabled={primary.disabled} onClick={primary.run}>{primary.label}</button>
+      <div className="wiz-actions">
+        {wiz.step !== 'welcome' ? <button type="button" className="wiz-ghost" onClick={goBack}>{c.common.back}</button> : <span/>}
+        <div className="wiz-actions-right">
+          {canSkip && <button type="button" className="wiz-link" onClick={skipStep}>{c.common.skipStep}</button>}
+          <button type="button" className="primary-button wiz-primary" disabled={primary.disabled} onClick={primary.run}>{primary.label}</button>
+        </div>
       </div>
     </footer>
     <p className="sr-only" role="status" aria-live="polite">{stepLine}</p>
@@ -330,8 +334,8 @@ function MicStep({ c, status, level, listen, setListen, platform }: { c: Copy; s
   return <>
     <p className="wiz-lead">{c.mic.body}</p>
     <div className={`wiz-panel wiz-meter-panel ${ok ? 'is-ok' : ''} ${blocked ? 'is-bad' : ''}`}>
-      <LevelMeter level={level} label={c.mic.meter}/>
-      <p className="wiz-status" role={blocked ? 'alert' : 'status'}>
+      {!blocked && <LevelMeter level={level} label={c.mic.meter}/>}
+      <p className={`wiz-status ${blocked ? 'is-flush' : ''}`} role={blocked ? 'alert' : 'status'}>
         {status === 'idle' && <span className="wiz-muted">{c.mic.meter}</span>}
         {status === 'testing' && <span>{c.mic.testing}</span>}
         {status === 'heard' && <span className="wiz-good"><Check size={16}/> {c.mic.heard}</span>}
@@ -356,7 +360,7 @@ function NameStep({ c, settings, open, setOpen, taught, setTaught, heard, setHea
     <p className="wiz-name-words" aria-hidden="true">{c.name.say}</p>
     <div className="wiz-panel">
       <div className="wiz-panel-head">
-        <div><h3>{c.name.teachTitle}</h3><p>{c.name.teachBody}</p></div>
+        {!open && <div><h3>{c.name.teachTitle}</h3><p>{c.name.teachBody}</p></div>}
         <button type="button" className="soft-button" aria-expanded={open} onClick={() => setOpen(!open)}>{open ? c.name.teachClose : c.name.teachOpen}</button>
       </div>
       {open && <div className="wiz-teach"><LocalWakeSettings compact settings={local} setSettings={setLocal} onSelfTest={count => setHeard(count)} onProfileChange={setTaught}/></div>}
@@ -371,6 +375,15 @@ function BrainStep({ c, card, setCard, provider, setProvider, keyText, setKeyTex
 }) {
   const refs = useRef<Partial<Record<Card, HTMLDivElement | null>>>({});
   const order: Card[] = ['key', 'offline'];
+  const chosenOnce = useRef(false);
+  // Bring the chosen card, and then its test result, into view (this screen is the tallest one).
+  useEffect(() => {
+    if (!chosenOnce.current) { chosenOnce.current = true; return; }
+    refs.current[card]?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+  }, [card]);
+  useEffect(() => {
+    if (keyState.kind === 'ok' || keyState.kind === 'error' || ollama.kind === 'found' || ollama.kind === 'none') document.querySelector('.wiz-card.is-selected .wiz-result')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }, [keyState.kind, ollama.kind]);
   const move = (event: KeyboardEvent, from: Card) => {
     const forward = event.key === 'ArrowDown' || event.key === 'ArrowRight';
     const backward = event.key === 'ArrowUp' || event.key === 'ArrowLeft';
