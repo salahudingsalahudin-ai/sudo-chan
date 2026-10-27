@@ -11,7 +11,7 @@ import { useLipSync } from './lipsync';
 import { escapeAction, panelPlan } from '../shared/overlay-panels.ts';
 import { ConversationWindow, DEFAULT_WAKE_ALIASES, WakeGate, buildWakeHint, matchWakeWord } from '../shared/wake-word.ts';
 import { ClipGate, WAKE_TRIM_MS, formatGateLine } from '../shared/clip-gate.ts';
-import { LocalWakeController } from '../shared/local-wake/runtime.ts';
+import { LocalWakeController, decideWakeClip } from '../shared/local-wake/runtime.ts';
 import { parseProfile } from '../shared/local-wake/enrollment.ts';
 import { LocalWakeSettings } from './LocalWakeSettings';
 import { approvalHeadline, approvalSecondsLeft, approvalSpokenLine, mergeApprovals, reduceApprovals } from '../shared/approval-ui.ts';
@@ -325,23 +325,7 @@ function Overlay({ state }: { state: AppState }) {
       sttHint: isOverlayVoiceActive ? undefined : buildWakeHint(stateRef.current.settings.customWakeWord, stateRef.current.settings.wakeAliases),
       // On-device check: only in wake mode (Live Talk and the conversation window are never gated), never for barge-in clips.
       localWake: (clip, rate) => (isOverlayVoiceActiveRef.current ? Promise.resolve(undefined) : localWake.current.evaluate(clip, rate)),
-      decideClip: (features, local) => {
-        const now = performance.now();
-        const live = isOverlayVoiceActiveRef.current;
-        const decision = clipGate.current.decide(features, { now, live });
-        if (live) return { send: true };
-        // The local verdict (if any) and the quota-saver's answer decide together; 'off' or 'not enrolled' leaves the gate alone.
-        const combined = localWake.current.decide(local, decision, clipGate.current.quotaPressure);
-        if (combined.refundGate) clipGate.current.refund(decision);
-        if (!combined.send) return { send: false };
-        // The old 2 s minimum interval and error back-off still apply in wake mode; a refused clip gives its token back.
-        if (!wakeGate.current.allow(now)) {
-          if (decision.send && !combined.refundGate) clipGate.current.refund(decision);
-          localWake.current.unsend(combined);
-          return { send: false };
-        }
-        return { send: true, trimMs: decision.trimMs ?? WAKE_TRIM_MS };
-      },
+      decideClip: (features, local) => decideWakeClip({ features, local, live: isOverlayVoiceActiveRef.current, now: performance.now(), clipGate: clipGate.current, wakeGate: wakeGate.current, controller: localWake.current }),
       onTranscribeResult: (outcome, info) => {
         if (!isOverlayVoiceActiveRef.current) wakeGate.current.report(performance.now(), outcome);
         if (info?.quotaPressure !== undefined) clipGate.current.setQuotaPressure(info.quotaPressure);

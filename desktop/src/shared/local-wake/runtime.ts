@@ -1,6 +1,9 @@
 // Runtime glue of the local wake word: runs one evaluation without hogging the main thread, limits false accepts,
 // combines the local verdict with the existing quota-saver gate, and counts (never records) what happened.
 // Pure: time and yielding are injected, so tests drive it with fake clocks and fake detectors.
+import { WAKE_TRIM_MS } from '../clip-gate.ts';
+import type { ClipFeatures, ClipGate } from '../clip-gate.ts';
+import type { WakeGate } from '../wake-word.ts';
 import { createDetector } from './registry.ts';
 import { DEFAULT_LOCAL_WAKE_SENSITIVITY } from './types.ts';
 import type { LocalWakeDetector, LocalWakeMode, LocalWakeProfile, LocalWakeVerdict } from './types.ts';
@@ -240,4 +243,36 @@ export class LocalWakeController {
     const line = this.stats.flush(now, this.modeValue, 60_000, force);
     return line ? formatWakeLocalLine(line) : undefined;
   }
+}
+
+// ------------------------------------------------------------------------------------------ the whole wake-mode clip decision
+export interface WakeClipInput {
+  features: ClipFeatures;
+  /** Verdict from `controller.evaluate`, or undefined (off, not enrolled, Live Talk, barge-in). */
+  local: LocalWakeVerdict | undefined;
+  live: boolean;
+  /** performance.now() */
+  now: number;
+  clipGate: ClipGate;
+  wakeGate: WakeGate;
+  controller: LocalWakeController;
+}
+
+/**
+ * The one place that decides whether a finished clip leaves the machine: Live Talk always sends; otherwise the quota-saver gate and the
+ * on-device check decide together, then the old 2 s minimum interval / error back-off still applies. Whoever refuses gets its token back.
+ */
+export function decideWakeClip(input: WakeClipInput): { send: boolean; trimMs?: number } {
+  const { features, local, live, now, clipGate, wakeGate, controller } = input;
+  const decision = clipGate.decide(features, { now, live });
+  if (live) return { send: true };
+  const combined = controller.decide(local, decision, clipGate.quotaPressure);
+  if (combined.refundGate) clipGate.refund(decision);
+  if (!combined.send) return { send: false };
+  if (!wakeGate.allow(now)) {
+    if (decision.send && !combined.refundGate) clipGate.refund(decision);
+    controller.unsend(combined);
+    return { send: false };
+  }
+  return { send: true, trimMs: decision.trimMs ?? WAKE_TRIM_MS };
 }

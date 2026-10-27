@@ -1,6 +1,6 @@
 // Enrolment: checks one recording of the name, turns 5-8 good ones into calibrated templates, and (de)serialises the profile.
 // Only derived feature vectors leave this module. The raw audio stays in the caller's memory and is dropped after one call.
-import { FRAME_MS, extractFeatures, findSpeechSpan, frameEnergiesDb, levelGain, resampleTo16k } from './dsp.ts';
+import { FRAME_MS, extractFeatures, findSpeechSpan, frameEnergiesDb, levelGain, noiseFloorDb, resampleTo16k } from './dsp.ts';
 import type { FeatureSeq } from './dsp.ts';
 import { MAX_TEMPLATES, MAX_TEMPLATE_FRAMES, MIN_TEMPLATES, TEMPLATE_ENGINE_ID, calibrate, parseTemplateData, toStored } from './template-engine.ts';
 import type { LabelProfile, TemplateEngineData } from './template-engine.ts';
@@ -23,6 +23,8 @@ export const MAX_WORD_MS = 1600;
 /** Loudest speech frame, in dB of mean square: -42 is an RMS of about 0.008 (the voice engine's own start threshold is 0.009). */
 export const MIN_PEAK_DB = -42;
 export const MIN_ENROLL_SNR_DB = 12;
+/** A floor louder than this (RMS about 0.01) leaves no room for the word. */
+export const MAX_FLOOR_DB = -40;
 export const CLIP_LEVEL = 0.985;
 export const CLIP_FRACTION = 0.004;
 /** Context frames kept around the word so deltas at the word's edges look like they will in a real clip. */
@@ -49,7 +51,11 @@ export function checkEnrollmentSample(samples: Float32Array, sampleRate: number)
   const energies = frameEnergiesDb(pcm);
   const span = findSpeechSpan(energies, { pick: 'longest', maxGapFrames: 15 });
   const issues: SampleIssue[] = [];
-  if (!span) return { ...empty, issues: clipped / samples.length > CLIP_FRACTION ? ['clipped'] : ['no-speech'] };
+  if (!span) {
+    // No clear peak over the floor: either nothing was said, or the room is so loud the word drowned in it.
+    const issue: SampleIssue = clipped / samples.length > CLIP_FRACTION ? 'clipped' : noiseFloorDb(energies) > MAX_FLOOR_DB ? 'noisy' : 'no-speech';
+    return { ...empty, issues: [issue] };
+  }
   const wordMs = Math.round((span.end - span.start) * FRAME_MS);
   if (span.peakDb < MIN_PEAK_DB) issues.push('too-quiet');
   if (clipped / samples.length > CLIP_FRACTION) issues.push('clipped');
@@ -71,31 +77,48 @@ export interface LabelBuild {
   label?: LabelProfile;
   /** Indices (into the input) of samples dropped because they were unlike the others. */
   dropped: number[];
-  /** Why it failed: too few samples or an inconsistent set. */
-  error?: 'too-few' | 'inconsistent';
+  /**
+   * 'too-few': fewer than five takes. 'odd-sample': one take sounds unlike the rest and there are only five, so ask for one or two more
+   * (the odd one is then dropped). 'inconsistent': the takes do not sound like one word.
+   */
+  error?: 'too-few' | 'odd-sample' | 'inconsistent';
   looMean?: number;
   threshold?: number;
 }
 
 /** Highest relative spread of leave-one-out scores we accept; above it the samples do not look like one word. */
-export const MAX_LOO_SPREAD = 0.6;
+export const MAX_LOO_SPREAD = 0.2;
+/** A take whose leave-one-out score is this many times the median is "odd" (a cough, a different word, a trailing sentence). */
+export const ODD_FACTOR = 1.4;
 
-/** Calibrates a set of 5-8 accepted samples. One clear outlier is dropped (if five remain); a set that stays inconsistent is refused. */
+function median(values: number[]): number {
+  const sorted = [...values].sort((x, y) => x - y);
+  const mid = sorted.length >> 1;
+  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+}
+
+/** Calibrates a set of 5-8 accepted samples. One odd take is dropped (if five remain); a set that stays inconsistent is refused. */
 export function buildLabel(samples: FeatureSeq[]): LabelBuild {
   const dropped: number[] = [];
   let kept = samples.slice(0, MAX_TEMPLATES).map((seq, index) => ({ seq, index }));
   if (kept.length < MIN_TEMPLATES) return { ok: false, dropped, error: 'too-few' };
   for (;;) {
     const cal = calibrate(kept.map(k => k.seq));
-    const spread = cal.looSd / Math.max(1e-9, cal.looMean);
-    const worst = cal.looScores.reduce((w, s, i) => (s > cal.looScores[w] ? i : w), 0);
-    const outlier = cal.looScores[worst] > cal.looMean + 1.5 * Math.max(cal.looSd, 1e-9) && spread > 0.25;
-    if (spread <= MAX_LOO_SPREAD && !(outlier && kept.length > MIN_TEMPLATES)) {
-      return { ok: true, dropped, label: { templates: kept.map(k => toStored(k.seq)), threshold: cal.threshold, looMean: cal.looMean, looSd: cal.looSd }, looMean: cal.looMean, threshold: cal.threshold };
+    const worst = cal.looScores.reduce((w, score, i) => (score > cal.looScores[w] ? i : w), 0);
+    const others = cal.looScores.filter((_, i) => i !== worst);
+    const odd = cal.looScores[worst] > ODD_FACTOR * median(others);
+    if (odd) {
+      if (kept.length <= MIN_TEMPLATES) {
+        const typical = median(cal.looScores);
+        const oddCount = cal.looScores.filter(score => score > ODD_FACTOR * typical).length;
+        return { ok: false, dropped, error: oddCount >= 2 ? 'inconsistent' : 'odd-sample', looMean: cal.looMean };
+      }
+      dropped.push(kept[worst].index);
+      kept = kept.filter((_, i) => i !== worst);
+      continue;
     }
-    if (kept.length <= MIN_TEMPLATES) return { ok: false, dropped, error: 'inconsistent', looMean: cal.looMean };
-    dropped.push(kept[worst].index);
-    kept = kept.filter((_, i) => i !== worst);
+    if (cal.looSd / Math.max(1e-9, cal.looMean) > MAX_LOO_SPREAD) return { ok: false, dropped, error: 'inconsistent', looMean: cal.looMean };
+    return { ok: true, dropped, label: { templates: kept.map(k => toStored(k.seq)), threshold: cal.threshold, looMean: cal.looMean, looSd: cal.looSd }, looMean: cal.looMean, threshold: cal.threshold };
   }
 }
 

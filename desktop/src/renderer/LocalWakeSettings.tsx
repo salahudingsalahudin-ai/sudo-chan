@@ -87,7 +87,9 @@ export function LocalWakeSettings({ settings, setSettings }: { settings: Setting
     if (phase.kind !== 'enroll' || !session || !api) return;
     const built = session.finish();
     if (!built.ok || !built.label) {
-      say(built.error === 'inconsistent' ? 'The samples did not sound alike enough. Please start over and say it the same way each time.' : 'I need a few more samples first.', true);
+      say(built.error === 'inconsistent' ? 'The samples did not sound alike enough. Please start over and say it the same way each time.'
+        : built.error === 'odd-sample' ? 'One take sounded different from the others. Please record one or two more and press Done again.'
+        : 'I need a few more samples first.', true);
       if (built.error === 'inconsistent') { setSession(new EnrollmentSession()); setCount(0); }
       return;
     }

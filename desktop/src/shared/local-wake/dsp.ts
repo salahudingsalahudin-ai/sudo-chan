@@ -215,6 +215,11 @@ function percentile(values: Float32Array, p: number): number {
   return sorted[Math.min(sorted.length - 1, Math.max(0, Math.floor(p * (sorted.length - 1))))];
 }
 
+/** Level of the quietest tenth of the frames (dB): the room's noise floor. -120 for an empty signal. */
+export function noiseFloorDb(energyDb: Float32Array): number {
+  return energyDb.length ? percentile(energyDb, 0.1) : -120;
+}
+
 /**
  * Finds the speech in a clip from frame energies alone. The threshold sits well above the noise floor and well below the peak, so
  * quiet voices and noisy rooms both work; a clip whose loudest part is not at least 10 dB above its floor has no speech.

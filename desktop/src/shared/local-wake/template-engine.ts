@@ -84,7 +84,7 @@ export function calibrate(seqs: FeatureSeq[]): Calibration {
   const looMean = looScores.reduce((a, b) => a + b, 0) / looScores.length;
   const variance = looScores.reduce((a, b) => a + (b - looMean) * (b - looMean), 0) / looScores.length;
   const looSd = Math.sqrt(variance);
-  const threshold = looMean + 2 * Math.max(looSd, 0.15 * looMean);
+  const threshold = looMean + 2 * Math.max(looSd, 0.2 * looMean);
   return { looScores, looMean, looSd, threshold };
 }
 
