@@ -228,7 +228,7 @@ const tick = () => new Promise(r => setTimeout(r, 25));
 test('tools: definitions are valid OpenAI function schemas', () => {
   const { runtime } = makeRuntime();
   const names = runtime.definitions.map(d => d.function.name).sort();
-  assert.deepEqual(names, ['append_file', 'get_system_info', 'list_dir', 'open_app', 'open_url', 'read_file', 'run_command', 'search_files', 'write_file']);
+  assert.deepEqual(names, ['append_file', 'edit_file', 'get_system_info', 'list_dir', 'open_app', 'open_url', 'read_file', 'run_command', 'search_files', 'write_file']);
   for (const d of runtime.definitions) {
     assert.equal(d.type, 'function');
     assert.equal(d.function.parameters.type, 'object');
@@ -435,7 +435,7 @@ test('agent loop: model calls a tool, result is fed back, final answer is delive
   const result = await runToolLoop(options);
   assert.deepEqual(texts, ['Your notes say hello world.']);
   assert.equal(result.toolCalls, 1);
-  assert.equal(bodies[0].tools.length, 9);
+  assert.equal(bodies[0].tools.length, 10);
   assert.equal(bodies[0].stream, false);
   const secondMessages = bodies[1].messages;
   assert.equal(secondMessages.at(-2).role, 'assistant');

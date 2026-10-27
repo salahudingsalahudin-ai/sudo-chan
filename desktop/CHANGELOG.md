@@ -1,5 +1,20 @@
 # Changelog (desktop)
 
+## task-agent (on top of integrate3): "mera kaam lena" on files
+
+- **New tool `edit_file`** (path, old_text, new_text): exact, unique match required (0 or several matches give the model a
+  clear instruction), same path policy and approval click as `write_file`, card shows the changed lines as `- old` / `+ new`,
+  re-checked just before writing, atomic temp+rename, file mode kept, audit entry without contents.
+- **`read_file` paging:** optional `start_line` / `end_line`, default page ~6 KB (was 20 KB) with a
+  "call again with start_line=N" footer; small files unchanged. Keeps tool turns inside Groq's 7000 tokens/minute.
+- **`max_tokens` for write turns:** 1900 on Groq (3000 elsewhere) only when the message asks for a change or a file was just
+  read; everything else stays 950 / 1500. 429 fallback unchanged.
+- **Tool trace in history:** `ChatSession` keeps `[tools: read ~/a.py (lines 1-80); edited ~/a.py]` (paths and verbs only, max 300
+  chars) beside the assistant reply so "ab isko run karo" has context. Not a bubble, not spoken, not in the window state.
+- `TOOLS_PROMPT`: prefer `edit_file`, `write_file` only for new files, page big reads, explains the trace line.
+- New: `src/main/tools/trace.ts`. Tests: `tests/edit-file.check.mjs` (14 tests); one older test now expects 10 tools.
+  Docs: `TOOLS.md` ("Doing a task on your files").
+
 ## usage-meter (on top of integrate2)
 
 - **Realistic voice for every reply.** New setting `ttsQuality` (default `best`): Gemini voice is tried for every reply,
