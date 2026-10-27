@@ -187,7 +187,9 @@ export class SttRouter {
         if (this.blockedByRateLimit[route.id]) sawRateLimit = true;
         continue;
       }
+      const routeStarted = this.deps.now();
       const result = await route.run(req, key);
+      console.info(`[STT] route=${route.id} status=${result.status} chars=${result.text.length} ms=${this.deps.now() - routeStarted}`);
       if (result.status === 429) {
         this.blockedUntil[route.id] = this.deps.now() + 60_000;
         this.blockedByRateLimit[route.id] = true;

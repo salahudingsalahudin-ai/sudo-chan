@@ -756,13 +756,21 @@ function setupIPC() {
     const sttHint = typeof hint === 'string' ? hint.replace(/[^\p{L}\p{N}\s,.'-]/gu, ' ').slice(0, 300).trim() : '';
     // Gemini first (best on Urdu / Roman Urdu), then Groq Whisper, then OpenAI; keys come from per-provider storage.
     const sttStarted = Date.now();
+    let clipLevel = '';
+    try {
+      const pcm = Buffer.from(base64, 'base64');
+      const samples = Math.floor((pcm.length - 44) / 2);
+      let peak = 0, sum = 0;
+      for (let i = 0; i < samples; i++) { const v = Math.abs(pcm.readInt16LE(44 + i * 2)) / 32768; if (v > peak) peak = v; sum += v * v; }
+      clipLevel = samples > 0 ? ` sec=${(samples / 16000).toFixed(1)} peak=${peak.toFixed(2)} rms=${Math.sqrt(sum / samples).toFixed(3)}` : '';
+    } catch { /* level logging is best effort */ }
     const result = await stt().transcribe({
       base64,
       mimeType: typeof mimeType === 'string' ? mimeType : 'audio/wav',
       language: typeof language === 'string' ? language : undefined,
       hint: sttHint || undefined,
     });
-    console.info(`[STT] ok=${result.ok} provider=${result.provider ?? '-'} ms=${Date.now() - sttStarted} audioKB=${Math.round(base64.length * 0.75 / 1024)}${result.ok ? '' : ` err=${result.error}`}`);
+    console.info(`[STT] ok=${result.ok} provider=${result.provider ?? '-'} ms=${Date.now() - sttStarted} audioKB=${Math.round(base64.length * 0.75 / 1024)}${clipLevel}${result.ok ? '' : ` err=${result.error}`}`);
     if (result.ok) return { ok: true, text: result.text, scriptWarning: result.scriptWarning };
     return { ok: false, error: result.error ?? 'Could not transcribe speech.', fallbackToBrowser: true, rateLimited: Boolean(result.rateLimited) };
   });
