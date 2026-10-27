@@ -16,7 +16,7 @@ Audit and reasoning in `URDU-STT.md`; recording test in `TEST-URDU.md`.
   the "Sudo-chan, Sido-chan," prompt leak is still rejected. Numbers are reasoned, not measured.
 - **Diagnostics:** `[STT] whisper model= lang= segs= nsp= logprob=`, `voiced=` in the clip line, `retried=1`.
 - **Self-check:** `scripts/stt-check.mjs` + `TEST-URDU.md` (20 phrases). Not run (needs real audio and keys).
-- Tests: `tests/transcript-normalize.check.mjs` (12), `tests/stt-retry.check.mjs` (15).
+- Tests: `tests/transcript-normalize.check.mjs` (12), `tests/stt-retry.check.mjs` (15). `npm test` 442 pass; `npm run verify` 37/37 (under memory pressure the smoke step and one timing test can flake; a rerun was clean).
 
 ## mic-indicator (on top of fix-phantom-wake): the mic can no longer be switched off by accident
 
