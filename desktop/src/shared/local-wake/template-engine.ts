@@ -99,14 +99,14 @@ interface PreparedLabel {
 
 class TemplateJob implements LocalWakeJob {
   private phase: Phase = 'resample';
-  private input: Float32Array;
+  private input: Float32Array<ArrayBufferLike>;
   private rate: number;
-  private out: Float32Array;
+  private out: Float32Array<ArrayBufferLike>;
   private resampled = 0;
-  private energies = new Float32Array(0);
+  private energies: Float32Array<ArrayBufferLike> = new Float32Array(0);
   private winStart = 0;
   private winEnd = 0;
-  private ceps = new Float32Array(0);
+  private ceps: Float32Array<ArrayBufferLike> = new Float32Array(0);
   private featuresDone = 0;
   private gain = 1;
   private test: FeatureSeq = { frames: 0, data: new Float32Array(0) };
@@ -140,14 +140,18 @@ class TemplateJob implements LocalWakeJob {
   step(budgetMs: number, now: () => number): boolean {
     const deadline = now() + budgetMs;
     try {
-      while (this.phase !== 'done') {
+      while (!this.isDone()) {
         this.work();
-        if (this.phase !== 'done' && now() >= deadline) return false;
+        if (!this.isDone() && now() >= deadline) return false;
       }
     } catch {
       this.finish('error');
     }
     return true;
+  }
+
+  private isDone(): boolean {
+    return this.phase === 'done';
   }
 
   private work() {

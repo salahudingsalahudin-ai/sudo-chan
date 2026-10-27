@@ -76,5 +76,8 @@ const api: DesktopAPI = {
   getToolApprovals: () => ipcRenderer.invoke(CHANNELS.toolApprovals),
   respondToolApproval: (id, decision) => ipcRenderer.invoke(CHANNELS.toolApprovalReply, { id, decision }),
   stopAllTools: () => ipcRenderer.invoke(CHANNELS.toolsStopAll),
+  getLocalWakeProfile: () => ipcRenderer.invoke(CHANNELS.localWakeGet),
+  saveLocalWakeProfile: profile => ipcRenderer.invoke(CHANNELS.localWakeSave, profile),
+  deleteLocalWakeProfile: () => ipcRenderer.invoke(CHANNELS.localWakeDelete),
 };
 contextBridge.exposeInMainWorld('companion', api);

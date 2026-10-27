@@ -141,3 +141,64 @@ export function summariseSelfTest(verdicts: Pick<LocalWakeVerdict, 'candidate'>[
     : `Heard ${heard}/${total}. Good enough to try Assist mode; if it misses often, raise sensitivity or record the samples again.`;
   return { heard, total, message };
 }
+
+// ------------------------------------------------------------------------------------------ enrolment session
+export const WORD_LABELS = ['sudo', 'sid'] as const;
+export type WordLabel = typeof WORD_LABELS[number];
+/** Recommended number of takes; 5 is the minimum, 8 the maximum. */
+export const TARGET_SAMPLES = 6;
+
+export interface AddResult {
+  accepted: boolean;
+  /** One calm sentence when the take was refused. */
+  advice?: string;
+  check: SampleCheck;
+}
+
+/** Collects accepted takes of one word. Holds feature vectors only: the caller drops the audio right after `add`. */
+export class EnrollmentSession {
+  private seqs: FeatureSeq[] = [];
+
+  get count(): number {
+    return this.seqs.length;
+  }
+
+  get canFinish(): boolean {
+    return this.seqs.length >= MIN_TEMPLATES;
+  }
+
+  get full(): boolean {
+    return this.seqs.length >= MAX_TEMPLATES;
+  }
+
+  add(samples: Float32Array, sampleRate: number): AddResult {
+    const check = checkEnrollmentSample(samples, sampleRate);
+    if (this.full) return { accepted: false, advice: 'That is enough samples. Press Done.', check };
+    if (!check.ok || !check.features) return { accepted: false, advice: SAMPLE_ADVICE[check.issues[0] ?? 'no-speech'], check };
+    this.seqs.push(check.features);
+    return { accepted: true, check };
+  }
+
+  /** Discards the newest take (the user said "that one was wrong"). */
+  undo() {
+    this.seqs.pop();
+  }
+
+  finish(): LabelBuild {
+    return buildLabel(this.seqs);
+  }
+}
+
+/** The profile with `label` replaced by `built` (other enrolled words are kept). */
+export function withLabel(existing: LocalWakeProfile | undefined, label: string, built: LabelProfile, now: number): LocalWakeProfile {
+  const old = existing && existing.engine === TEMPLATE_ENGINE_ID ? parseTemplateData(existing.data) : undefined;
+  return makeProfile({ ...(old?.labels ?? {}), [label]: built }, now);
+}
+
+/** The profile without `label`, or undefined when no word is left. */
+export function withoutLabel(existing: LocalWakeProfile | undefined, label: string, now: number): LocalWakeProfile | undefined {
+  const old = existing && existing.engine === TEMPLATE_ENGINE_ID ? parseTemplateData(existing.data) : undefined;
+  if (!old) return undefined;
+  const { [label]: _removed, ...rest } = old.labels;
+  return Object.keys(rest).length ? makeProfile(rest, now) : undefined;
+}

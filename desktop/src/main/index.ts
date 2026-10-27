@@ -31,6 +31,7 @@ import { hardenKeyFiles } from './key-files.js';
 import { LocalAI, normalizeCloudModel } from './local-ai.js';
 import { UsageTracker } from '../shared/usage.js';
 import { UsageFile } from './usage-store.js';
+import { LocalWakeFile } from './local-wake-store.ts';
 import { ChatSession } from './chat-session.js';
 import { ApprovalManager } from './tools/approval.js';
 import { routeApprovalClose, routeApprovalRequest, type ApprovalPort } from '../shared/approval-ui.js';
@@ -130,6 +131,12 @@ function usage(): UsageTracker {
     usageMeter = tracker;
   }
   return usageMeter;
+}
+/** On-device wake profile (userData/local-wake.json, feature vectors only). Created on first use so smoke runs use their own userData. */
+let localWakeFile: LocalWakeFile | undefined;
+function localWake(): LocalWakeFile {
+  localWakeFile ??= new LocalWakeFile(join(app.getPath('userData'), 'local-wake.json'));
+  return localWakeFile;
 }
 localAI.usage = {
   groqChat: (headers, ok) => usage().groqChat(headers, ok),
@@ -969,6 +976,17 @@ function setupIPC() {
   }, 'settings');
   // Counters and reset times only (no keys); Settings shows the full list, Chat one calm line.
   handle(CHANNELS.usage, () => usage().summary({ gemini: Boolean(geminiKey()), groq: Boolean(getProviderKey('groq')), azure: azure().hasKey() }), ['settings', 'chat']);
+  handle(CHANNELS.localWakeGet, () => ({ profile: localWake().read() ?? null, revision: state.localWakeRevision ?? 0 }), ['overlay', 'settings']);
+  handle(CHANNELS.localWakeSave, (_e, value: unknown) => {
+    if (!localWake().write(value)) return { ok: false, error: 'That voice profile could not be saved.' };
+    state.localWakeRevision = (state.localWakeRevision ?? 0) + 1; publish();
+    return { ok: true };
+  }, 'settings');
+  handle(CHANNELS.localWakeDelete, () => {
+    const removed = localWake().delete();
+    state.localWakeRevision = (state.localWakeRevision ?? 0) + 1; publish();
+    return removed ? { ok: true } : { ok: false, error: 'Could not delete the file. Remove local-wake.json from the app folder by hand.' };
+  }, 'settings');
   handle(CHANNELS.azureGet, () => {
     const key = getProviderKey('azure');
     return {

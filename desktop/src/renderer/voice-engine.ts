@@ -341,6 +341,7 @@ export function checkWakeIntent(
 import { BargeInDetector, DEFAULT_BARGE_IN_SENSITIVITY, clipIsEcho } from '../shared/barge-in.ts';
 import { ClipFeatureAccumulator, frameStats } from '../shared/clip-gate.ts';
 import type { ClipFeatures } from '../shared/clip-gate.ts';
+import type { LocalWakeVerdict } from '../shared/local-wake/types.ts';
 
 export interface BargeInInfo {
   /** performance.now() when the user's interrupting speech began */
@@ -364,7 +365,13 @@ export interface VoiceSessionCallbacks {
    * Wake-mode quota saver (src/shared/clip-gate.ts). Called with cheap measurements of a finished clip instead of `shouldTranscribe`
    * when provided. `send: false` drops the clip locally; `trimMs` caps how much of it is uploaded. Live Talk should answer `{ send: true }`.
    */
-  decideClip?: (features: ClipFeatures) => { send: boolean; trimMs?: number };
+  decideClip?: (features: ClipFeatures, local?: LocalWakeVerdict) => { send: boolean; trimMs?: number };
+  /**
+   * On-device wake word (src/shared/local-wake). Gets the finished clip's raw samples (never stored, never sent anywhere) and resolves with a
+   * verdict that `decideClip` receives as its second argument. Resolve `undefined` to skip it (Live Talk, feature off, nothing enrolled).
+   * It must yield to the event loop between slices of work: this runs on the same thread as the audio callback.
+   */
+  localWake?: (clip: Float32Array, sampleRate: number) => Promise<LocalWakeVerdict | undefined>;
   /** Only the first N ms of a clip is sent. Wake-word listening needs just the name, not a monologue. */
   maxClipMs?: number;
   /** Vocabulary hint for the speech-to-text provider (e.g. the assistant's name and aliases). */
@@ -616,7 +623,12 @@ export class VoiceSession {
       let trimMs = callbacks.maxClipMs ?? 0;
       if (callbacks.decideClip) {
         const features = this.features.finish({ durationMs: (merged.length / sampleRate) * 1000, overlappedPlayback: this.clipOverlap, bargeInFired: this.clipBargeFired });
-        const decision = callbacks.decideClip(features);
+        let local: LocalWakeVerdict | undefined;
+        if (callbacks.localWake && !this.clipBargeFired) {
+          try { local = await callbacks.localWake(merged, sampleRate); } catch { local = undefined; }
+          if (!this.active) { this.isProcessingTranscribe = false; return; }
+        }
+        const decision = callbacks.decideClip(features, local);
         if (!decision.send) {
           callbacks.onInterim?.('');
           this.isProcessingTranscribe = false;

@@ -11,6 +11,9 @@ import { useLipSync } from './lipsync';
 import { escapeAction, panelPlan } from '../shared/overlay-panels.ts';
 import { ConversationWindow, DEFAULT_WAKE_ALIASES, WakeGate, buildWakeHint, matchWakeWord } from '../shared/wake-word.ts';
 import { ClipGate, WAKE_TRIM_MS, formatGateLine } from '../shared/clip-gate.ts';
+import { LocalWakeController } from '../shared/local-wake/runtime.ts';
+import { parseProfile } from '../shared/local-wake/enrollment.ts';
+import { LocalWakeSettings } from './LocalWakeSettings';
 import { approvalHeadline, approvalSecondsLeft, approvalSpokenLine, mergeApprovals, reduceApprovals } from '../shared/approval-ui.ts';
 import { clearInterruptedSpeech, getLastBotSpeech, getMutedPreference, hasInterruptedSpeech, resumeInterruptedSpeech, setMutedPreference, speak, stopSpeech } from './speech';
 import { isStopCommand, unclearAction } from '../shared/stop-intent.ts';
@@ -260,11 +263,25 @@ function Overlay({ state }: { state: AppState }) {
   const wakeGate = useRef(new WakeGate(2000));
   // Quota saver: decides locally whether a wake-mode clip is worth a cloud request (never consulted during Live Talk).
   const clipGate = useRef(new ClipGate());
+  // On-device name check (Settings > Voice > "On-device name check", default off). Decides locally whether a wake-mode clip is a candidate.
+  const localWake = useRef(new LocalWakeController({ now: () => performance.now(), yieldNow: () => new Promise<void>(resolve => setTimeout(resolve, 0)) }));
+  const localWakeMode = state.settings.localWake ?? 'off';
+  useEffect(() => { localWake.current.configure(localWakeMode, state.settings.localWakeSensitivity); }, [localWakeMode, state.settings.localWakeSensitivity]);
+  useEffect(() => {
+    if (localWakeMode === 'off') { localWake.current.setProfile(undefined); return; }
+    let live = true;
+    void api?.getLocalWakeProfile().then(info => { if (live) localWake.current.setProfile(parseProfile(info.profile)); }, () => { if (live) localWake.current.setProfile(undefined); });
+    return () => { live = false; };
+  }, [localWakeMode, state.localWakeRevision]);
   const wakeWindow = useRef(new ConversationWindow());
   const wakeOpened = useRef(false);
   // One log line per decision class a minute, counts only: `[gate] skipped=N sent=M reason=...`.
   useEffect(() => {
-    const timer = setInterval(() => { for (const line of clipGate.current.flushStats(performance.now())) console.info(formatGateLine(line)); }, 60_000);
+    const timer = setInterval(() => {
+      for (const line of clipGate.current.flushStats(performance.now())) console.info(formatGateLine(line));
+      const local = localWake.current.flushStats(performance.now());
+      if (local) console.info(local);
+    }, 60_000);
     return () => clearInterval(timer);
   }, []);
   const shouldListen = isOverlayVoiceActive || wakeEnabled;
@@ -306,17 +323,24 @@ function Overlay({ state }: { state: AppState }) {
       // Standby only needs the name: short clips, rate-limited, hinted with the name and aliases.
       maxClipMs: isOverlayVoiceActive ? undefined : WAKE_TRIM_MS,
       sttHint: isOverlayVoiceActive ? undefined : buildWakeHint(stateRef.current.settings.customWakeWord, stateRef.current.settings.wakeAliases),
-      decideClip: features => {
+      // On-device check: only in wake mode (Live Talk and the conversation window are never gated), never for barge-in clips.
+      localWake: (clip, rate) => (isOverlayVoiceActiveRef.current ? Promise.resolve(undefined) : localWake.current.evaluate(clip, rate)),
+      decideClip: (features, local) => {
         const now = performance.now();
         const live = isOverlayVoiceActiveRef.current;
         const decision = clipGate.current.decide(features, { now, live });
-        if (!decision.send) return { send: false };
+        if (live) return { send: true };
+        // The local verdict (if any) and the quota-saver's answer decide together; 'off' or 'not enrolled' leaves the gate alone.
+        const combined = localWake.current.decide(local, decision, clipGate.current.quotaPressure);
+        if (combined.refundGate) clipGate.current.refund(decision);
+        if (!combined.send) return { send: false };
         // The old 2 s minimum interval and error back-off still apply in wake mode; a refused clip gives its token back.
-        if (!live && !wakeGate.current.allow(now)) {
-          clipGate.current.refund(decision);
+        if (!wakeGate.current.allow(now)) {
+          if (decision.send && !combined.refundGate) clipGate.current.refund(decision);
+          localWake.current.unsend(combined);
           return { send: false };
         }
-        return { send: true, trimMs: live ? undefined : decision.trimMs };
+        return { send: true, trimMs: decision.trimMs ?? WAKE_TRIM_MS };
       },
       onTranscribeResult: (outcome, info) => {
         if (!isOverlayVoiceActiveRef.current) wakeGate.current.report(performance.now(), outcome);
@@ -328,7 +352,7 @@ function Overlay({ state }: { state: AppState }) {
       getBargeInSensitivity: () => stateRef.current.settings.bargeInSensitivity ?? DEFAULT_BARGE_IN_SENSITIVITY,
       onBargeIn: handleBargeIn,
       onUnclear: info => {
-        if (!isOverlayVoiceActiveRef.current) clipGate.current.noteResult(false);
+        if (!isOverlayVoiceActiveRef.current) { clipGate.current.noteResult(false); localWake.current.noteOutcome(false); }
         handleUnclear(info);
       },
       onFinal: (text, features) => {
@@ -336,7 +360,7 @@ function Overlay({ state }: { state: AppState }) {
         const currentLive = isOverlayVoiceActiveRef.current;
         const currentSettings = stateRef.current.settings;
         if (isPhantomOrSelfEcho(text, currentSettings)) {
-          if (!currentLive) clipGate.current.noteResult(false);
+          if (!currentLive) { clipGate.current.noteResult(false); localWake.current.noteOutcome(false); }
           return;
         }
 
@@ -345,6 +369,7 @@ function Overlay({ state }: { state: AppState }) {
           const match = matchWakeWord(text, currentSettings.customWakeWord, currentSettings.wakeAliases);
           // The hit rate tunes the quota saver: a run of clips without the name makes it stricter, a hit loosens it.
           clipGate.current.noteResult(match.matched);
+          localWake.current.noteOutcome(match.matched);
           if (!match.matched) return;
 
           // If personal voice lock is enabled, additionally verify the speaker is Sid
@@ -1248,6 +1273,8 @@ function SettingsView({ state }: { state: AppState }) {
     settings.glassesEnabled !== state.settings.glassesEnabled ||
     settings.toolsEnabled !== state.settings.toolsEnabled ||
     settings.bargeInSensitivity !== state.settings.bargeInSensitivity ||
+    settings.localWake !== state.settings.localWake ||
+    settings.localWakeSensitivity !== state.settings.localWakeSensitivity ||
     settings.ttsProvider !== state.settings.ttsProvider ||
     settings.ttsQuality !== state.settings.ttsQuality ||
     settings.ttsGeminiVoice !== state.settings.ttsGeminiVoice ||
@@ -1273,6 +1300,8 @@ function SettingsView({ state }: { state: AppState }) {
     state.settings.glassesEnabled,
     state.settings.toolsEnabled,
     state.settings.bargeInSensitivity,
+    state.settings.localWake,
+    state.settings.localWakeSensitivity,
     state.settings.ttsProvider,
     state.settings.ttsQuality,
     state.settings.ttsGeminiVoice,
@@ -1444,6 +1473,7 @@ function SettingsView({ state }: { state: AppState }) {
           <SettingRow title="Listen for my name" description="Off by default. When on, the mic listens locally and only short clips with speech are sent to speech-to-text. Pause any time from the bot's indicator.">
             <div className="switch-control"><span>{(settings.wakeWordEnabled ?? true) ? 'On' : 'Off'}</span><button className="switch" type="button" role="switch" aria-label="Listen for my name" aria-checked={Boolean(settings.wakeWordEnabled)} onClick={() => setSettings({ ...settings, wakeWordEnabled: !settings.wakeWordEnabled })}><span/></button></div>
           </SettingRow>
+          <LocalWakeSettings settings={settings} setSettings={setSettings}/>
           <SettingRow title="Let Sudo-chan look at my screen" description="Off by default. When on, saying her name (or pressing the eye button in chat) takes ONE screenshot and sends it to your cloud AI provider so she can explain what you are working on. Never on a timer, never saved. Close password or banking windows first.">
             <div className="switch-control"><span>{settings.screenAssistEnabled ? 'On' : 'Off'}</span><button className="switch" type="button" role="switch" aria-label="Let Sudo-chan look at my screen" aria-checked={Boolean(settings.screenAssistEnabled)} onClick={() => setSettings({ ...settings, screenAssistEnabled: !settings.screenAssistEnabled })}><span/></button></div>
           </SettingRow>
