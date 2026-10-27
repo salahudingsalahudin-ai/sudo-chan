@@ -18,6 +18,7 @@ import { RemoveKeysRow, useKeyStorageInfo } from './KeyStorage';
 import { runChatVoiceTurn } from '../shared/chat-voice-turn.ts';
 import { DEFAULT_BARGE_IN_SENSITIVITY } from '../shared/barge-in.ts';
 import { formatResetLabel } from '../shared/usage.ts';
+import { MIC_CONFIRM_MS, changedSettings, micDotPress, micDotView } from '../shared/mic-control.ts';
 import { getLastStop, isSpeakingNow, stopSpeaking } from './tts-player';
 import { isPhantomTranscript, isSelfEchoTranscript } from '../shared/stt-hallucination.ts';
 import { ScreenPanel } from './ScreenPanel';
@@ -259,6 +260,21 @@ function Overlay({ state }: { state: AppState }) {
   const wakeWindow = useRef(new ConversationWindow());
   const wakeOpened = useRef(false);
   const shouldListen = isOverlayVoiceActive || wakeEnabled;
+  // The mic dot: turning the mic OFF takes two clicks within 3 s (the first one only arms it), see shared/mic-control.ts.
+  const [micArmedAt, setMicArmedAt] = useState<number | null>(null);
+  useEffect(() => {
+    if (micArmedAt === null) return;
+    const timer = setTimeout(() => setMicArmedAt(null), MIC_CONFIRM_MS);
+    return () => clearTimeout(timer);
+  }, [micArmedAt]);
+  useEffect(() => setMicArmedAt(null), [wakeEnabled, isOverlayVoiceActive]);
+  const micView = micDotView({ wakeEnabled, liveActive: isOverlayVoiceActive, paused: state.paused, armed: micArmedAt !== null });
+  const pressMicDot = () => {
+    const result = micDotPress({ wakeEnabled, liveActive: isOverlayVoiceActive, armedAt: micArmedAt, now: Date.now() });
+    setMicArmedAt(result.armedAt);
+    if (result.action === 'end-live') void api?.setVoiceActive(false);
+    else if (result.action === 'enable' || result.action === 'disable') void api?.saveSettings({ wakeWordEnabled: result.action === 'enable' }, 'dot');
+  };
 
   useEffect(() => {
     // If Chat window is actively having a voice session, Overlay yields the mic to Chat
@@ -419,7 +435,7 @@ function Overlay({ state }: { state: AppState }) {
       />
     )}
     <div
-      className={`overlay-bot ${arriving ? 'bot-arriving' : ''}`}
+      className={`overlay-bot ${arriving ? 'bot-arriving' : ''} ${micView.mode === 'off' ? 'is-mic-off' : ''}`}
       data-interactive
       aria-label="Say hello to Sudo-chan"
       onClick={() => void api?.welcome()}
@@ -447,18 +463,11 @@ function Overlay({ state }: { state: AppState }) {
       )}
     </div>
     <div className="overlay-dock" data-interactive>
+      {/* The mic switch is its own button, outside the chat pill, with a gap, so a click on the pill can never reach it. */}
+      <button type="button" className="mic-switch" title={micView.title} aria-label={micView.title} onClick={pressMicDot}>
+        <span className={`mic-dot is-${micView.mode}`} aria-hidden="true"/>
+      </button>
       <button className="companion-pill" onClick={() => void api?.openChat()}>
-        <span
-          className={`presence-dot mic-toggle ${state.paused ? 'is-paused' : isOverlayVoiceActive ? 'is-live' : shouldListen ? 'is-listening' : 'is-off'}`}
-          role="button"
-          tabIndex={0}
-          title={isOverlayVoiceActive ? 'Live Talk (click to end)' : shouldListen ? 'Mic on, listening for your name (click to turn off)' : 'Mic off (click to turn on)'}
-          onClick={event => {
-            event.stopPropagation();
-            if (isOverlayVoiceActive) void api?.setVoiceActive(false);
-            else void api?.saveSettings({ ...state.settings, wakeWordEnabled: !wakeEnabled });
-          }}
-        />
         {state.paused
           ? 'Taking a breath'
           : isOverlayVoiceActive
@@ -853,7 +862,7 @@ function Chat({ state }: { state: AppState }) {
             className={`viz-toggle-btn ${activeVisualizer === 'bot' ? 'active' : ''}`}
             onClick={() => {
               setActiveVisualizer('bot');
-              void api?.saveSettings({ ...state.settings, voiceVisualizerMode: 'bot' });
+              void api?.saveSettings({ voiceVisualizerMode: 'bot' }, 'chat');
             }}
             title="Sudo-chan Bot Character"
           >
@@ -864,7 +873,7 @@ function Chat({ state }: { state: AppState }) {
             className={`viz-toggle-btn ${activeVisualizer === 'orb' ? 'active' : ''}`}
             onClick={() => {
               setActiveVisualizer('orb');
-              void api?.saveSettings({ ...state.settings, voiceVisualizerMode: 'orb' });
+              void api?.saveSettings({ voiceVisualizerMode: 'orb' }, 'chat');
             }}
             title="ChatGPT Sonic Fluid Orb"
           >
@@ -1166,7 +1175,7 @@ function SettingsView({ state }: { state: AppState }) {
         registeredVoiceSample: result.profile.id,
       };
       setSettings(updated);
-      void api?.saveSettings(updated);
+      void api?.saveSettings({ registeredVoiceSample: result.profile.id }, 'settings');
       setNotice("Sid's voice profile recorded and registered successfully!");
       setIsError(false);
     } catch (e) {
@@ -1258,7 +1267,7 @@ function SettingsView({ state }: { state: AppState }) {
   const save = async (event: FormEvent) => {
     event.preventDefault(); if (!api || saving) return;
     setSaving(true); setNotice('');
-    try { const result = await api.saveSettings(settings); setIsError(!result.ok); setNotice(result.ok ? 'All settled. Your space, your way.' : result.error ?? 'Could not save settings.'); }
+    try { const result = await api.saveSettings(changedSettings(state.settings, settings), 'settings'); setIsError(!result.ok); setNotice(result.ok ? 'All settled. Your space, your way.' : result.error ?? 'Could not save settings.'); }
     catch { setIsError(true); setNotice('Could not save. Please try again.'); }
     finally { setSaving(false); }
   };

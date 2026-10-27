@@ -132,6 +132,9 @@ export interface ToolApprovalRequest {
   expiresInMs: number;
 }
 export type ToolApprovalEvent = { type: 'request'; request: ToolApprovalRequest } | { type: 'close'; id: string };
+/** Who asked to change the mic switch (logged only; never grants anything). */
+export type MicSource = 'dot' | 'tray' | 'settings' | 'chat';
+
 export interface DesktopAPI {
   getState(): Promise<AppState>;
   onState(callback: (state: AppState) => void): () => void;
@@ -140,7 +143,8 @@ export interface DesktopAPI {
   hideWindow(): Promise<void>;
   welcome(): Promise<void>;
   setPaused(paused: boolean): Promise<void>;
-  saveSettings(settings: Settings): Promise<ActionResult>;
+  /** Pass only the fields that changed; main merges them onto its current settings. `source` is for the [mic] log line. */
+  saveSettings(settings: Partial<Settings>, source?: MicSource): Promise<ActionResult>;
   resetPosition(): Promise<void>;
   setInteractive(interactive: boolean): void;
   setCaptionVisible(visible: boolean): void;

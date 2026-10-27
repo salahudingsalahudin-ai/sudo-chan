@@ -21,6 +21,7 @@ import { SttRouter } from './stt.js';
 import type { SpeechEvent, StopReason } from '../shared/speech-events.js';
 import { installHiddenWindows, runSmoke, smokeApprovalTimeoutMs } from './smoke.js';
 import { overlayShape } from '../shared/overlay-shape.js';
+import { mergeSettings, micChangeLine, parseSaveRequest, resolveMicSource } from '../shared/mic-control.js';
 import { activePanelForState } from '../shared/overlay-panels.js';
 import { decodeKey, describeKeyStorage, encodeKey, keyStoragePlan } from './key-storage.js';
 import { hardenKeyFiles } from './key-files.js';
@@ -503,7 +504,7 @@ function updateTray() {
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: 'Sudo-chan · Local AI', enabled: false }, { type: 'separator' },
     { label: state.overlayVisible ? 'Hide companion' : 'Show companion', click: () => { if (state.overlayVisible) { overlay.hide(); state.overlayVisible = false; publish(); } else showOverlay(); } },
-    { label: 'Microphone: listen for my name', type: 'checkbox', checked: state.settings.wakeWordEnabled ?? true, click: item => { void saveSettings({ ...state.settings, wakeWordEnabled: item.checked }); } },
+    { label: 'Microphone: listen for my name', type: 'checkbox', checked: state.settings.wakeWordEnabled ?? true, click: item => { void saveSettings({ wakeWordEnabled: item.checked }, 'tray'); } },
     { label: 'Pause companion animation', type: 'checkbox', checked: state.paused, click: item => { state.paused = item.checked; publish(); } },
     { label: 'Open chat', click: openChat }, { label: 'Settings', click: openSettings },
     { type: 'separator' }, { label: 'Quit Sudo-chan', click: () => app.quit() },
@@ -659,7 +660,9 @@ function followUpVision(text: string, targets: VisionTarget[]): StreamOptions['v
   if (!hit) return undefined;
   return { dataUri: hit.shot.dataUri, thumbnail: undefined, targets, fallbackText: text, ageSeconds: hit.ageSeconds, onTiming: visionMs => console.info(`[Screen] follow-up on a ${hit.ageSeconds}s old screenshot vision=${visionMs}ms`) };
 }
-async function saveSettings(candidate: unknown) {
+/** `patch` holds only the fields the caller changed; everything else comes from the CURRENT settings, so a stale form can never flip the mic. */
+async function saveSettings(patch: unknown, source: string = 'unknown') {
+  const candidate: unknown = typeof patch === 'object' && patch !== null && !Array.isArray(patch) ? mergeSettings(state.settings, patch as Record<string, unknown>) : patch;
   if (!validSettings(candidate)) return { ok: false, error: 'Choose a valid shortcut and companion size.' };
   if (candidate.screenAssistEnabled && !state.settings.screenAssistEnabled && !store.get('screenAssistConsent')) {
     if (await consentDialog()) store.set('screenAssistConsent', true);
@@ -681,6 +684,8 @@ async function saveSettings(candidate: unknown) {
   }
   if (changed && state.shortcutAvailable) globalShortcut.unregister(previous.shortcut);
   state.settings = candidate; state.shortcutAvailable = true;
+  const micLine = micChangeLine(previous.wakeWordEnabled, candidate.wakeWordEnabled, source);
+  if (micLine) console.info(micLine);
   // Turning tools off cancels anything waiting for approval or still running.
   if (previous.toolsEnabled === true && candidate.toolsEnabled !== true) stopAllTools();
   if (candidate.pomodoroEnabled !== undefined) {
@@ -705,7 +710,11 @@ function setupIPC() {
   });
   handle(CHANNELS.welcome, () => setHappy(greetings[greetingIndex++ % greetings.length], 4000), 'overlay');
   handle(CHANNELS.pause, (_e, paused) => { if (typeof paused !== 'boolean') throw new Error('Invalid pause state.'); state.paused = paused; publish(); });
-  handle(CHANNELS.save, (_e, value) => saveSettings(value), ['settings', 'chat', 'overlay']);
+  handle(CHANNELS.save, (event, value) => {
+    const request = parseSaveRequest(value);
+    if (!request) return { ok: false, error: 'Choose a valid shortcut and companion size.' };
+    return saveSettings(request.patch, resolveMicSource(request.source, windowKinds.get(BrowserWindow.fromWebContents(event.sender)!)));
+  }, ['settings', 'chat', 'overlay']);
   handle(CHANNELS.reset, () => { resetOverlayPosition(); showOverlay(); }, 'settings');
   handle(CHANNELS.messages, () => conversation.snapshot(), 'chat');
   handle(CHANNELS.clear, event => {
