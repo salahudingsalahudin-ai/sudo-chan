@@ -139,8 +139,8 @@ test('voice can never approve: no speech/STT/voice module can reach the approval
   const app = readFileSync(new URL('renderer/App.tsx', root), 'utf8');
   const uses = [...app.matchAll(/respondToolApproval/g)].length;
   assert.equal(uses, 3, 'only the chat card button, the overlay panel buttons and its Esc-to-deny');
-  // The only keyboard path is Escape = deny.
-  assert.match(app, /event\.key === 'Escape'\) void api\?\.respondToolApproval\(request\.id, 'deny'\)/);
+  // The only keyboard path is Escape = deny (one central handler, driven by the panel slot).
+  assert.match(app, /action === 'deny-approval' && approval\) void api\?\.respondToolApproval\(approval\.id, 'deny'\)/);
 });
 
 test('tool status: the runtime reports activity counts while a tool runs', async () => {

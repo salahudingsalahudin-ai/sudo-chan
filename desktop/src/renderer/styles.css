@@ -1136,6 +1136,18 @@ body[data-window=overlay]{overflow:hidden}.overlay-room{position:relative;width:
 /* Screen assist: overlay indicator and screenshot thumbnail in chat */
 .screen-badge{position:absolute;top:4px;left:50%;transform:translateX(-50%);z-index:5;border:1px solid rgba(149,220,228,.6);background:rgba(16,29,37,.92);color:#e6f6f8;font:700 11px/1 inherit;padding:6px 10px;border-radius:999px;cursor:pointer;white-space:nowrap}
 .screen-badge.is-sent{border-color:rgba(120,220,160,.6);cursor:default}
+/* Screen assist on the desktop bot: consent panel and notices (dark glass, same family as the Live Talk caption) */
+.screen-panel{position:absolute;top:2%;left:5%;width:90%;max-height:48%;box-sizing:border-box;padding:8px 10px;overflow:hidden;z-index:6;border-radius:14px;
+  background:linear-gradient(160deg,rgba(18,36,48,.92),rgba(10,22,32,.94));border:1px solid rgba(120,220,235,.38);
+  box-shadow:0 6px 18px rgba(9,40,56,.28),0 0 14px rgba(98,217,190,.18);color:#e8fbff;text-align:center;font-size:10.5px;line-height:1.35;animation:screenPanelIn .2s ease-out}
+.screen-panel-text{margin:0 0 6px;display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere}
+.screen-panel.is-notice .screen-panel-text{margin:0;-webkit-line-clamp:3}
+.screen-panel-actions{display:flex;gap:6px;justify-content:center}
+.screen-btn{flex:1;border:1px solid rgba(149,220,228,.45);background:rgba(255,255,255,.08);color:#e8fbff;font:700 10.5px/1 inherit;padding:6px 8px;border-radius:999px;cursor:pointer}
+.screen-btn:hover{background:rgba(255,255,255,.16)}
+.screen-btn.is-allow{background:linear-gradient(135deg,#2bb3a1,#2f89c9);border-color:transparent}
+@keyframes screenPanelIn{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion:reduce){.screen-panel{animation:none}}
 .message-shot{margin:0 0 6px}
 .message-shot img{display:block;max-width:160px;border-radius:8px;border:1px solid rgba(149,220,228,.35)}
 .message-shot figcaption{font-size:10.5px;opacity:.75;margin-top:3px}
@@ -1188,3 +1200,8 @@ body[data-window=overlay]{overflow:hidden}.overlay-room{position:relative;width:
 .overlay-approval .approval-actions button:hover{filter:brightness(1.08)}
 .overlay-approval .approval-timer{margin-top:4px;text-align:center;font-size:8.5px;color:#9fc3cc}
 @media (prefers-reduced-motion:reduce){.overlay-approval{animation:none}}
+
+/* One panel slot (shared/overlay-panels.ts): every top panel uses the same box so exactly one is visible and none overlaps */
+.overlay-approval,.screen-panel,.overlay-caption,.overlay-speech{top:2%;left:5%;width:90%;box-sizing:border-box}
+.screen-badge{z-index:6}
+.overlay-caption .caption-chip{display:block;margin-bottom:3px;font-size:8.5px;font-weight:650;color:#8fe0c0;letter-spacing:.02em}

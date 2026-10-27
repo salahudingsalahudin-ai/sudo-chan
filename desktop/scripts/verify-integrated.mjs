@@ -126,17 +126,29 @@ function functionBody(source, header) {
   add('wiring', 'preload exposes exactly the DesktopAPI methods', missing.length === 0 && extra.length === 0 ? 'PASS' : 'FAIL', `${methods.length} methods${missing.length ? `; missing: ${missing}` : ''}${extra.length ? `; extra: ${extra}` : ''}`);
 }
 {
+  // One panel slot: main shapes the window from the same plan the renderer draws (shared/overlay-panels.ts).
   const shapeCall = /overlay\.setShape\(overlayShape\(([^;]*)\)\);/.exec(index)?.[1] ?? '';
   const app = read('src/renderer/App.tsx');
-  const needs = [];
-  if (/overlay-caption/.test(app) || /captionVisible/.test(index)) needs.push(['caption', /captionVisible/]);
-  if (/screen-badge/.test(app)) needs.push(['screen badge', /screenStatus/]);
-  if (/overlay-approval|approvalVisible|ApprovalPanel/.test(app)) needs.push(['approval panel', /approval/i]);
-  const bad = needs.filter(([, re]) => !re.test(shapeCall)).map(([n]) => n);
-  // The shape helper itself must open the top region when asked.
+  const usesPlan = /activePanelForState\(state\)/.test(shapeCall) && /panelPlan\(/.test(app);
+  const panels = await import(join(root, 'dist/shared/overlay-panels.js')).catch(() => undefined);
   const shape = await import(join(root, 'dist/shared/overlay-shape.js')).then(m => m.overlayShape, () => undefined);
-  const opens = shape ? shape(190, 230, true).some(r => r.y === 0 && r.height > 40) && !shape(190, 230, false).some(r => r.y === 0) : false;
-  add('wiring', 'overlay window shape includes caption/approval regions when their flags are set', bad.length === 0 && opens ? 'PASS' : 'FAIL', bad.length ? `updateOverlayShape ignores: ${bad.join(', ')}` : opens ? '' : 'overlayShape(…, true) does not open the top region');
+  let opensAll = false;
+  if (panels && shape) {
+    opensAll = panels.PANEL_PRIORITY.every(panel => {
+      const height = 230;
+      const rects = shape(190, height, panel);
+      const y = Math.floor(height * (panels.PANEL_HEIGHT[panel] - 0.02));
+      return rects.some(r => 95 >= r.x && 95 < r.x + r.width && 3 >= r.y && 3 < r.y + r.height)
+        && rects.some(r => 38 >= r.x && 38 < r.x + r.width && y >= r.y && y < r.y + r.height);
+    }) && !shape(190, 230, null).some(r => r.y === 0);
+  }
+  add('wiring', 'overlay panel slot: window shape and renderer use one plan; every panel region is open', usesPlan && opensAll ? 'PASS' : 'FAIL', !usesPlan ? 'main must call overlayShape(…, activePanelForState(state)) and the overlay must render panelPlan(…)' : opensAll ? '' : 'a panel region is missing from the native window shape');
+}
+{
+  // API keys: no direct safeStorage method calls in the main process (the call can block forever on some Linux keyrings).
+  const direct = /safeStorage\.(isEncryptionAvailable|encryptString|decryptString|getSelectedStorageBackend)/.test(index);
+  const planned = /keyStoragePlan\(/.test(index);
+  add('wiring', 'saving/reading API keys never calls safeStorage directly (key-storage.ts decides)', !direct && planned ? 'PASS' : 'FAIL', direct ? 'index.ts calls a safeStorage method directly' : planned ? '' : 'keyStoragePlan() is not used');
 }
 {
   const safe = /requestSingleInstanceLock/.test(index) && /smokeTest\)\s*app\.setPath\('userData'/.test(index);

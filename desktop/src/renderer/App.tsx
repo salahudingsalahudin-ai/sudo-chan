@@ -7,12 +7,14 @@ import { SonicOrb } from './SonicOrb';
 import { AISettings } from './AISettings';
 import { AzureVoiceSettings } from './AzureVoiceSettings';
 import { useLipSync } from './lipsync';
+import { escapeAction, panelPlan } from '../shared/overlay-panels.ts';
 import { ConversationWindow, DEFAULT_WAKE_ALIASES, WakeGate, buildWakeHint, matchWakeWord } from '../shared/wake-word.ts';
 import { approvalHeadline, approvalSecondsLeft, approvalSpokenLine, mergeApprovals, reduceApprovals } from '../shared/approval-ui.ts';
 import { clearInterruptedSpeech, getMutedPreference, hasInterruptedSpeech, resumeInterruptedSpeech, setMutedPreference, speak, stopSpeech } from './speech';
 import { isStopCommand, unclearAction } from '../shared/stop-intent.ts';
 import { DEFAULT_BARGE_IN_SENSITIVITY } from '../shared/barge-in.ts';
 import { isSpeakingNow, stopSpeaking } from './tts-player';
+import { ScreenPanel } from './ScreenPanel';
 import { VoiceSession, type BargeInInfo, getVoiceProfile, isSpeakerMatch, recordVoiceSample } from './voice-engine';
 import type { VoiceProfile } from './voice-engine';
 
@@ -81,7 +83,8 @@ declare global { interface Window { __bargeInLatency?: Array<{ speechToDetectMs:
 function handleBargeIn(info?: BargeInInfo) {
   const detectedAt = info?.detectedAt ?? performance.now();
   stopSpeaking('barge-in');
-  void api?.stopReply();
+  // The user is probably asking a follow-up about the same screen: keep the (in-memory) screenshot.
+  void api?.stopReply({ keepScreen: true });
   const stoppedAt = performance.now();
   const speechToDetectMs = Math.round(detectedAt - (info?.speechStartedAt ?? detectedAt));
   const detectToStoppedMs = Math.round(stoppedAt - detectedAt);
@@ -147,9 +150,7 @@ function OverlayApproval({ request }: { request: ToolApprovalRequest }) {
     shownAt.current = Date.now();
     setNow(Date.now());
     const timer = setInterval(() => setNow(Date.now()), 1000);
-    const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape') void api?.respondToolApproval(request.id, 'deny'); };
-    window.addEventListener('keydown', onKey);
-    return () => { clearInterval(timer); window.removeEventListener('keydown', onKey); };
+    return () => clearInterval(timer);
   }, [request.id]);
   const left = approvalSecondsLeft(request, shownAt.current, now);
   const answer = (decision: 'allow' | 'allow-chat' | 'deny') => { void api?.respondToolApproval(request.id, decision); };
@@ -197,8 +198,23 @@ function Overlay({ state }: { state: AppState }) {
   const toolsWorking = state.toolStatus === 'working';
   const isOverlayVoiceActiveForCaption = state.voiceActiveTarget === 'overlay';
   const captionText = toolsWorking ? 'Kaam kar rahi hoon...' : (caption.bot || caption.you);
-  const captionShown = !approval && ((isOverlayVoiceActiveForCaption && Boolean(caption.bot || caption.you)) || toolsWorking);
-  useEffect(() => { api?.setCaptionVisible(captionShown); }, [captionShown]);
+  const captionWanted = (isOverlayVoiceActiveForCaption && Boolean(caption.bot || caption.you)) || toolsWorking;
+  // Main resolves the same priority from the published flags (captionVisible etc.), so the native window shape matches this plan.
+  useEffect(() => { api?.setCaptionVisible(captionWanted); }, [captionWanted]);
+  const plan = panelPlan({ approvalPending: Boolean(approval), screenStatus: state.screenStatus, captionWanted, speechWanted: Boolean(state.speech) && !isOverlayVoiceActiveForCaption });
+  // Esc only refuses or cancels the visible prompt: deny the approval, decline the consent, cancel a pending capture.
+  useEffect(() => {
+    const action = escapeAction(plan.active);
+    if (!action) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      if (action === 'deny-approval' && approval) void api?.respondToolApproval(approval.id, 'deny');
+      else if (action === 'decline-consent') void api?.screenConsent(false);
+      else if (action === 'cancel-screen') void api?.cancelScreen();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [plan.active, approval?.id]);
   const isOverlayVoiceActive = state.voiceActiveTarget === 'overlay';
   const overlaySessionRef = useRef<VoiceSession | null>(null);
 
@@ -281,7 +297,8 @@ function Overlay({ state }: { state: AppState }) {
           void api?.setVoiceActive(true, 'overlay');
           if (currentSettings.screenAssistEnabled) {
             // If the screenshot cannot be taken (Local mode, cooldown...), still answer what was said.
-            void api?.sendScreen({ text: match.rest, source: 'wake' }).then(result => { if (!result.ok && match.rest) void api?.sendMessage(match.rest, true); });
+            // When the reason was already shown and spoken on the overlay (declined, sensitive window, failed capture), do not also send the words as a blind chat message.
+            void api?.sendScreen({ text: match.rest, source: 'wake' }).then(result => { if (!result.ok && !result.handled && match.rest) void api?.sendMessage(match.rest, true); });
           }
           else if (match.rest) void api?.sendMessage(match.rest, true);
         } else {
@@ -360,19 +377,11 @@ function Overlay({ state }: { state: AppState }) {
     return () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerleave', leave); };
   }, []);
   return <main className="overlay-room" aria-label="Sudo-chan desktop companion">
-    {state.screenStatus && (
-      <button
-        className={`screen-badge ${state.screenStatus === 'sent' ? 'is-sent' : ''}`}
-        data-interactive
-        onClick={() => void api?.cancelScreen()}
-        title={state.screenStatus === 'capturing' ? 'Click to cancel' : 'Screenshot was sent to your AI provider'}
-      >
-        {state.screenStatus === 'capturing' ? '👀 Dekh rahi hoon... ✕' : '📸 Screen bheji gayi'}
-      </button>
-    )}
-    {approval && <OverlayApproval request={approval} />}
-    {captionShown && <div className="overlay-caption" role="status" aria-live="polite" data-interactive><span className={toolsWorking || caption.bot ? 'caption-bot' : 'caption-you'}>{captionText}</span></div>}
-    {state.speech && !isOverlayVoiceActive && <div className="overlay-speech" role="status" data-interactive>{state.speech}</div>}
+    {/* One panel slot: approval > consent > countdown > notice > looking > caption > hint > greeting. See shared/overlay-panels.ts. */}
+    {plan.active === 'approval' && approval && <OverlayApproval request={approval} />}
+    {(plan.active === 'consent' || plan.active === 'countdown' || plan.active === 'notice' || plan.active === 'capturing' || plan.active === 'hint') && <ScreenPanel state={state} speakAloud={isOverlayVoiceActive} />}
+    {plan.active === 'caption' && <div className="overlay-caption" role="status" aria-live="polite" data-interactive>{plan.chip && <span className="caption-chip">{plan.chip === 'cached' ? '📎 Purani screen par based' : '📸 Screen bheji gayi'}</span>}<span className={toolsWorking || caption.bot ? 'caption-bot' : 'caption-you'}>{captionText}</span></div>}
+    {plan.active === 'speech' && <div className="overlay-speech" role="status" data-interactive>{state.speech}</div>}
 
     <div className="overlay-grip" data-interactive title="Drag to make yourself at home" aria-label="Drag companion"><span/><span/><span/></div>
     {shouldListen && !state.paused && (
@@ -1150,7 +1159,9 @@ function SettingsView({ state }: { state: AppState }) {
     settings.registeredVoiceSample !== state.settings.registeredVoiceSample ||
     settings.customWakeWord !== state.settings.customWakeWord ||
     settings.wakeWordEnabled !== state.settings.wakeWordEnabled ||
+    settings.voiceLanguage !== state.settings.voiceLanguage ||
     settings.screenAssistEnabled !== state.settings.screenAssistEnabled ||
+    settings.screenAssistCountdown !== state.settings.screenAssistCountdown ||
     settings.sttSpeed !== state.settings.sttSpeed ||
     JSON.stringify(settings.wakeAliases) !== JSON.stringify(state.settings.wakeAliases) ||
     settings.voiceVisualizerMode !== state.settings.voiceVisualizerMode ||
@@ -1172,7 +1183,9 @@ function SettingsView({ state }: { state: AppState }) {
     state.settings.registeredVoiceSample,
     state.settings.customWakeWord,
     state.settings.wakeWordEnabled,
+    state.settings.voiceLanguage,
     state.settings.screenAssistEnabled,
+    state.settings.screenAssistCountdown,
     state.settings.sttSpeed,
     JSON.stringify(state.settings.wakeAliases),
     state.settings.voiceVisualizerMode,
@@ -1351,6 +1364,9 @@ function SettingsView({ state }: { state: AppState }) {
           </SettingRow>
           <SettingRow title="Let Sudo-chan look at my screen" description="Off by default. When on, saying her name (or pressing the eye button in chat) takes ONE screenshot and sends it to your cloud AI provider so she can explain what you are working on. Never on a timer, never saved. Close password or banking windows first.">
             <div className="switch-control"><span>{settings.screenAssistEnabled ? 'On' : 'Off'}</span><button className="switch" type="button" role="switch" aria-label="Let Sudo-chan look at my screen" aria-checked={Boolean(settings.screenAssistEnabled)} onClick={() => setSettings({ ...settings, screenAssistEnabled: !settings.screenAssistEnabled })}><span/></button></div>
+          </SettingRow>
+          <SettingRow title="Countdown before the first screenshot" description="Shows 'Screenshot in 3...' with a cancel button before the first capture of a session, so you can close a sensitive window. She also refuses to capture when a password manager, bank, login or private window is visible (only windows that expose accessibility information can be seen).">
+            <div className="switch-control"><span>{(settings.screenAssistCountdown ?? true) ? 'On' : 'Off'}</span><button className="switch" type="button" role="switch" aria-label="Countdown before the first screenshot" aria-checked={settings.screenAssistCountdown ?? true} onClick={() => setSettings({ ...settings, screenAssistCountdown: !(settings.screenAssistCountdown ?? true) })}><span/></button></div>
           </SettingRow>
           <SettingRow
             title="Assistant name"
