@@ -9,6 +9,7 @@
   },
   "type": "module",
   "main": "dist/main/bootstrap.js",
+  "desktopName": "sudo-chan.desktop",
   "scripts": {
     "dev": "node scripts/dev.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json",
@@ -53,7 +54,7 @@
         "deb"
       ],
       "category": "Utility",
-      "icon": "assets/icon.png",
+      "icon": "assets/linux-icons",
       "executableName": "sudo-chan",
       "maintainer": "Sid <noreply@sudo-chan.vercel.app>",
       "synopsis": "Desktop AI companion",
@@ -61,7 +62,7 @@
         "entry": {
           "Name": "Sudo-chan",
           "Comment": "A quiet, friendly desktop AI companion",
-          "StartupWMClass": "Sudo-chan"
+          "StartupWMClass": "sudo-chan"
         }
       }
     },
