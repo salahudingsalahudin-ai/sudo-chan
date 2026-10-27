@@ -1,5 +1,20 @@
 # Changelog (desktop)
 
+## mic-indicator (on top of fix-phantom-wake): the mic can no longer be switched off by accident
+
+Root cause of "the bot stopped hearing me": the mic dot lived inside the chat-opening pill, so a click meant for the pill turned the
+microphone off. Details in `MIC-INDICATOR.md`.
+
+- **Separate mic switch** (26 px button, 8 px left of the pill). Clicking the pill never touches the mic.
+- **Obvious state, no extra text:** green glowing dot = listening; blue ringed dot = Live Talk; hollow amber ring = resting;
+  dim dot with a diagonal slash = OFF (the bot also looks calm and muted). Shapes differ, so it is colour-blind safe.
+- **Gesture:** ON = one click. OFF = click, then click again within 3 s (first click arms the dot). The tray item is unchanged.
+- **Settings Save no longer overwrites the mic:** renderer sends patches (`{ patch, source }`), main merges onto its current settings
+  and validates as before; the Settings window sends only the fields it changed.
+- **Log line** `[mic] wakeWordEnabled true->false source=dot|tray|settings|chat` on every change (source is an allow-list, log only).
+- Overlay window shape has an explicit region for the mic switch.
+- Tests: `tests/mic-control.check.mjs` (20) + 1 overlay-shape case. `npm test` 415 pass; `npm run verify` 37/37.
+
 ## fix-phantom-wake (on top of integrate4): the bot no longer wakes and talks by itself
 
 Live log: 5 replies in ~2 minutes with nobody speaking, every "heard" text was `Sudo-chan, Sido-chan,` and every reply ended in
