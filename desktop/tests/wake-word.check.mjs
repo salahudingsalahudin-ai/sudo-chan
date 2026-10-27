@@ -83,3 +83,28 @@ test('settings: wake word is ON by default (user request) and validated', async 
   assert.equal(validSettings({ ...DEFAULT_SETTINGS, wakeAliases: 'Sudo' }), false);
   assert.equal(validSettings({ ...DEFAULT_SETTINGS, wakeAliases: [1] }), false);
 });
+
+test('settings: sttSpeed accepts accurate/fast only', async () => {
+  const { DEFAULT_SETTINGS, validSettings } = await import('../src/shared/validation.ts');
+  assert.equal(validSettings({ ...DEFAULT_SETTINGS, sttSpeed: 'fast' }), true);
+  assert.equal(validSettings({ ...DEFAULT_SETTINGS, sttSpeed: 'accurate' }), true);
+  assert.equal(validSettings({ ...DEFAULT_SETTINGS, sttSpeed: 'turbo' }), false);
+});
+
+test('SttRouter: fast mode asks Whisper before Gemini, accurate asks Gemini first', async () => {
+  const { SttRouter } = await import('../src/main/stt.ts');
+  const calls = [];
+  const fetchFn = async (url) => {
+    calls.push(url.includes('groq') ? 'groq' : url.includes('generativelanguage') ? 'gemini' : 'other');
+    return url.includes('groq')
+      ? { status: 200, ok: true, json: async () => ({ text: 'hello there my friend' }), text: async () => '' }
+      : { status: 200, ok: true, json: async () => ({ candidates: [{ content: { parts: [{ text: 'hello there my friend' }] } }] }), text: async () => '' };
+  };
+  for (const [mode, first] of [['fast', 'groq'], ['accurate', 'gemini']]) {
+    calls.length = 0;
+    const r = new SttRouter({ fetch: fetchFn, getKey: () => 'k', now: () => 0, getMode: () => mode });
+    const out = await r.transcribe({ base64: 'AAAA', mimeType: 'audio/wav', language: 'auto' });
+    assert.equal(out.ok, true);
+    assert.equal(calls[0], first, `${mode} should call ${first} first`);
+  }
+});

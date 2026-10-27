@@ -973,6 +973,7 @@ function SettingsView({ state }: { state: AppState }) {
     settings.registeredVoiceSample !== state.settings.registeredVoiceSample ||
     settings.customWakeWord !== state.settings.customWakeWord ||
     settings.wakeWordEnabled !== state.settings.wakeWordEnabled ||
+    settings.sttSpeed !== state.settings.sttSpeed ||
     JSON.stringify(settings.wakeAliases) !== JSON.stringify(state.settings.wakeAliases) ||
     settings.voiceVisualizerMode !== state.settings.voiceVisualizerMode ||
     settings.glassesEnabled !== state.settings.glassesEnabled ||
@@ -992,6 +993,7 @@ function SettingsView({ state }: { state: AppState }) {
     state.settings.registeredVoiceSample,
     state.settings.customWakeWord,
     state.settings.wakeWordEnabled,
+    state.settings.sttSpeed,
     JSON.stringify(state.settings.wakeAliases),
     state.settings.voiceVisualizerMode,
     state.settings.glassesEnabled,
@@ -1183,6 +1185,17 @@ function SettingsView({ state }: { state: AppState }) {
               onChange={e => setSettings({ ...settings, wakeAliases: e.target.value.split(',').map(a => a.trim()).filter(Boolean).slice(0, 20) })}
               placeholder="Sudo, Sid, Sudo-chan"
             />
+          </SettingRow>
+          <SettingRow title="Speech recognition speed" description="Fast answers sooner (about 0.5 s) but may mishear Urdu. Accurate understands Urdu and Roman Urdu better but takes 2-3 s.">
+            <select
+              className="wake-word-input"
+              value={settings.sttSpeed ?? 'accurate'}
+              onChange={e => setSettings({ ...settings, sttSpeed: e.target.value as 'accurate' | 'fast' })}
+              aria-label="Speech recognition speed"
+            >
+              <option value="accurate">Accurate (Gemini first)</option>
+              <option value="fast">Fast (Whisper first)</option>
+            </select>
           </SettingRow>
           <SettingRow
             title="Voice Recognition Language"

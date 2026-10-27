@@ -28,6 +28,8 @@ export interface SttDeps {
   fetch: FetchLike;
   getKey(provider: 'gemini' | 'groq' | 'openai'): string;
   now(): number;
+  /** 'fast' tries Groq Whisper first (about 0.5 s) before Gemini; 'accurate' (default) tries Gemini first. */
+  getMode?(): string | undefined;
 }
 
 // '-latest' aliases: the dated 2.5 names returned 404 for the user's key. Lite first: it answered a clip in ~1.8 s, while gemini-flash-latest exceeded the 9 s timeout in a sanity check.
@@ -175,7 +177,9 @@ export class SttRouter {
   async transcribe(req: SttRequest): Promise<SttOutcome> {
     let sawRateLimit = false;
     const lang = normalizeSttLang(req.language);
-    for (const route of this.routes) {
+    const fast = this.deps.getMode?.() === 'fast';
+    const ordered = fast ? [...this.routes.filter(r => r.provider === 'whisper'), ...this.routes.filter(r => r.provider !== 'whisper')] : this.routes;
+    for (const route of ordered) {
       const key = this.deps.getKey(route.key);
       if (!key) continue;
       const now = this.deps.now();

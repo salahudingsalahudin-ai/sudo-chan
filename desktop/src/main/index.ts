@@ -112,7 +112,7 @@ function geminiKey(): string {
 }
 let sttRouter: SttRouter | undefined;
 function stt(): SttRouter {
-  sttRouter ??= new SttRouter({ fetch: (url, init) => fetch(url, init as RequestInit), getKey: id => getProviderKey(id), now: () => Date.now() });
+  sttRouter ??= new SttRouter({ fetch: (url, init) => fetch(url, init as RequestInit), getKey: id => getProviderKey(id), now: () => Date.now(), getMode: () => state.settings.sttSpeed });
   return sttRouter;
 }
 let azureProvider: AzureTtsProvider | undefined;

@@ -79,6 +79,7 @@ export function validSettings(value: unknown): value is Settings {
   if (s.wakeAliases !== undefined && (!Array.isArray(s.wakeAliases) || s.wakeAliases.length > 20 || s.wakeAliases.some(a => typeof a !== 'string' || a.length > 40))) return false;
   if (s.voiceVisualizerMode !== undefined && s.voiceVisualizerMode !== 'bot' && s.voiceVisualizerMode !== 'orb') return false;
   if (s.sttProvider !== undefined && !['auto', 'browser', 'whisper', 'gemini'].includes(s.sttProvider)) return false;
+  if (s.sttSpeed !== undefined && s.sttSpeed !== 'accurate' && s.sttSpeed !== 'fast') return false;
   if (s.ttsProvider !== undefined && !['auto', 'google', 'gemini', 'azure', 'elevenlabs'].includes(s.ttsProvider)) return false;
   if (s.ttsVoice !== undefined && typeof s.ttsVoice !== 'string') return false;
   if (s.ttsGeminiVoice !== undefined && (typeof s.ttsGeminiVoice !== 'string' || !/^[A-Za-z]{2,30}$/.test(s.ttsGeminiVoice))) return false;

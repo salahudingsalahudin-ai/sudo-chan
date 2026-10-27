@@ -24,6 +24,8 @@ export interface Settings {
   sttProvider?: SttProviderId;
   sttLanguage?: SttLanguage;
   ttsProvider?: TtsProviderId;
+  /** Speech recognition: 'accurate' = Gemini first (better Urdu, ~2-3 s), 'fast' = Groq Whisper first (~0.5 s). */
+  sttSpeed?: 'accurate' | 'fast';
   ttsVoice?: string;
   ttsGeminiVoice?: string;
   /** 'auto' (by language) or an Azure neural voice id. */
