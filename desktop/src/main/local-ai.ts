@@ -2,6 +2,7 @@ import { freemem, totalmem } from 'node:os';
 import type { AIMode, CloudProviderId, ModelMeta } from '../shared/types.js';
 import { CLOUD_PRESETS } from '../shared/validation.js';
 import { runToolLoop, ToolLoopHttpError, ToolsUnsupportedError } from './tools/agent-loop.js';
+import { wantsPlannerTools, withoutPlannerTools } from './tools/tool-gate.js';
 import type { ToolRuntimeLike } from './tools/types.js';
 import { describeToolCall } from './tools/trace.js';
 import type { VisionTarget } from '../shared/screen-assist.ts';
@@ -93,20 +94,27 @@ function safeJson(text: string): unknown {
   try { return JSON.parse(text); } catch { return undefined; }
 }
 
-export const TOOLS_PROMPT = [
-  '[TOOLS ARE ON]',
-  'You can act on the user\'s computer ONLY through tool calls:',
-  '- read-only (home folder only): read_file (about 6 KB per call; for a bigger file use start_line/end_line and follow the "call again with start_line=N" footer), list_dir, search_files, get_system_info',
-  '- no click needed, private to this app: save_note, list_notes, read_note (your own notebook), set_reminder (in_minutes or at_time like "17:30"), list_reminders, cancel_reminder',
-  '- no click needed, the user\'s own to-do list: add_task (title; due in words like "kal 5 baje"; remind=true ONLY if they asked to be reminded), plan_today (short plan, max 5), next_task, list_tasks (today/overdue/all/done), update_task, complete_task, start_task (marks a task in progress and returns its text); set_reminder also takes task_id',
-  '- need the user to click Allow on screen every time: edit_file, write_file, append_file, run_command (one program, no pipes), open_url, open_app',
-  'Changing files: to change an existing file read the needed part (read_file), then call edit_file with old_text copied EXACTLY (it must match one place only; add neighbouring lines if the tool says it matches several) and new_text. Use write_file ONLY for a new file, with content under about 2500 characters; for more, write the first part and use append_file. Never rewrite a whole existing file with write_file for a small change. Do not re-read a file you already have.',
-  'To-do help: "aaj mera kya kaam hai" -> plan_today; "ye kaam list mein daal do: ..." -> add_task; "pehla kaam khatam ho gaya" -> complete_task; "mera agla kaam utha lo" -> start_task, then do the work with the file/command tools (each needs a click). Starting a task is NOT doing it: say only what tool results confirm. You cannot delete tasks. Task titles are read aloud: answer in the user\'s language in 1-3 short spoken sentences, no markdown, no ids, no bullet symbols.',
-  'Lines like [tools: ...] in earlier assistant messages are a log the app added of what tools did (paths only). Use it for context such as "that file", but never write such a line yourself and never speak it.',
-  'Rules: use a tool only when the request needs it. Before a risky action say in one short sentence what you are about to do; the user approves with a button on screen, NOT by voice or by saying "yes".',
-  'If a tool result says blocked, denied, timed out or NOT done, tell the user plainly and do not pretend otherwise. NEVER claim you read, wrote, ran or opened anything unless a tool result confirms it.',
-  'You cannot see the screen on a turn with tools (a screenshot turn has no tools) and you cannot browse the web; secrets (.ssh, .env, passwords, browser data) are off limits.',
-].join('\n');
+/**
+ * The tool instructions. `planner: false` leaves out the lines about notes, reminders and tasks (about 200 tokens) for turns that are not about them;
+ * the matching tool definitions are left out by `withoutPlannerTools` (see tools/tool-gate.ts). Default: everything.
+ */
+export function buildToolsPrompt(planner = true): string {
+  return [
+    '[TOOLS ARE ON]',
+    'You can act on the user\'s computer ONLY through tool calls:',
+    '- read-only (home folder only): read_file (about 6 KB per call; for a bigger file use start_line/end_line and follow the "call again with start_line=N" footer), list_dir, search_files, get_system_info',
+    ...(planner ? ['- no click needed, private to this app: save_note, list_notes, read_note (your own notebook), set_reminder (in_minutes or at_time like "17:30"), list_reminders, cancel_reminder'] : []),
+    ...(planner ? ['- no click needed, the user\'s own to-do list: add_task (title; due in words like "kal 5 baje"; remind=true ONLY if they asked to be reminded), plan_today (short plan, max 5), next_task, list_tasks (today/overdue/all/done), update_task, complete_task, start_task (marks a task in progress and returns its text); set_reminder also takes task_id'] : []),
+    '- need the user to click Allow on screen every time: edit_file, write_file, append_file, run_command (one program, no pipes), open_url, open_app',
+    'Changing files: to change an existing file read the needed part (read_file), then call edit_file with old_text copied EXACTLY (it must match one place only; add neighbouring lines if the tool says it matches several) and new_text. Use write_file ONLY for a new file, with content under about 2500 characters; for more, write the first part and use append_file. Never rewrite a whole existing file with write_file for a small change. Do not re-read a file you already have.',
+    ...(planner ? ['To-do help: "aaj mera kya kaam hai" -> plan_today; "ye kaam list mein daal do: ..." -> add_task; "pehla kaam khatam ho gaya" -> complete_task; "mera agla kaam utha lo" -> start_task, then do the work with the file/command tools (each needs a click). Starting a task is NOT doing it: say only what tool results confirm. You cannot delete tasks. Task titles are read aloud: answer in the user\'s language in 1-3 short spoken sentences, no markdown, no ids, no bullet symbols.'] : []),
+    'Lines like [tools: ...] in earlier assistant messages are a log the app added of what tools did (paths only). Use it for context such as "that file", but never write such a line yourself and never speak it.',
+    'Rules: use a tool only when the request needs it. Before a risky action say in one short sentence what you are about to do; the user approves with a button on screen, NOT by voice or by saying "yes".',
+    'If a tool result says blocked, denied, timed out or NOT done, tell the user plainly and do not pretend otherwise. NEVER claim you read, wrote, ran or opened anything unless a tool result confirms it.',
+    'You cannot see the screen on a turn with tools (a screenshot turn has no tools) and you cannot browse the web; secrets (.ssh, .env, passwords, browser data) are off limits.',
+  ].join('\n');
+}
+export const TOOLS_PROMPT = buildToolsPrompt();
 
 export function buildSystemPrompt(options?: {
   voice?: boolean;
@@ -115,6 +123,8 @@ export function buildSystemPrompt(options?: {
   tools?: boolean;
   /** Tools are enabled but this turn carries a screenshot, which is answered without tools. */
   toolsPaused?: boolean;
+  /** With `tools`: false leaves out the prompt lines for notes, reminders and tasks (this turn is not about them). Default true. */
+  plannerTools?: boolean;
 }): string {
   if (options?.voice) {
     return [
@@ -163,7 +173,7 @@ export function buildSystemPrompt(options?: {
       ? '- Real System Boundaries: Privacy-first desktop companion. You can see the screen ONLY on a turn where a screenshot is attached by screen assist; this is NOT such a turn, so you cannot see the screen and must say so instead of guessing. You cannot browse the live web. Files and commands are only possible through the tools below, with the user\'s approval.'
       : '- Real System Boundaries: Privacy-first desktop companion. Can see the screen of the user ONLY on a turn where a screenshot is attached to the message (when the user enabled screen assist and said your name or pressed the eye button); on every other turn you cannot see the screen and must say so instead of guessing; you cannot modify or delete OS files directly, cannot browse the live web.',
     options?.toolsPaused ? '- Tools (files, commands, links) are ON in settings but are NOT available on this screenshot turn. Answer what is on the screen; if the user also wants an action done, tell them to say the task again as a separate request right after (your description stays in this chat); never claim you did something.' : '',
-    options?.tools ? `\n${TOOLS_PROMPT}` : '',
+    options?.tools ? `\n${buildToolsPrompt(options.plannerTools !== false)}` : '',
   ].filter(Boolean).join('\n');
 }
 
@@ -569,7 +579,12 @@ export class LocalAI {
 
     const providerLabel = CLOUD_PRESETS[cloud.provider]?.label || cloud.provider;
     if (options?.tools && options.tools.definitions.length) {
-      const toolSystem = buildSystemPrompt({ voice: options.voice, model, provider: providerLabel, tools: true });
+      // Groq's free tier allows ~7000 input tokens a minute and every tool step re-sends the list: offer notes/reminders/tasks only when this
+      // conversation is about them (the file and command tools are always there).
+      const plannerTools = wantsPlannerTools(messages);
+      const toolRuntime = plannerTools ? options.tools : withoutPlannerTools(options.tools);
+      console.log(`[Tools] offering ${toolRuntime.definitions.length} tool(s)${plannerTools ? '' : ' (no notes/reminders/tasks on this turn)'}`);
+      const toolSystem = buildSystemPrompt({ voice: options.voice, model, provider: providerLabel, tools: true, plannerTools });
       // No few-shot examples on tool turns: the tool list is re-sent on every step and Groq limits input tokens per minute
       // (qwen: 7000), so ~600 tokens of examples per step would trigger 429s after two or three steps.
       const toolMessages = [{ role: 'system' as const, content: toolSystem }, ...messages];
@@ -584,7 +599,7 @@ export class LocalAI {
           apiKey,
           model,
           messages: toolMessages,
-          tools: options.tools,
+          tools: toolRuntime,
           signal,
           onText,
           maxTokens: cloud.provider === 'groq' ? 950 : 1500,
