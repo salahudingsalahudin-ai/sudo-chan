@@ -27,7 +27,7 @@ found, and what was verified. The review branch is `integrate6-review` (on top o
 - `src/main/tools/tool-gate.ts` (new): `wantsPlannerTools(messages)` (latest message plus the two before it; English, Roman Urdu, Urdu script, tool names; errs towards offering),
   `withoutPlannerTools(runtime)` (hides the 13 notes / reminders / tasks definitions, same `execute`, never an empty list).
 - `src/main/local-ai.ts`: `buildToolsPrompt(planner)`; `TOOLS_PROMPT` is still the full text; `buildSystemPrompt({ plannerTools })`; the cloud tool path uses the gate (log line `[Tools] offering N tool(s)`).
-  Saves about 1,300 tokens per step on turns that are not about tasks, notes or reminders (definitions 7,978 -> 3,875 characters, prompt about 2,670 -> about 1,650 characters). Voice prompts are unchanged.
+  Saves about 1,300 tokens per step on turns that are not about tasks, notes or reminders (definitions 7,978 -> 3,875 characters, prompt 2,666 -> 1,673 characters). Voice prompts are unchanged.
 - `tests/integrate6.check.mjs` (10 tests) and two `verify` wiring checks (Settings fields in App.tsx; tool gate wired).
 - Docs: `CHANGELOG.md` (desktop and root), `VERIFY.md`, this file.
 
