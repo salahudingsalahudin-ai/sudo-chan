@@ -192,3 +192,6 @@
   .save-bar { padding: 14px; gap: 12px; }.save-bar > p { font-size: 11px; gap: 7px; }.primary-button { padding: 11px 13px; gap: 10px; font-size: 12px; }
   .settings-footer p { font-size: 10px; }.settings-footer b { font-size: 15px; }
 }
+.key-storage-detail { font-size: 12px; line-height: 1.6; color: #d0d5c8; }
+.remove-keys-actions { display: flex; gap: 12px; flex-shrink: 0; }
+.remove-keys .text-button { font-size: 12px; color: #f2b8a8; background: transparent; border: 0; text-decoration: underline; cursor: pointer; padding: 4px 0; }

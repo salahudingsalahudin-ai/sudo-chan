@@ -14,6 +14,8 @@ import { approvalHeadline, approvalSecondsLeft, approvalSpokenLine, mergeApprova
 import { clearInterruptedSpeech, getMutedPreference, hasInterruptedSpeech, resumeInterruptedSpeech, setMutedPreference, speak, stopSpeech } from './speech';
 import { isStopCommand, unclearAction } from '../shared/stop-intent.ts';
 import { routeSpeech } from '../shared/intent.ts';
+import { RemoveKeysRow, useKeyStorageInfo } from './KeyStorage';
+import { runChatVoiceTurn } from '../shared/chat-voice-turn.ts';
 import { DEFAULT_BARGE_IN_SENSITIVITY } from '../shared/barge-in.ts';
 import { formatResetLabel } from '../shared/usage.ts';
 import { isSpeakingNow, stopSpeaking } from './tts-player';
@@ -560,7 +562,8 @@ function Chat({ state }: { state: AppState }) {
           if (text.trim() && handleStopCommand(text)) return;
           if (text.trim() && !conversationBusyRef.current) {
             setBotSubtitle('');
-            void api?.sendMessage(text.trim(), true);
+            // Same routing as the overlay: only a clear screen request (and only with screen assist ON) starts the screenshot flow.
+            runChatVoiceTurn(text, Boolean(settingsRef.current.screenAssistEnabled), api);
           }
         },
         onAudioLevel: level => {
@@ -1124,6 +1127,7 @@ function SettingsView({ state }: { state: AppState }) {
   const [isError, setIsError] = useState(false);
   const [saving, setSaving] = useState(false);
   const [confirmClear, setConfirmClear] = useState(false);
+  const keyStorage = useKeyStorageInfo();
   const [activeSection, setActiveSection] = useState('presence');
   const settingsScroll = useRef<HTMLDivElement>(null);
 
@@ -1484,14 +1488,16 @@ function SettingsView({ state }: { state: AppState }) {
         <AISettings/>
         <section id="privacy" className="settings-card privacy-card scroll-reveal">
           <div className="card-heading"><span className="section-icon peach"><Icon name="shield"/></span><div><span className="eyebrow">04 / YOUR SPACE STAYS YOURS</span><h2>Nothing behind the curtain.</h2></div></div>
-          <p>In <strong>Local mode</strong>, your messages never leave this computer — all generation runs via Ollama on device with zero telemetry. In <strong>Cloud mode</strong>, your messages are sent securely via HTTPS directly to your chosen provider (Google Gemini, Groq, OpenAI, or OpenRouter) using your own API key. Keys are encrypted on your device via safeStorage and never sent to Sudo-chan servers.</p>
+          <p>In <strong>Local mode</strong>, your messages never leave this computer — all generation runs via Ollama on device with zero telemetry. In <strong>Cloud mode</strong>, your messages are sent securely via HTTPS directly to your chosen provider (Google Gemini, Groq, OpenAI, or OpenRouter) using your own API key. Keys are never sent to Sudo-chan servers.</p>
+          <p className="key-storage-detail"><strong>How keys are stored:</strong> {keyStorage.detail}</p>
           <p><strong>Mic:</strong> only while listening is on. <strong>Screen:</strong> only after you click Allow and only while screen assist is on; the image goes to your cloud model and is never saved. <strong>Files:</strong> only while tools are on, and risky actions ask you first.</p>
           <div className="privacy-facts">
             <span><i/>Local chat stays on your machine</span>
             <span><i/>Cloud uses direct provider HTTPS</span>
-            <span><i/>API keys encrypted on this device</span>
+            <span><i/>{keyStorage.fact}</span>
             <span><i/>Chat kept in memory until Quit</span>
           </div>
+          <RemoveKeysRow/>
           <div className="privacy-bottom"><span>Want a fresh start?</span><button className="text-button" type="button" onClick={() => void clear()}>{confirmClear ? 'Confirm clear conversation' : 'Clear conversation'}</button></div>
         </section>
       </form>

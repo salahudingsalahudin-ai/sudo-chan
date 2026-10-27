@@ -82,7 +82,7 @@ function functionBody(source, header) {
     cloudConfig: ['settings'], fetchCloudModels: null, quit: ['settings'], reset: ['settings'], messages: ['chat'],
     welcome: ['overlay'], stop: ['chat', 'overlay'], sendScreen: ['chat', 'overlay'], cancelScreen: ['chat', 'overlay'],
     toolApprovals: ['chat'], toolApprovalReply: ['chat'], toolsStopAll: ['chat', 'overlay', 'settings'],
-    usage: ['settings', 'chat'],
+    usage: ['settings', 'chat'], clearKeys: ['settings'], keyStorageInfo: ['settings'],
   };
   const registrations = [...index.matchAll(/\n  (handle|ipcMain\.on)\(CHANNELS\.(\w+),/g)].map((m, i, all) => ({
     name: m[2], kind: m[1], text: index.slice(m.index, all[i + 1]?.index ?? index.indexOf('\n}\n', m.index)),
@@ -150,6 +150,12 @@ function functionBody(source, header) {
   const direct = /safeStorage\.(isEncryptionAvailable|encryptString|decryptString|getSelectedStorageBackend)/.test(index);
   const planned = /keyStoragePlan\(/.test(index);
   add('wiring', 'saving/reading API keys never calls safeStorage directly (key-storage.ts decides)', !direct && planned ? 'PASS' : 'FAIL', direct ? 'index.ts calls a safeStorage method directly' : planned ? '' : 'keyStoragePlan() is not used');
+}
+{
+  // Key files: config.json is created 600 inside a 700 folder, hardening never throws, and "Remove saved keys" exists (settings only, see IPC check above).
+  const hardens = /hardenKeyFiles\(configDir,[^;]*\);\s*\n\s*store = new Store/.test(index) && /configFileMode:\s*0o600/.test(index);
+  const removes = /handle\(CHANNELS\.clearKeys/.test(index) && /stripAllKeys\(/.test(index);
+  add('wiring', 'config.json is 600 / folder 700, and "Remove saved keys" is wired', hardens && removes ? 'PASS' : 'FAIL', !hardens ? 'start() must call hardenKeyFiles before new Store and pass configFileMode: 0o600' : removes ? '' : 'clearKeys handler or stripAllKeys missing');
 }
 {
   const safe = /requestSingleInstanceLock/.test(index) && /smokeTest\)\s*app\.setPath\('userData'/.test(index);

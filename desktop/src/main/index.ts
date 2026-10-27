@@ -15,14 +15,15 @@ import { TtsRouter } from './tts-provider.js';
 import { AzureTtsProvider } from './azure-provider.js';
 import { validAzureKey, validAzureRegion } from '../shared/azure-tts.js';
 import { displayBackend } from '../shared/display-backend.js';
-import { migrateProviders, resolveProviderKey, shouldActivate, withProviderEntry } from './provider-keys.js';
+import { migrateProviders, resolveProviderKey, shouldActivate, stripAllKeys, withProviderEntry } from './provider-keys.js';
 import type { KeyCodec, ProviderMap } from './provider-keys.js';
 import { SttRouter } from './stt.js';
 import type { SpeechEvent, StopReason } from '../shared/speech-events.js';
 import { installHiddenWindows, runSmoke, smokeApprovalTimeoutMs } from './smoke.js';
 import { overlayShape } from '../shared/overlay-shape.js';
 import { activePanelForState } from '../shared/overlay-panels.js';
-import { decodeKey, encodeKey, keyStoragePlan } from './key-storage.js';
+import { decodeKey, describeKeyStorage, encodeKey, keyStoragePlan } from './key-storage.js';
+import { hardenKeyFiles } from './key-files.js';
 import { LocalAI, normalizeCloudModel } from './local-ai.js';
 import { UsageTracker } from '../shared/usage.js';
 import { UsageFile } from './usage-store.js';
@@ -932,6 +933,25 @@ function setupIPC() {
     console.info(`[TTS] engine=${result.provider ?? 'none'} voice=${result.voice ?? '-'} lang=${lang} chars=${clean.length} ok=${result.ok} ms=${Date.now() - synthStarted}${result.cached ? ' cached' : ''}${result.ok ? '' : ` status=${result.status ?? '-'}`}`);
     return result.ok ? { ok: true, dataUri: result.dataUri } : { ok: false };
   });
+  // How keys are stored, in words (single source: describeKeyStorage). Never calls safeStorage.
+  handle(CHANNELS.keyStorageInfo, () => describeKeyStorage(keyPlan, process.platform), 'settings');
+  // "Remove saved keys": click + confirm in Settings. Clears every provider key (chat, Gemini, Groq, Azure ...) from disk and memory.
+  handle(CHANNELS.clearKeys, () => {
+    try {
+      cancelScreenCapture();
+      conversation.stop();
+      const result = stripAllKeys(store.get('cloud'), store.get('providers') as ProviderMap | undefined);
+      if (result.cloud) store.set('cloud', result.cloud as StoredCloud);
+      store.set('providers', result.providers as Record<string, StoredProvider | undefined>);
+      aiState.cloud = { ...aiState.cloud, apiKeySet: false, maskedKey: '' };
+      router?.resetBackoff();
+      if (azureProvider) azureProvider.lastError = '';
+      publishAI();
+      return { ok: true, removed: result.removed, notice: result.removed ? `Removed ${result.removed} saved key${result.removed === 1 ? '' : 's'} from this computer.` : 'No saved keys were found.' };
+    } catch {
+      return { ok: false, error: 'Could not remove the saved keys. Please try again.' };
+    }
+  }, 'settings');
   // Counters and reset times only (no keys); Settings shows the full list, Chat one calm line.
   handle(CHANNELS.usage, () => usage().summary({ gemini: Boolean(geminiKey()), groq: Boolean(getProviderKey('groq')), azure: azure().hasKey() }), ['settings', 'chat']);
   handle(CHANNELS.azureGet, () => {
@@ -1090,7 +1110,11 @@ function setupIPC() {
   });
 }
 async function start() {
+  // Keys live in config.json: make the folder 700 before the store creates the file, and the file 600 (best effort, never throws or blocks).
+  const configDir = app.getPath('userData');
+  hardenKeyFiles(configDir, ['config.json'], process.platform);
   store = new Store<StoreSchema>({
+    configFileMode: 0o600,
     defaults: {
       // Smoke runs must never open the real microphone or grab the user's global shortcut.
       settings: smokeTest ? { ...DEFAULT_SETTINGS, wakeWordEnabled: false, shortcut: 'Control+Alt+Shift+F24' } : DEFAULT_SETTINGS,
@@ -1099,6 +1123,7 @@ async function start() {
       position: null,
     },
   });
+  hardenKeyFiles(configDir, ['config.json'], process.platform); // also fixes a config.json that an older version left world-readable
   // Never call safeStorage here: on this Linux setup isEncryptionAvailable() can block forever on the
   // keyring, which stopped every window from opening. Encryption happens only when the user saves a key.
   try {

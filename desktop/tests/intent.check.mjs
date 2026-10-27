@@ -148,3 +148,76 @@ test('intent.ts is pure: no Electron, fs, network or timers', () => {
   const src = readFileSync(new URL('../src/shared/intent.ts', import.meta.url), 'utf8');
   assert.doesNotMatch(src, /from 'electron'|node:fs|fetch\(|setTimeout|setInterval|process\.|require\(/);
 });
+
+// ---- Chat window's own voice call uses the same routing ----
+import { runChatVoiceTurn } from '../src/shared/chat-voice-turn.ts';
+
+function fakeVoiceApi(screenResult = { ok: true }) {
+  const calls = { screen: [], message: [] };
+  return {
+    calls,
+    api: {
+      sendScreen: async payload => { calls.screen.push(payload); return screenResult; },
+      sendMessage: async (text, voice) => { calls.message.push({ text, voice }); return { ok: true }; },
+    },
+  };
+}
+const settle = () => new Promise(resolve => setTimeout(resolve, 5));
+
+test('chat voice: a screen phrase starts the screen flow ONLY when screen assist is ON', async () => {
+  const on = fakeVoiceApi();
+  assert.equal(runChatVoiceTurn('meri screen dekho', true, on.api), 'screen');
+  await settle();
+  assert.deepEqual(on.calls.screen, [{ text: 'meri screen dekho', source: 'wake' }]);
+  assert.equal(on.calls.message.length, 0, 'a successful screen turn is not also sent as a blind message');
+
+  const off = fakeVoiceApi();
+  assert.equal(runChatVoiceTurn('meri screen dekho', false, off.api), 'message');
+  await settle();
+  assert.equal(off.calls.screen.length, 0, 'setting off: never a capture request');
+  assert.deepEqual(off.calls.message, [{ text: 'meri screen dekho', voice: true }]);
+});
+
+test('chat voice: chat, task and unsure utterances never request a screenshot', async () => {
+  for (const phrase of ['kaise ho', 'notes.txt bana do', 'reminder lagao', 'what is the error in python', 'screen ki brightness kam karo', 'isko samjhao', 'ye file kya hai', 'hmm', 'dekho yaar mujhe nahi pata']) {
+    const { api, calls } = fakeVoiceApi();
+    assert.equal(runChatVoiceTurn(phrase, true, api), 'message', phrase);
+    await settle();
+    assert.equal(calls.screen.length, 0, `${phrase}: no screenshot`);
+    assert.deepEqual(calls.message, [{ text: phrase, voice: true }], phrase);
+  }
+});
+
+test('chat voice: silence or an empty transcript does nothing, never a capture', async () => {
+  const { api, calls } = fakeVoiceApi();
+  assert.equal(runChatVoiceTurn('', true, api), 'ignored');
+  assert.equal(runChatVoiceTurn('   ', true, api), 'ignored');
+  assert.equal(runChatVoiceTurn('meri screen dekho', true, undefined), 'ignored');
+  await settle();
+  assert.equal(calls.screen.length + calls.message.length, 0);
+});
+
+test('chat voice: when the screenshot is not taken the words are still answered, unless the reason was already shown', async () => {
+  const failed = fakeVoiceApi({ ok: false });
+  runChatVoiceTurn('ye kya hai', true, failed.api);
+  await settle();
+  assert.deepEqual(failed.calls.message, [{ text: 'ye kya hai', voice: true }]);
+
+  const declined = fakeVoiceApi({ ok: false, handled: true });
+  runChatVoiceTurn('ye kya hai', true, declined.api);
+  await settle();
+  assert.equal(declined.calls.message.length, 0, 'declined/guarded: already announced on the overlay, no blind chat message');
+});
+
+test('wiring: the Chat window voice handler goes through runChatVoiceTurn, with no direct capture', () => {
+  const app = readFileSync(new URL('../src/renderer/App.tsx', import.meta.url), 'utf8');
+  assert.match(app, /import \{ runChatVoiceTurn \} from '..\/shared\/chat-voice-turn\.ts'/);
+  assert.match(app, /runChatVoiceTurn\(text, Boolean\(settingsRef\.current\.screenAssistEnabled\), api\)/);
+  // The chat voice onFinal no longer sends every utterance as a plain message.
+  assert.doesNotMatch(app, /setBotSubtitle\(''\);\s*void api\?\.sendMessage\(text\.trim\(\), true\);/);
+  const helper = readFileSync(new URL('../src/shared/chat-voice-turn.ts', import.meta.url), 'utf8');
+  assert.match(helper, /routeSpeech\(clean, \{ screenAssist, afterWake: false \}\)/);
+  assert.doesNotMatch(helper, /setTimeout|setInterval|process\.|from 'electron'/, 'no timers: nothing can capture on its own');
+  // Same sources as the overlay: a spoken request, never 'button' (which has a shorter cooldown).
+  assert.match(helper, /source: 'wake'/);
+});

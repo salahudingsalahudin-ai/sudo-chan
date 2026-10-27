@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { AIMode, AIState, CloudProviderId } from '../shared/types';
 import { CLOUD_PRESETS } from '../shared/validation';
+import { useKeyStorageInfo } from './KeyStorage';
 
 const GEMINI_PREFERRED_MODELS = [
   'gemini-flash-latest',
@@ -10,6 +11,7 @@ const GEMINI_PREFERRED_MODELS = [
 ];
 
 export function AISettings() {
+  const keyStorage = useKeyStorageInfo();
   const [ai, setAI] = useState<AIState>({
     mode: 'local',
     model: '',
@@ -721,7 +723,7 @@ export function AISettings() {
               autoComplete="off"
             />
             <p className="field-hint">
-              Saved encrypted on this computer via safeStorage. Never sent to Sudo-chan servers.
+              {keyStorage.hint}
             </p>
           </div>
 
