@@ -14,6 +14,7 @@ import { approvalHeadline, approvalSecondsLeft, approvalSpokenLine, mergeApprova
 import { clearInterruptedSpeech, getMutedPreference, hasInterruptedSpeech, resumeInterruptedSpeech, setMutedPreference, speak, stopSpeech } from './speech';
 import { isStopCommand, unclearAction } from '../shared/stop-intent.ts';
 import { routeSpeech } from '../shared/intent.ts';
+import { runChatVoiceTurn } from '../shared/chat-voice-turn.ts';
 import { DEFAULT_BARGE_IN_SENSITIVITY } from '../shared/barge-in.ts';
 import { formatResetLabel } from '../shared/usage.ts';
 import { isSpeakingNow, stopSpeaking } from './tts-player';
@@ -560,7 +561,8 @@ function Chat({ state }: { state: AppState }) {
           if (text.trim() && handleStopCommand(text)) return;
           if (text.trim() && !conversationBusyRef.current) {
             setBotSubtitle('');
-            void api?.sendMessage(text.trim(), true);
+            // Same routing as the overlay: only a clear screen request (and only with screen assist ON) starts the screenshot flow.
+            runChatVoiceTurn(text, Boolean(settingsRef.current.screenAssistEnabled), api);
           }
         },
         onAudioLevel: level => {
