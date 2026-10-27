@@ -368,6 +368,8 @@ export interface VoiceSessionCallbacks {
 }
 
 const BARGE_IN_BASE_THRESHOLD = 0.009;
+/** Minimum voiced audio (ms) before a clip is sent to speech-to-text. */
+const MIN_VOICED_MS = 220;
 
 /**
  * Continuous Voice Activity Detection (VAD) & Instant Speech Recognizer
@@ -517,7 +519,13 @@ export class VoiceSession {
             this.silenceTimer = setTimeout(() => {
               this.silenceTimer = null;
               this.isSpeakingSpeech = false;
-              if (this.speechChunks.length > 8 && !this.isProcessingTranscribe) {
+              // Clicks, coughs and fan noise produce tiny bursts; every clip sent to the cloud costs ~2 s and
+              // blocks real speech while it is processed, so require a minimum of actual voiced audio.
+              if (this.voicedMs < MIN_VOICED_MS) {
+                this.speechChunks = [];
+                this.burstPitches = [];
+                this.voicedMs = 0;
+              } else if (this.speechChunks.length > 8 && !this.isProcessingTranscribe) {
                 const avgPitch = this.burstPitches.length > 0
                   ? Math.round(this.burstPitches.reduce((a, b) => a + b, 0) / this.burstPitches.length)
                   : undefined;

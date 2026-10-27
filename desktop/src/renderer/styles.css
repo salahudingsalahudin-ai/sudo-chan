@@ -1133,3 +1133,17 @@ body[data-window=overlay]{overflow:hidden}.overlay-room{position:relative;width:
 .presence-dot.is-off{background:#aab8bc;box-shadow:0 0 0 3px #aab8bc22}
 @keyframes micPulse{0%,100%{box-shadow:0 0 0 3px #62d9be1f}50%{box-shadow:0 0 0 5px #62d9be44}}
 @media (prefers-reduced-motion:reduce){.presence-dot.is-listening{animation:none}}
+
+/* Glow behind the desktop bot: it reacts to the real mic level while listening and to her voice while speaking */
+.overlay-glow{position:absolute;left:8%;top:14%;width:84%;height:74%;border-radius:50%;pointer-events:none;z-index:0;
+  background:radial-gradient(circle,rgba(98,217,190,.55) 0%,rgba(98,217,190,.22) 45%,rgba(98,217,190,0) 70%);
+  opacity:calc(.28 + var(--glow,0) * .72);transform:scale(calc(.92 + var(--glow,0) * .2));transition:opacity 90ms linear,transform 90ms linear}
+.overlay-glow.is-live{background:radial-gradient(circle,rgba(74,168,255,.6) 0%,rgba(74,168,255,.24) 45%,rgba(74,168,255,0) 70%)}
+.overlay-glow.is-speaking{background:radial-gradient(circle,rgba(150,120,255,.55) 0%,rgba(150,120,255,.22) 45%,rgba(150,120,255,0) 70%)}
+.overlay-glow.is-standby{animation:glowBreathe 3s ease-in-out infinite}
+@keyframes glowBreathe{0%,100%{filter:brightness(.85)}50%{filter:brightness(1.1)}}
+@media (prefers-reduced-motion:reduce){.overlay-glow.is-standby{animation:none}}
+
+/* The mic dot in the overlay pill is the on/off switch for the desktop bot's microphone */
+.presence-dot.mic-toggle{cursor:pointer;width:11px;height:11px;outline-offset:3px}
+.presence-dot.mic-toggle:hover{filter:brightness(1.15)}
