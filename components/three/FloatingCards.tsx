@@ -66,7 +66,7 @@ export default function FloatingCards({ weights, reduced }: { weights: MutableRe
       if (!item.group || !item.sharp || !item.soft) return;
       const a = t * 0.2 + (i * Math.PI) / 2;
       const s = Math.sin(a);
-      const x = Math.cos(a) * clamp(viewport.width * 0.165, 0.9, 1.3);
+      const x = Math.cos(a) * clamp(viewport.width * 0.145, 0.85, 1.2);
       const z = s * 1.0 - 0.05;
       // Tilted orbit: cards pass low in front of her body, high behind her head, so they never cover her face.
       const y = 0.12 - s * 0.8 + Math.sin(t * 0.7 + i * 1.9) * 0.05;

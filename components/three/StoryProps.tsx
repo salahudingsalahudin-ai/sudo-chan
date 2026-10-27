@@ -282,7 +282,7 @@ export function PrivacyLock(shared: Shared) {
         <meshBasicMaterial ref={domeMat} color={PALETTE.cyan} wireframe transparent opacity={0.1} depthWrite={false} toneMapped={false} />
       </mesh>
       <group ref={lock} position={[1.1, -0.25, 0.55]}>
-        <mesh position={[0, 0.34, 0]} material={shackle}><torusGeometry args={[0.2, 0.055, 12, 32, Math.PI]} /></mesh>
+        <mesh position={[0, 0.22, 0]} material={shackle}><torusGeometry args={[0.2, 0.055, 12, 32, Math.PI]} /></mesh>
         <RoundedBox args={[0.66, 0.52, 0.28]} radius={0.12} smoothness={4} material={body} />
         <mesh position={[0, 0.04, 0.145]}><circleGeometry args={[0.055, 20]} /><meshBasicMaterial color="#8fe9ff" toneMapped={false} /></mesh>
         <mesh position={[0, -0.05, 0.145]}><planeGeometry args={[0.03, 0.1]} /><meshBasicMaterial color="#8fe9ff" toneMapped={false} /></mesh>

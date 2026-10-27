@@ -50,7 +50,7 @@ main.journey .site-footer{font-size:12px}
 main.journey.reduced-motion .trust-panel li{transform:none}
 
 /* ---- 3D hero pass: lightweight SVG companion, counter placement, mobile bot, focus rings ---- */
-.static-bot-head{--bot-tilt:none}
+.static-bot-head{--bot-tilt:rotateX(0deg)}
 .static-bot[data-scene-side="right"] .static-bot-head,.journey.is-hero-active .static-bot-head{transform:translate(23vw,-3vh) var(--bot-tilt)!important}
 .static-bot[data-scene-side="left"] .static-bot-head{transform:translate(-23vw,-3vh) var(--bot-tilt)!important}
 .companion-svg{color:#4fd0e4;animation:cs-voice 10s ease-in-out infinite;filter:drop-shadow(0 18px 28px rgba(16,36,70,.18))}
