@@ -4,7 +4,7 @@ import Store from 'electron-store';
 import { setLaunchAtLogin } from './autostart.js';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { appendFileSync, mkdtempSync, promises as fsp } from 'node:fs';
+import { appendFileSync, existsSync, mkdtempSync, promises as fsp } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { CHANNELS } from '../shared/types.js';
 import type { AIMode, AIState, AppState, ChatState, CloudConfigInput, CloudProviderId, Settings, WindowKind } from '../shared/types.js';
@@ -54,6 +54,7 @@ import type { FlowStatus } from '../shared/screen-flow.ts';
 import { checkVisibleWindows, listWindows } from './screen-guard.ts';
 import { AWARENESS_IDLE_MS, AWARENESS_POLL_MS, awarenessChangeAllowed, LiveAwareness } from '../shared/live-awareness.ts';
 import { isLiveStopReason, liveStartLine, liveStopLine } from '../shared/live-talk.ts';
+import { shouldShowOnboarding } from '../shared/onboarding.ts';
 import type { LiveStopReason } from '../shared/live-talk.ts';
 import type { VisionProviderInfo, VisionTarget } from '../shared/screen-assist.ts';
 import type { StreamOptions } from './local-ai.js';
@@ -456,10 +457,10 @@ function authorizeOrDrop(event: Electron.IpcMainEvent, kind?: WindowKind | Windo
 }
 function createWindow(kind: WindowKind) {
   const isOverlay = kind === 'overlay';
-  const [width, height] = isOverlay ? BOT_DIMENSIONS[state.settings.botSize] : kind === 'chat' ? [460, 650] : [780, 760];
+  const [width, height] = isOverlay ? BOT_DIMENSIONS[state.settings.botSize] : kind === 'chat' ? [460, 650] : state.setupActive ? SETUP_WINDOW_SIZE : [780, 760];
   const work = screen.getPrimaryDisplay().workArea;
   const win = new BrowserWindow({
-    width: Math.min(width, work.width), height: Math.min(height, work.height), minWidth: isOverlay ? undefined : Math.min(360, work.width), minHeight: isOverlay ? undefined : Math.min(450, work.height),
+    width: Math.min(width, work.width), height: Math.min(height, work.height), minWidth: isOverlay ? undefined : Math.min(kind === 'settings' && state.setupActive ? SETUP_MIN_SIZE[0] : 360, work.width), minHeight: isOverlay ? undefined : Math.min(kind === 'settings' && state.setupActive ? SETUP_MIN_SIZE[1] : 450, work.height),
     title: `Sudo-chan${kind === 'settings' ? ' · Your space' : kind === 'chat' ? ' · A little closer' : ''}`,
     frame: false, transparent: isOverlay, backgroundColor: isOverlay ? '#00000000' : '#101d25',
     alwaysOnTop: isOverlay || kind === 'chat', skipTaskbar: isOverlay, resizable: !isOverlay,
@@ -564,10 +565,43 @@ function openChat() {
   const position = clampPosition({ x: overlay.getBounds().x - bounds.width - 12, y: area.y + area.height - bounds.height - 28 }, area, bounds.width, bounds.height);
   chat.setPosition(position.x, position.y);
 }
+// ---- First-run setup wizard: a MODE of the Settings window (no new window kind). Pure rules: shared/onboarding.ts ----
+const SETUP_WINDOW_SIZE = [600, 720] as const;
+const SETUP_MIN_SIZE = [480, 560] as const;
+let setupLiveStarted = false;
+function applySettingsWindowSize() {
+  if (!settingsWindow || settingsWindow.isDestroyed()) return;
+  const work = screen.getPrimaryDisplay().workArea;
+  const [width, height] = state.setupActive ? SETUP_WINDOW_SIZE : [780, 760];
+  const [minWidth, minHeight] = state.setupActive ? SETUP_MIN_SIZE : [360, 450];
+  settingsWindow.setMinimumSize(Math.min(minWidth, work.width), Math.min(minHeight, work.height));
+  settingsWindow.setSize(Math.min(width, work.width), Math.min(height, work.height));
+  settingsWindow.center();
+}
+function endSetupLive() {
+  if (!setupLiveStarted) return;
+  setupLiveStarted = false;
+  if (state.voiceActiveTarget === 'overlay') setLiveTarget(null, 'click');
+}
+function setSetupMode(active: boolean) {
+  if (Boolean(state.setupActive) === active) return;
+  state.setupActive = active;
+  if (!active) endSetupLive();
+  applySettingsWindowSize();
+  publish();
+}
+/** Closing the wizard window (Esc, the close button, the tray) counts as "skip setup": it is recorded once and never comes back by itself. */
+function dismissSetup() {
+  if (!state.setupActive) return;
+  setSetupMode(false);
+  void saveSettings({ onboardingDone: true }, 'settings');
+}
 function openSettings() {
   if (!settingsWindow || settingsWindow.isDestroyed()) {
     settingsWindow = createWindow('settings');
-    settingsWindow.once('ready-to-show', () => { settingsWindow?.show(); settingsWindow?.focus(); });
+    const created = settingsWindow;
+    created.once('ready-to-show', () => { if (state.setupActive) created.center(); created.show(); created.focus(); });
+    created.on('hide', () => { if (!quitting && !captureHidden.has(created)) dismissSetup(); });
   } else { settingsWindow.show(); settingsWindow.focus(); }
 }
 function updateTray() {
@@ -1201,6 +1235,23 @@ function setupIPC() {
     if (granted === true) void saveSettings({ liveAwareness: 'window' }, 'awareness-prompt');
     else publish();
   }, 'overlay');
+  // Setup wizard: Settings window only. Entering needs nothing; the live demo works only while the wizard is open.
+  handle(CHANNELS.setupMode, (_e, active) => {
+    if (typeof active !== 'boolean') return { ok: false, error: 'Invalid request.' };
+    setSetupMode(active);
+    return { ok: true };
+  }, 'settings');
+  handle(CHANNELS.setupLive, (_e, active) => {
+    if (typeof active !== 'boolean') return { ok: false, error: 'Invalid request.' };
+    if (!state.setupActive) return { ok: false, error: 'Setup is not open.' };
+    if (active) {
+      // The wizard already asked about the window name (or the person skipped it): no second question on the desktop bot during the demo.
+      store.set('liveAwarenessAsked', true);
+      setupLiveStarted = true;
+      setLiveTarget('overlay');
+    } else endSetupLive();
+    return { ok: true };
+  }, 'settings');
   // Compatibility only: speech state is owned by CHANNELS.speechEvent below.
   handle(CHANNELS.setIsSpeaking, () => ({ ok: true }));
   ipcMain.on(CHANNELS.speechEvent, (event, payload: unknown) => {
@@ -1284,12 +1335,15 @@ function setupIPC() {
 async function start() {
   // Keys live in config.json: make the folder 700 before the store creates the file, and the file 600 (best effort, never throws or blocks).
   const configDir = app.getPath('userData');
+  // Fresh install = no config.json yet. Looked at BEFORE the store creates it (see shared/onboarding.ts shouldShowOnboarding).
+  const configExisted = existsSync(join(configDir, 'config.json'));
+  const freshInstall = !configExisted && !smokeTest;
   hardenKeyFiles(configDir, ['config.json'], process.platform);
   store = new Store<StoreSchema>({
     configFileMode: 0o600,
     defaults: {
       // Smoke runs must never open the real microphone or grab the user's global shortcut.
-      settings: smokeTest ? { ...DEFAULT_SETTINGS, wakeWordEnabled: false, shortcut: 'Control+Alt+Shift+F24' } : DEFAULT_SETTINGS,
+      settings: smokeTest ? { ...DEFAULT_SETTINGS, wakeWordEnabled: false, shortcut: 'Control+Alt+Shift+F24' } : freshInstall ? { ...DEFAULT_SETTINGS, wakeWordEnabled: false, onboardingStep: 'welcome' as const } : DEFAULT_SETTINGS,
       mode: 'local',
       model: 'qwen2.5:0.5b',
       position: null,
@@ -1330,6 +1384,14 @@ async function start() {
     };
   }
   state = { settings: validSettings(saved) ? saved : { ...DEFAULT_SETTINGS }, paused: false, mood: 'calm', speech: '', overlayVisible: true, shortcutAvailable: false, platform: process.platform, displayBackend: process.platform === 'linux' ? nativeWayland ? 'Wayland (experimental)' : wayland ? 'XWayland compatibility' : 'X11' : process.platform, loginSupported: app.isPackaged, voiceCallActive: false, voiceActiveTarget: null };
+  // A brand new install opens the setup wizard (the microphone stays closed until the wizard asks); everyone with a config already never sees it.
+  const providersSaved = store.get('providers') as Record<string, unknown> | undefined;
+  state.setupActive = shouldShowOnboarding({
+    configExisted,
+    settings: validSettings(saved) ? saved : undefined,
+    hasSavedKeys: Boolean(store.get('cloud')) || Boolean(providersSaved && Object.keys(providersSaved).length > 0),
+    smokeRun: smokeTest,
+  });
   session.defaultSession.setPermissionRequestHandler((_contents, permission, callback) => callback(permission === 'media' && !smokeTest));
   session.defaultSession.setPermissionCheckHandler((_contents, permission) => permission === 'media' && !smokeTest);
   setupIPC();
@@ -1340,6 +1402,7 @@ async function start() {
   overlay.setIgnoreMouseEvents(false);
   overlay.on('resize', updateOverlayShape);
   overlay.once('ready-to-show', showOverlay);
+  if (state.setupActive) overlay.once('ready-to-show', () => setTimeout(openSettings, 500));
   // `moved` is macOS/Windows-only; `move` also fires on Linux/XWayland.
   overlay.on('move', () => {
     clearTimeout(positionTimer);

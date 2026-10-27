@@ -2,6 +2,7 @@ import type { CloudConfigInput, CloudProviderId, Settings } from './types.js';
 import { isAzureVoice } from './azure-tts.ts';
 import { isLocalWakeMode } from './local-wake/types.ts';
 import { isLiveAwarenessSetting } from './live-awareness.ts';
+import { isOnboardingLanguage, isOnboardingStep } from './onboarding.ts';
 
 export const DEFAULT_SETTINGS: Settings = {
   shortcut: 'Control+Space',
@@ -38,6 +39,8 @@ export const DEFAULT_SETTINGS: Settings = {
   liveAwareness: 'off',
   liveKeepAnEye: false,
   updateCheckEnabled: true,
+  onboardingDone: false,
+  onboardingLanguage: 'en',
 };
 export const BOT_DIMENSIONS = { small: [190, 230], medium: [220, 260], large: [264, 312] } as const;
 export const MAX_MESSAGE_LENGTH = 2000;
@@ -107,6 +110,9 @@ export function validSettings(value: unknown): value is Settings {
   if (s.liveAwareness !== undefined && !isLiveAwarenessSetting(s.liveAwareness)) return false;
   if (s.liveKeepAnEye !== undefined && typeof s.liveKeepAnEye !== 'boolean') return false;
   if (s.updateCheckEnabled !== undefined && typeof s.updateCheckEnabled !== 'boolean') return false;
+  if (s.onboardingDone !== undefined && typeof s.onboardingDone !== 'boolean') return false;
+  if (s.onboardingLanguage !== undefined && !isOnboardingLanguage(s.onboardingLanguage)) return false;
+  if (s.onboardingStep !== undefined && !isOnboardingStep(s.onboardingStep)) return false;
   if (s.bargeInSensitivity !== undefined && (typeof s.bargeInSensitivity !== 'number' || !Number.isFinite(s.bargeInSensitivity) || s.bargeInSensitivity < 0 || s.bargeInSensitivity > 1)) return false;
   if (s.localWake !== undefined && !isLocalWakeMode(s.localWake)) return false;
   if (s.localWakeSensitivity !== undefined && (typeof s.localWakeSensitivity !== 'number' || !Number.isFinite(s.localWakeSensitivity) || s.localWakeSensitivity < 0 || s.localWakeSensitivity > 1)) return false;

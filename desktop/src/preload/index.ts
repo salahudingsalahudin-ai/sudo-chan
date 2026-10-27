@@ -90,5 +90,7 @@ const api: DesktopAPI = {
   getLocalWakeProfile: () => ipcRenderer.invoke(CHANNELS.localWakeGet),
   saveLocalWakeProfile: profile => ipcRenderer.invoke(CHANNELS.localWakeSave, profile),
   deleteLocalWakeProfile: () => ipcRenderer.invoke(CHANNELS.localWakeDelete),
+  setSetupMode: active => ipcRenderer.invoke(CHANNELS.setupMode, active === true),
+  setupLive: active => ipcRenderer.invoke(CHANNELS.setupLive, active === true),
 };
 contextBridge.exposeInMainWorld('companion', api);

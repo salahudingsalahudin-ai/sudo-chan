@@ -3,6 +3,7 @@ import type { UsageSummary } from './usage.ts';
 import type { PanelAction, TasksView } from './tasks.ts';
 import type { LocalWakeMode } from './local-wake/types.ts';
 import type { LiveStopReason } from './live-talk.ts';
+import type { OnboardingLanguage, OnboardingStep } from './onboarding.ts';
 export type Mood = 'calm' | 'worried' | 'happy';
 export type WindowKind = 'overlay' | 'chat' | 'settings';
 export type BotSize = 'small' | 'medium' | 'large';
@@ -63,6 +64,12 @@ export interface Settings {
   liveKeepAnEye?: boolean;
   /** Once a day, ask GitHub (from the main process only) whether a newer release exists. Default ON; never downloads anything. */
   updateCheckEnabled?: boolean;
+  /** The first-run setup wizard was finished or dismissed. Existing users never see the wizard unless they choose "Run setup again". */
+  onboardingDone?: boolean;
+  /** Language of the wizard's own screens only ('en' or 'roman-ur'). */
+  onboardingLanguage?: OnboardingLanguage;
+  /** The wizard step the person is on, so a restart resumes at the same screen. */
+  onboardingStep?: OnboardingStep;
 }
 export interface AppState {
   settings: Settings;
@@ -95,6 +102,8 @@ export interface AppState {
   awarenessPrompt?: boolean;
   /** Bumped whenever the on-device wake profile is saved or deleted, so the desktop bot reloads it. */
   localWakeRevision?: number;
+  /** True while the Settings window shows the first-run setup wizard instead of the normal Settings page. */
+  setupActive?: boolean;
 }
 export interface ModelMeta {
   sizeMB: number;
@@ -225,6 +234,10 @@ export interface DesktopAPI {
   saveLocalWakeProfile(profile: unknown): Promise<ActionResult>;
   /** Settings only: deletes the profile file ("Delete my voice samples"). */
   deleteLocalWakeProfile(): Promise<ActionResult>;
+  /** Settings window only: show (true) or leave (false) the setup wizard. Leaving also ends a Live Talk the wizard started. */
+  setSetupMode(active: boolean): Promise<ActionResult>;
+  /** Settings window only, and only while the wizard is open: start or stop the "try it" Live Talk on the desktop bot. */
+  setupLive(active: boolean): Promise<ActionResult>;
 }
 export interface TasksActionResult { ok: boolean; error?: string; view: TasksView }
 /** `profile` is the parsed file content (renderer validates it again with parseProfile); `revision` changes on every save or delete so the overlay can reload. */
@@ -273,4 +286,6 @@ export const CHANNELS = {
   localWakeGet: 'companion:local-wake-get',
   localWakeSave: 'companion:local-wake-save',
   localWakeDelete: 'companion:local-wake-delete',
+  setupMode: 'companion:setup-mode',
+  setupLive: 'companion:setup-live',
 } as const;

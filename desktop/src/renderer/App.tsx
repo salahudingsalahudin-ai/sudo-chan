@@ -14,6 +14,8 @@ import { ClipGate, WAKE_TRIM_MS, formatGateLine } from '../shared/clip-gate.ts';
 import { LocalWakeController, decideWakeClip } from '../shared/local-wake/runtime.ts';
 import { parseProfile } from '../shared/local-wake/enrollment.ts';
 import { LocalWakeSettings } from './LocalWakeSettings';
+import { SetupWizard } from './SetupWizard';
+import { restartPatch } from '../shared/onboarding.ts';
 import { approvalHeadline, approvalSecondsLeft, approvalSpokenLine, mergeApprovals, reduceApprovals } from '../shared/approval-ui.ts';
 import { clearInterruptedSpeech, getLastBotSpeech, getMutedPreference, hasInterruptedSpeech, resumeInterruptedSpeech, setMutedPreference, speak, stopSpeech } from './speech';
 import { isStopCommand, unclearAction } from '../shared/stop-intent.ts';
@@ -81,14 +83,15 @@ function ThinkingIndicator() {
 function useCompanion() {
   const [state, setState] = useState(initialState);
   const [error, setError] = useState('');
+  const [ready, setReady] = useState(false);
   useEffect(() => {
     if (!api) { setError('Open this preview in the Sudo-chan desktop app.'); return; }
     let subscribed = true;
-    const unsubscribe = api.onState(next => { if (subscribed) setState(next); });
-    void api.getState().then(next => { if (subscribed) setState(next); }).catch(() => { if (subscribed) setError('Could not connect to your companion. Please restart the app.'); });
+    const unsubscribe = api.onState(next => { if (subscribed) { setState(next); setReady(true); } });
+    void api.getState().then(next => { if (subscribed) { setState(next); setReady(true); } }).catch(() => { if (subscribed) setError('Could not connect to your companion. Please restart the app.'); });
     return () => { subscribed = false; unsubscribe(); };
   }, []);
-  return { state, error };
+  return { state, error, ready };
 }
 function WindowHeader({ subtitle, settings = false }: { subtitle: string; settings?: boolean }) {
   return <header className="window-header"><div className="brand-mark">s<span/></div><div className="header-brand"><b>Sudo-chan</b><span>{subtitle}</span></div><div className="header-actions">{!settings && <button className="icon-button" aria-label="Open settings" onClick={() => void api?.openSettings()}><Icon name="settings"/></button>}<button className="icon-button" aria-label="Hide window" onClick={() => void api?.hideWindow()}><Icon name="close"/></button></div></header>;
@@ -1316,6 +1319,9 @@ function SettingsView({ state }: { state: AppState }) {
     settings.localWake !== state.settings.localWake ||
     settings.localWakeSensitivity !== state.settings.localWakeSensitivity ||
     settings.updateCheckEnabled !== state.settings.updateCheckEnabled ||
+    settings.onboardingDone !== state.settings.onboardingDone ||
+    settings.onboardingLanguage !== state.settings.onboardingLanguage ||
+    settings.onboardingStep !== state.settings.onboardingStep ||
     settings.ttsProvider !== state.settings.ttsProvider ||
     settings.ttsQuality !== state.settings.ttsQuality ||
     settings.ttsGeminiVoice !== state.settings.ttsGeminiVoice ||
@@ -1346,6 +1352,9 @@ function SettingsView({ state }: { state: AppState }) {
     state.settings.localWake,
     state.settings.localWakeSensitivity,
     state.settings.updateCheckEnabled,
+    state.settings.onboardingDone,
+    state.settings.onboardingLanguage,
+    state.settings.onboardingStep,
     state.settings.ttsProvider,
     state.settings.ttsQuality,
     state.settings.ttsGeminiVoice,
@@ -1371,6 +1380,13 @@ function SettingsView({ state }: { state: AppState }) {
     try { const result = await api.saveSettings(changedSettings(state.settings, settings), 'settings'); setIsError(!result.ok); setNotice(result.ok ? 'All settled. Your space, your way.' : result.error ?? 'Could not save settings.'); }
     catch { setIsError(true); setNotice('Could not save. Please try again.'); }
     finally { setSaving(false); }
+  };
+  const runSetupAgain = async () => {
+    if (!api) return;
+    try {
+      await api.saveSettings(restartPatch(state.settings.onboardingLanguage), 'settings');
+      await api.setSetupMode(true);
+    } catch { setIsError(true); setNotice('Could not open the setup. Please try again.'); }
   };
   const clear = async () => {
     if (!confirmClear) { setConfirmClear(true); return; }
@@ -1400,6 +1416,7 @@ function SettingsView({ state }: { state: AppState }) {
             </div>
           </SettingRow>
           <SettingRow title="Back to a familiar place" description="Move her to the bottom-right of your main screen."><button className="soft-button" type="button" onClick={() => void api?.resetPosition()}><Icon name="reset" size={15}/>Reset position</button></SettingRow>
+          <SettingRow title="Run setup again" description="Walk through the welcome steps once more: microphone, her name, her brain and your privacy choices. Nothing changes until you press Next on a step."><button className="soft-button" type="button" onClick={() => void runSetupAgain()}>Run setup again</button></SettingRow>
           <div className="gentle-note"><Icon name="chat" size={16}/><p>Drag the three little dots above her head. Click her to say hello; double-click to chat.</p></div>
         </section>
         <section id="rhythm" className="settings-card scroll-reveal"><div className="card-heading"><span className="section-icon lilac"><Icon name="pause"/></span><div><span className="eyebrow">02 / AT YOUR OWN PACE</span><h2>Your rhythm</h2></div></div>
@@ -1640,7 +1657,7 @@ function SettingsView({ state }: { state: AppState }) {
   </main>;
 }
 export default function App() {
-  const { state, error } = useCompanion();
+  const { state, error, ready } = useCompanion();
   const [kind] = useState(() => location.hash.slice(1));
   useEffect(() => {
     document.body.dataset.window = kind;
@@ -1657,5 +1674,8 @@ export default function App() {
   if (error) return <main className="bridge-error"><Bot/><h1>A little connection trouble.</h1><p role="alert">{error}</p></main>;
   if (kind === 'overlay') return <Overlay state={state}/>;
   if (kind === 'chat') return <Chat state={state}/>;
+  // Wait for the first real state, so a fresh install never flashes the Settings page before the setup wizard.
+  if (!ready) return <main className="app-window settings-window" aria-busy="true"/>;
+  if (state.setupActive) return <SetupWizard state={state}/>;
   return <SettingsView state={state}/>;
 }
