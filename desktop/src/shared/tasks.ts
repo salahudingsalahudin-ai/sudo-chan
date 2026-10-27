@@ -48,7 +48,7 @@ export function emptyState(): TaskState {
 
 // ------------------------------------------------------------------------------------------ text cleaning
 // eslint-disable-next-line no-control-regex
-const CONTROL = /[\u0000-\u0008\u000b-\u001f\u007f]/g;
+const CONTROL = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g;
 
 export function cleanTitle(value: unknown): string {
   return typeof value === 'string' ? value.replace(CONTROL, ' ').replace(/\s+/g, ' ').trim() : '';
