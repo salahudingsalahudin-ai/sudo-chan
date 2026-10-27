@@ -1,5 +1,22 @@
 # Changelog (desktop)
 
+## first-run-wizard (on top of live-talk-flow): a calm seven-screen setup for a fresh install
+
+Details, copy, states and how to look at it in `ONBOARDING.md`.
+
+- **Setup wizard** as a *mode of the Settings window* (`AppState.setupActive`; no new window kind): Welcome (English / Roman Urdu), Microphone (click-to-allow, live level meter,
+  friendly fixes for denied / no device / busy with Linux PipeWire and PulseAudio tips), Her name (optional teaching through the existing local-wake panel, `localWake` stays off unless the
+  self-test heard her and the person chooses it), Her brain (disabled "Sign in, coming soon", own Groq / Gemini key tested and stored through the main process, Ollama check, an honest
+  line about what works without a brain), Your choices (tools, screen help, window name: all OFF, plus "What she never does"), Say hello (one-click Live Talk demo with a listening glow
+  and a 3-item cheat sheet), All set (summary, tray icon, "Run setup again").
+- **Fresh install only.** Detected in `start()` before the store creates `config.json` (`shouldShowOnboarding` in `src/shared/onboarding.ts`). Owners and everybody with a config, settings or keys
+  never see it; smoke runs never show it. A fresh install starts with the microphone closed until the wizard asks. Progress is saved on every move and resumes on the same screen.
+- **Never blocks the app.** `Esc`, **Skip setup**, or closing the window records `onboardingDone` and returns to normal. Settings gets a **Run setup again** row.
+- **New settings** `onboardingDone`, `onboardingLanguage`, `onboardingStep` (types, defaults, `validSettings`, the Settings "unsaved changes" test and re-sync list). **New IPC** `setSetupMode`, `setupLive`
+  (Settings window only, `authorize`); preload / `DesktopAPI` parity kept; `LocalWakeSettings` gained optional `compact`, `onSelfTest`, `onProfileChange` props (Settings behaviour unchanged).
+- **Tests / verify:** `tests/onboarding.check.mjs` (28), one new `npm run verify` wiring check, two IPC entries in the authorize table and four smoke checks for the setup mode.
+  `scripts/onboarding-shots.mjs` (test-only) screenshots every screen in an isolated temp userData folder.
+
 ## live-talk-flow (on top of main 3f87daa): one Live Talk button, one state machine, instant stop, window-name awareness
 
 Details, the full transition table and 8 things to try in `LIVE-TALK-FLOW.md`.
