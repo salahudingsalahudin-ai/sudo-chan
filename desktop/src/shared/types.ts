@@ -131,6 +131,7 @@ export interface DesktopAPI {
   resetPosition(): Promise<void>;
   setInteractive(interactive: boolean): void;
   setCaptionVisible(visible: boolean): void;
+  onReminder(callback: (reminder: { text: string; late: boolean }) => void): () => void;
   sendMessage(text: string, voice?: boolean): Promise<ActionResult>;
   getMessages(): Promise<ChatState>;
   onChat(callback: (state: ChatState) => void): () => void;
@@ -185,6 +186,7 @@ export const CHANNELS = {
   speechEvent: 'companion:speech-event',
   speechBroadcast: 'companion:speech-broadcast',
   caption: 'companion:caption',
+  reminderDue: 'companion:reminder-due',
   azureGet: 'companion:azure-get',
   azureSave: 'companion:azure-save',
   azureTest: 'companion:azure-test',

@@ -189,6 +189,11 @@ function Overlay({ state }: { state: AppState }) {
     // One short spoken line; approving still needs a click.
     if (state.voiceActiveTarget === 'overlay') void speak(approvalSpokenLine(approval)).catch(() => {});
   }, [approval?.id]);
+  // A reminder came due: it is also a desktop notification; here she says it out loud.
+  useEffect(() => {
+    if (!api) return;
+    return api.onReminder(reminder => { void speak(`${reminder.late ? 'Der se yaad dila rahi hoon: ' : 'Yaad dilana: '}${reminder.text}`).catch(() => {}); });
+  }, []);
   const toolsWorking = state.toolStatus === 'working';
   const isOverlayVoiceActiveForCaption = state.voiceActiveTarget === 'overlay';
   const captionText = toolsWorking ? 'Kaam kar rahi hoon...' : (caption.bot || caption.you);

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, globalShortcut, ipcMain, Menu, nativeImage, safeStorage, screen, session, Tray } from 'electron';
+import { app, BrowserWindow, dialog, globalShortcut, ipcMain, Menu, nativeImage, Notification, safeStorage, screen, session, Tray } from 'electron';
 import type { IpcMainInvokeEvent } from 'electron';
 import Store from 'electron-store';
 import { setLaunchAtLogin } from './autostart.js';
@@ -28,6 +28,9 @@ import { AuditLog, redact } from './tools/audit.js';
 import * as toolPolicy from './tools/policy.js';
 import { createRegistry, nodeOpenDetached, nodeRunProgram, toDefinitions } from './tools/registry.js';
 import { ToolRuntime } from './tools/runtime.js';
+import { createNoteSpecs, createReminderSpecs } from './tools/extra-tools.js';
+import { NotesStore } from './tools/notes.js';
+import { Reminders, type Reminder } from './tools/reminders.js';
 import { PomodoroTimer } from './pomodoro.js';
 import { SystemHealthMonitor } from './system-health.js';
 import { captureScreen } from './screen-capture.ts';
@@ -60,6 +63,8 @@ interface StoreSchema {
   providers?: Record<string, StoredProvider | undefined>;
   /** The user has read and accepted that screenshots are sent to their cloud AI provider. */
   screenAssistConsent?: boolean;
+  /** Pending reminders (set by the assistant's set_reminder tool). */
+  reminders?: Reminder[];
 }
 
 const smokeTest = process.argv.includes('--smoke-test');
@@ -232,10 +237,34 @@ const toolApprovals = new ApprovalManager({
     if (toolApprovals.pendingCount === 0) setApprovalVisible(false);
   },
 });
+// Reminders keep firing after they were set even if tools are switched off later: switching tools off stops the
+// assistant from creating, listing or cancelling them, but a reminder the user asked for is never silently dropped.
+let reminders: Reminders | undefined;
+function reminderService(): Reminders {
+  reminders ??= new Reminders({
+    load: () => (store.get('reminders') as Reminder[] | undefined) ?? [],
+    save: list => store.set('reminders', list),
+    now: () => Date.now(),
+    setTimer: (fn, ms) => setTimeout(fn, ms),
+    clearTimer: handle => clearTimeout(handle as ReturnType<typeof setTimeout>),
+    onDue: (reminder, lateMs) => {
+      const late = lateMs > 120_000;
+      try { if (Notification.isSupported()) new Notification({ title: 'Sudo-chan reminder', body: reminder.text, silent: false }).show(); } catch { /* notification service may be missing */ }
+      setHappy(`⏰ ${reminder.text}`, 9000);
+      if (overlay && !overlay.isDestroyed()) overlay.webContents.send(CHANNELS.reminderDue, { text: reminder.text, late });
+      console.info(`[Reminder] fired id=${reminder.id} late=${late}`);
+    },
+  });
+  return reminders;
+}
 let toolRuntime: ToolRuntime | undefined;
 function tools(): ToolRuntime {
   if (!toolRuntime) {
-    const specs = createRegistry(toolPolicy, { home: homedir(), runProgram: nodeRunProgram, openDetached: nodeOpenDetached });
+    const specs = [
+      ...createRegistry(toolPolicy, { home: homedir(), runProgram: nodeRunProgram, openDetached: nodeOpenDetached }),
+      ...createNoteSpecs(new NotesStore(join(app.getPath('userData'), 'notes'))),
+      ...createReminderSpecs(reminderService()),
+    ];
     const audit = new AuditLog({
       append: line => appendFileSync(join(app.getPath('userData'), 'tool-audit.jsonl'), line, { encoding: 'utf8', mode: 0o600 }),
     });
@@ -1057,6 +1086,9 @@ async function start() {
   session.defaultSession.setPermissionCheckHandler((_contents, permission) => permission === 'media');
   setupIPC();
   overlay = createWindow('overlay'); positionOverlay();
+  // Reminders start a few seconds after the windows exist, so a reminder that came due while the app was closed can still be shown and spoken.
+  setTimeout(() => reminderService().start(), 4000);
+  app.on('before-quit', () => reminders?.stop());
   overlay.setIgnoreMouseEvents(false);
   overlay.on('resize', updateOverlayShape);
   overlay.once('ready-to-show', showOverlay);

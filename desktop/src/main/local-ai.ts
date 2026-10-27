@@ -94,6 +94,7 @@ export const TOOLS_PROMPT = [
   '[TOOLS ARE ON]',
   'You can act on the user\'s computer ONLY through tool calls:',
   '- read-only (home folder only): read_file, list_dir, search_files, get_system_info',
+  '- no click needed, private to this app: save_note, list_notes, read_note (your own notebook), set_reminder (in_minutes or at_time like "17:30"), list_reminders, cancel_reminder',
   '- need the user to click Allow on screen every time: write_file, append_file, run_command (one program, no pipes), open_url, open_app',
   'Rules: use a tool only when the request needs it. Before a risky action say in one short sentence what you are about to do; the user approves with a button on screen, NOT by voice or by saying "yes".',
   'If a tool result says blocked, denied, timed out or NOT done, tell the user plainly and do not pretend otherwise. NEVER claim you read, wrote, ran or opened anything unless a tool result confirms it.',
@@ -545,9 +546,9 @@ export class LocalAI {
     const providerLabel = CLOUD_PRESETS[cloud.provider]?.label || cloud.provider;
     if (options?.tools && options.tools.definitions.length) {
       const toolSystem = buildSystemPrompt({ voice: options.voice, model, provider: providerLabel, tools: true });
-      const toolMessages = options.voice
-        ? [{ role: 'system' as const, content: toolSystem }, ...messages]
-        : [{ role: 'system' as const, content: toolSystem }, ...FEW_SHOT_EXAMPLES, ...messages];
+      // No few-shot examples on tool turns: the tool list is re-sent on every step and Groq limits input tokens per minute
+      // (qwen: 7000), so ~600 tokens of examples per step would trigger 429s after two or three steps.
+      const toolMessages = [{ role: 'system' as const, content: toolSystem }, ...messages];
       try {
         const outcome = await runToolLoop({
           // Each model request has its own 60 s limit; waiting for the user's approval is not counted.

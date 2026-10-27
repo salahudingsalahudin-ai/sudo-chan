@@ -410,6 +410,7 @@ export function createRegistry(policy: PolicyApi, deps: RegistryDeps): ToolSpec[
             `CPU cores: ${cpus().length}`,
             `Memory: ${gb(freemem())} GB free of ${gb(totalmem())} GB`,
             `Uptime: ${(uptime() / 3600).toFixed(1)} hours`,
+            `Local time: ${new Date().toLocaleString('en-GB', { dateStyle: 'full', timeStyle: 'short' })}`,
           ].join('\n');
         },
       };
