@@ -61,6 +61,8 @@ export interface SttUsageSink {
   geminiStt(): void;
   geminiSttLimit(untilMs: number): void;
   groqStt(seconds: number, headers: HeaderLike, ok: boolean): void;
+  /** Fraction (0..1) of the Groq listening allowance left per Groq's own headers; undefined when unknown or stale. */
+  groqSttRemainingFraction?(): number | undefined;
 }
 export interface ChatUsageSink {
   groqChat(headers: HeaderLike, ok: boolean): void;
@@ -359,6 +361,16 @@ export class UsageTracker implements TtsUsageSink, SttUsageSink, ChatUsageSink {
     const snap = parseRateLimitHeaders(headers, this.now());
     if (snap) this.data.groqStt = snap;
     this.changed();
+  }
+
+  groqSttRemainingFraction(): number | undefined {
+    const snap = this.data.groqStt;
+    const now = this.now();
+    if (!snap || snap.at < now - 86_400_000) return undefined;
+    // The window already reset: the old numbers say nothing about the new one.
+    if (snap.resetRequestsAt !== undefined && snap.resetRequestsAt <= now) return undefined;
+    if (snap.limitRequests === undefined || snap.remainingRequests === undefined || snap.limitRequests <= 0) return undefined;
+    return Math.max(0, Math.min(1, snap.remainingRequests / snap.limitRequests));
   }
 
   groqChat(headers: HeaderLike, ok: boolean) {
