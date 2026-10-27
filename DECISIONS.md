@@ -61,3 +61,6 @@
 - **Build:** `tsconfig.node.json` now has `allowImportingTsExtensions` + `rewriteRelativeImportExtensions` so main code can import shared `.ts` files that the node tests also load; verified the emitted JS uses `.js`.
 - **Kept:** single stop path (tts-player), main-process-only providers, prefetch.
 - **Not verified:** any Gemini audio produced with the new prompt/batching (quota), real playback by ear.
+
+## Lip-sync target
+- Only the bot the user is talking to lip-syncs: the overlay follows speech events only when `voiceActiveTarget === 'overlay'`, the chat widget only when it is `'chat'`. Earlier both used `voiceCallActive`, so the overlay mirrored chat Live Talk (user report).

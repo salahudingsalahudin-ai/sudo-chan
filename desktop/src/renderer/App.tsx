@@ -89,7 +89,8 @@ function Overlay({ state }: { state: AppState }) {
   const [arriving, setArriving] = useState(false);
   const [cursorOffset, setCursorOffset] = useState<{ x: number; y: number } | undefined>(undefined);
   const [overlayAudioLevel, setOverlayAudioLevel] = useState(0);
-  const lip = useLipSync(Boolean(state.voiceCallActive));
+  // Only the bot the user is actually talking to moves its mouth (overlay = Live Talk on the desktop bot).
+  const lip = useLipSync(state.voiceActiveTarget === 'overlay');
   const lastSpokenOverlayId = useRef<string | null>(null);
   const isOverlayVoiceActive = state.voiceActiveTarget === 'overlay';
   const overlaySessionRef = useRef<VoiceSession | null>(null);
@@ -329,7 +330,8 @@ function Chat({ state }: { state: AppState }) {
   const [botSubtitle, setBotSubtitle] = useState('');
   const [liveTranscript, setLiveTranscript] = useState('');
   const [audioLevel, setAudioLevel] = useState(0);
-  const lip = useLipSync(Boolean(state.voiceCallActive));
+  // Chat widget Live Talk: only this window's bot lip-syncs, never the overlay.
+  const lip = useLipSync(state.voiceActiveTarget === 'chat');
   const [micMuted, setMicMuted] = useState(false);
   const voiceSessionRef = useRef<VoiceSession | null>(null);
 
