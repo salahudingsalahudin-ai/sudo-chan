@@ -17,7 +17,7 @@ Details, phrases to try and known gaps in `PLANNER.md`.
   Three chat-only IPC channels (`tasksList`, `tasksAdd`, `tasksAct`) plus a chat-only push channel (`tasksState`); preload and `DesktopAPI` updated; the verify
   wiring list knows the new channels. No overlay UI, no popups, no new notifications.
 - **Tests:** `tests/tasks.check.mjs` (96: dates, plan, validation, panel actions, in 4 time zones), `tests/tasks-store.check.mjs` (28: file, recovery, caps, tools,
-  policy/audit, reminders link, IPC wiring, prompt); 4 new checks in the real Electron smoke run.
+  policy/audit, reminders link, IPC wiring, prompt); 6 new checks in the real Electron smoke run.
 
 ## quota-saver (on top of mic-indicator): wake mode stops burning the free Groq listening allowance
 

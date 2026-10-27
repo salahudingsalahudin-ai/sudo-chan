@@ -146,3 +146,9 @@ Settings -> "Let Sudo-chan use tools" ON, Save. Use Groq. Wake word ON.
 - A rewrite of a file larger than ~2500 characters is done as `write_file` + `append_file` chunks (each needs a click), not one write.
 - `read_file` looks at the first 1 MB of a file only; the footer says so.
 - Real model behaviour with these tools was not exercised (no provider calls were made); tests use fake responses.
+
+---
+
+# Update (branch `planner`): to-do tools
+
+`add_task`, `list_tasks`, `update_task`, `complete_task`, `plan_today`, `next_task`, `start_task` need no click (they only touch the app's own `tasks.json`), obey the "Let Sudo-chan use tools" switch and are audited. `set_reminder` takes an optional `task_id`. Full description, phrases and limits: `desktop/PLANNER.md`.
