@@ -12,6 +12,7 @@ import { clearInterruptedSpeech, getMutedPreference, hasInterruptedSpeech, resum
 import { isStopCommand, unclearAction } from '../shared/stop-intent.ts';
 import { DEFAULT_BARGE_IN_SENSITIVITY } from '../shared/barge-in.ts';
 import { isSpeakingNow, stopSpeaking } from './tts-player';
+import { ScreenPanel } from './ScreenPanel';
 import { VoiceSession, type BargeInInfo, getVoiceProfile, isSpeakerMatch, recordVoiceSample } from './voice-engine';
 import type { VoiceProfile } from './voice-engine';
 
@@ -80,7 +81,8 @@ declare global { interface Window { __bargeInLatency?: Array<{ speechToDetectMs:
 function handleBargeIn(info?: BargeInInfo) {
   const detectedAt = info?.detectedAt ?? performance.now();
   stopSpeaking('barge-in');
-  void api?.stopReply();
+  // The user is probably asking a follow-up about the same screen: keep the (in-memory) screenshot.
+  void api?.stopReply({ keepScreen: true });
   const stoppedAt = performance.now();
   const speechToDetectMs = Math.round(detectedAt - (info?.speechStartedAt ?? detectedAt));
   const detectToStoppedMs = Math.round(stoppedAt - detectedAt);
@@ -228,7 +230,8 @@ function Overlay({ state }: { state: AppState }) {
           void api?.setVoiceActive(true, 'overlay');
           if (currentSettings.screenAssistEnabled) {
             // If the screenshot cannot be taken (Local mode, cooldown...), still answer what was said.
-            void api?.sendScreen({ text: match.rest, source: 'wake' }).then(result => { if (!result.ok && match.rest) void api?.sendMessage(match.rest, true); });
+            // When the reason was already shown and spoken on the overlay (declined, sensitive window, failed capture), do not also send the words as a blind chat message.
+            void api?.sendScreen({ text: match.rest, source: 'wake' }).then(result => { if (!result.ok && !result.handled && match.rest) void api?.sendMessage(match.rest, true); });
           }
           else if (match.rest) void api?.sendMessage(match.rest, true);
         } else {
@@ -307,16 +310,7 @@ function Overlay({ state }: { state: AppState }) {
     return () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerleave', leave); };
   }, []);
   return <main className="overlay-room" aria-label="Sudo-chan desktop companion">
-    {state.screenStatus && (
-      <button
-        className={`screen-badge ${state.screenStatus === 'sent' ? 'is-sent' : ''}`}
-        data-interactive
-        onClick={() => void api?.cancelScreen()}
-        title={state.screenStatus === 'capturing' ? 'Click to cancel' : 'Screenshot was sent to your AI provider'}
-      >
-        {state.screenStatus === 'capturing' ? '👀 Dekh rahi hoon... ✕' : '📸 Screen bheji gayi'}
-      </button>
-    )}
+    <ScreenPanel state={state} speakAloud={isOverlayVoiceActive} />
     {isOverlayVoiceActive && (caption.bot || caption.you) && <div className="overlay-speech overlay-caption" role="status" data-interactive>{caption.you && <div className="caption-you">🗣️ {caption.you}</div>}{caption.bot && <div className="caption-bot">{caption.bot}</div>}</div>}
     {state.speech && !isOverlayVoiceActive && <div className="overlay-speech" role="status" data-interactive>{state.speech}</div>}
 
@@ -1097,6 +1091,7 @@ function SettingsView({ state }: { state: AppState }) {
     settings.customWakeWord !== state.settings.customWakeWord ||
     settings.wakeWordEnabled !== state.settings.wakeWordEnabled ||
     settings.screenAssistEnabled !== state.settings.screenAssistEnabled ||
+    settings.screenAssistCountdown !== state.settings.screenAssistCountdown ||
     settings.sttSpeed !== state.settings.sttSpeed ||
     JSON.stringify(settings.wakeAliases) !== JSON.stringify(state.settings.wakeAliases) ||
     settings.voiceVisualizerMode !== state.settings.voiceVisualizerMode ||
@@ -1119,6 +1114,7 @@ function SettingsView({ state }: { state: AppState }) {
     state.settings.customWakeWord,
     state.settings.wakeWordEnabled,
     state.settings.screenAssistEnabled,
+    state.settings.screenAssistCountdown,
     state.settings.sttSpeed,
     JSON.stringify(state.settings.wakeAliases),
     state.settings.voiceVisualizerMode,
@@ -1297,6 +1293,9 @@ function SettingsView({ state }: { state: AppState }) {
           </SettingRow>
           <SettingRow title="Let Sudo-chan look at my screen" description="Off by default. When on, saying her name (or pressing the eye button in chat) takes ONE screenshot and sends it to your cloud AI provider so she can explain what you are working on. Never on a timer, never saved. Close password or banking windows first.">
             <div className="switch-control"><span>{settings.screenAssistEnabled ? 'On' : 'Off'}</span><button className="switch" type="button" role="switch" aria-label="Let Sudo-chan look at my screen" aria-checked={Boolean(settings.screenAssistEnabled)} onClick={() => setSettings({ ...settings, screenAssistEnabled: !settings.screenAssistEnabled })}><span/></button></div>
+          </SettingRow>
+          <SettingRow title="Countdown before the first screenshot" description="Shows 'Screenshot in 3...' with a cancel button before the first capture of a session, so you can close a sensitive window. She also refuses to capture when a password manager, bank, login or private window is visible (only windows that expose accessibility information can be seen).">
+            <div className="switch-control"><span>{(settings.screenAssistCountdown ?? true) ? 'On' : 'Off'}</span><button className="switch" type="button" role="switch" aria-label="Countdown before the first screenshot" aria-checked={settings.screenAssistCountdown ?? true} onClick={() => setSettings({ ...settings, screenAssistCountdown: !(settings.screenAssistCountdown ?? true) })}><span/></button></div>
           </SettingRow>
           <SettingRow
             title="Assistant name"

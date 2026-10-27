@@ -30,7 +30,10 @@ import { ToolRuntime } from './tools/runtime.js';
 import { PomodoroTimer } from './pomodoro.js';
 import { SystemHealthMonitor } from './system-health.js';
 import { captureScreen } from './screen-capture.ts';
-import { decideCapture, DEFAULT_SCREEN_PROMPT, pickVisionTargets, VISION_DEFAULT_MODELS } from '../shared/screen-assist.ts';
+import { DEFAULT_SCREEN_PROMPT, pickVisionTargets, VISION_DEFAULT_MODELS } from '../shared/screen-assist.ts';
+import { ScreenFlow } from '../shared/screen-flow.ts';
+import type { FlowStatus } from '../shared/screen-flow.ts';
+import { checkVisibleWindows } from './screen-guard.ts';
 import type { VisionProviderInfo, VisionTarget } from '../shared/screen-assist.ts';
 import type { StreamOptions } from './local-ai.js';
 
@@ -270,7 +273,7 @@ function snapshot(): AppState {
 function updateOverlayShape() {
   if (process.platform !== 'linux' || nativeWayland || !overlay || overlay.isDestroyed()) return;
   const [width, height] = overlay.getContentSize();
-  overlay.setShape(overlayShape(width, height, Boolean(state.speech)));
+  overlay.setShape(overlayShape(width, height, Boolean(state.speech || state.screenStatus), state.screenStatus === 'consent'));
 }
 function parseSpeechEvent(value: unknown): SpeechEvent | null {
   if (!value || typeof value !== 'object') return null;
@@ -446,31 +449,81 @@ function registerShortcut(shortcut: string) {
   try { return globalShortcut.register(shortcut, openChat); } catch { return false; }
 }
 // ---- Screen assist: capture only on wake word / explicit button, only with setting + consent, never stored ----
-let screenJob: { cancelled: boolean } | null = null;
-let lastScreenCaptureAt: number | null = null;
+// The sequence (consent once, cooldown/cache, sensitive-window guard, first-capture countdown, capture, cancel)
+// lives in shared/screen-flow.ts so it can be unit-tested; this file only supplies the Electron side effects.
 let screenStatusTimer: ReturnType<typeof setTimeout> | undefined;
-function setScreenStatus(status: 'capturing' | 'sent' | null, clearAfterMs = 0) {
+let consentResolver: ((granted: boolean) => void) | null = null;
+let consentShownAt = 0;
+function setScreenStatus(status: FlowStatus, extra?: { countdown?: number; notice?: string }) {
   clearTimeout(screenStatusTimer);
   state.screenStatus = status;
+  state.screenCountdown = status === 'countdown' ? extra?.countdown : undefined;
+  state.screenNotice = status === 'notice' ? extra?.notice : undefined;
   publish();
-  if (status && clearAfterMs > 0) screenStatusTimer = setTimeout(() => { state.screenStatus = null; publish(); }, clearAfterMs);
+  const clearAfter = status === 'sent' ? 3500 : status === 'cached' ? 4000 : status === 'notice' ? 6000 : 0;
+  if (clearAfter > 0) screenStatusTimer = setTimeout(() => { state.screenStatus = null; state.screenNotice = undefined; publish(); }, clearAfter);
 }
-async function ensureScreenConsent(): Promise<boolean> {
-  if (store.get('screenAssistConsent')) return true;
+async function consentDialog(): Promise<boolean> {
   const { response } = await dialog.showMessageBox({
     type: 'question',
     title: 'Let Sudo-chan look at your screen?',
     message: 'Allow Sudo-chan to look at your screen when you ask?',
-    detail: 'Only when you say her name (with "Listen for my name" on) or press the eye button, she takes ONE screenshot and sends it over the internet to your cloud AI provider (Groq or Gemini) so she can explain what you are working on. Nothing is captured in the background, screenshots are not saved, and you can turn this off any time in Settings. Windows with passwords or banking can be visible in a screenshot, so close them first.',
+    detail: 'Only when you say her name (with "Listen for my name" on) or press the eye button, she takes ONE screenshot and sends it over the internet to your cloud AI provider (Groq or Gemini) so she can explain what you are working on. Nothing is saved, and you can turn this off in Settings at any time.',
     buttons: ['Allow', 'Not now'],
     defaultId: 1,
     cancelId: 1,
     noLink: true,
   });
-  if (response !== 0) return false;
-  store.set('screenAssistConsent', true);
-  return true;
+  return response === 0;
 }
+/** Wake word: a compact panel on the overlay (Allow / Not now buttons, click only). Other sources use the native dialog. */
+function askConsentOnOverlay(): Promise<boolean> {
+  return new Promise<boolean>(resolve => {
+    consentResolver?.(false);
+    consentShownAt = Date.now();
+    const timer = setTimeout(() => { if (consentResolver === done) { consentResolver = null; resolve(false); } }, 60_000);
+    const done = (granted: boolean) => { clearTimeout(timer); resolve(granted); };
+    consentResolver = done;
+  });
+}
+function answerScreenConsent(granted: boolean) {
+  // Ignore clicks that arrive within 400 ms of the panel appearing (a stray double-click from the earlier action).
+  if (!consentResolver || Date.now() - consentShownAt < 400) return;
+  const resolver = consentResolver;
+  consentResolver = null;
+  resolver(granted);
+}
+function cancelScreenConsent() {
+  const resolver = consentResolver;
+  consentResolver = null;
+  resolver?.(false);
+}
+const screenFlow = new ScreenFlow({
+  now: () => Date.now(),
+  sleep: ms => new Promise<void>(resolve => setTimeout(resolve, ms)),
+  isEnabled: () => Boolean(state.settings.screenAssistEnabled),
+  countdownEnabled: () => state.settings.screenAssistCountdown !== false,
+  hasConsent: () => Boolean(store.get('screenAssistConsent')),
+  saveConsent: () => { store.set('screenAssistConsent', true); },
+  askConsent: source => (source === 'wake' ? askConsentOnOverlay() : consentDialog()),
+  cancelConsent: cancelScreenConsent,
+  setStatus: setScreenStatus,
+  capture: async () => {
+    // Hide our own panels so the screenshot shows the user's work. The small overlay bot stays visible (it carries the indicator).
+    const hidden = [chat, settingsWindow].filter((w): w is BrowserWindow => Boolean(w && !w.isDestroyed() && w.isVisible()));
+    for (const win of hidden) win.hide();
+    if (hidden.length) await new Promise(resolve => setTimeout(resolve, 350));
+    try {
+      const started = Date.now();
+      const shot = await captureScreen();
+      console.info(`[Screen] capture+resize=${Date.now() - started}ms ok=${shot.ok}${shot.ok ? '' : ` reason=${shot.reason}`}`);
+      return shot.ok ? { ok: true as const, shot: { dataUri: shot.dataUri, thumbnail: shot.thumbnail } } : { ok: false as const, reason: shot.reason };
+    } finally {
+      for (const win of hidden) if (!win.isDestroyed()) win.showInactive();
+    }
+  },
+  checkWindows: checkVisibleWindows,
+});
 function visionTargets(): VisionTarget[] {
   const active = aiState.mode === 'cloud'
     ? { provider: aiState.cloud.provider, endpoint: aiState.cloud.endpoint, model: aiState.cloud.model, apiKey: getProviderKey(aiState.cloud.provider) }
@@ -481,12 +534,6 @@ function visionTargets(): VisionTarget[] {
     if (apiKey) others[id] = { endpoint: CLOUD_PRESETS[id].endpoint, model: VISION_DEFAULT_MODELS[id], apiKey };
   }
   return pickVisionTargets(active, others);
-}
-function captureErrorMessage(reason: string): string {
-  if (reason === 'no-python-gi' || reason === 'no-python3') return 'Screen capture ke liye python3-gi chahiye (sudo apt install python3-gi).';
-  if (reason === 'portal-denied') return 'Screenshot ki permission nahi mili.';
-  if (reason === 'blank-frame') return 'Screen khaali (black) aayi, dobara try karein.';
-  return 'Screen capture nahi ho saka.';
 }
 function sendChat(text: string, isVoice: boolean, vision?: StreamOptions['vision']) {
   const effectiveCloud = aiState.mode === 'cloud' ? {
@@ -514,54 +561,41 @@ async function sendWithScreen(value: unknown) {
   const source = v.source;
   if (conversation.snapshot().busy) return { ok: false, error: 'Wait for this reply, or press Stop first.' };
   if (aiState.mode !== 'cloud') return { ok: false, error: 'Screen assist needs Cloud mode (Settings → AI): the image is only sent to your cloud provider.' };
-  let consented = Boolean(store.get('screenAssistConsent'));
-  const enabled = Boolean(state.settings.screenAssistEnabled);
-  if (enabled && !consented) consented = await ensureScreenConsent();
-  const decision = decideCapture({ enabled, consented, source, now: Date.now(), lastCaptureAt: lastScreenCaptureAt, busy: Boolean(screenJob) });
-  if (!decision.capture) {
-    // Name said again within the cooldown: still answer the words, just without a new screenshot.
-    if ((decision.reason === 'cooldown' || decision.reason === 'busy') && text) return sendChat(text, isVoice);
-    const reasons = { disabled: 'Screen assist is off. Turn it on in Settings.', 'no-consent': 'Screen assist needs your permission first.', busy: 'Already looking at the screen.', cooldown: 'Abhi abhi screen dekhi hai, thori der baad dobara bolein.' };
-    return { ok: false, error: reasons[decision.reason] };
-  }
   const targets = visionTargets();
   if (!targets.length) return { ok: false, error: 'Screen dekhne ke liye Groq ya Gemini ki key chahiye (Settings → AI).' };
 
-  const job = { cancelled: false };
-  screenJob = job;
-  setScreenStatus('capturing');
-  // Hide our own panels so the screenshot shows the user's work. The small overlay bot stays visible (it carries the indicator).
-  const hidden = [chat, settingsWindow].filter((w): w is BrowserWindow => Boolean(w && !w.isDestroyed() && w.isVisible()));
-  for (const win of hidden) win.hide();
-  if (hidden.length) await new Promise(resolve => setTimeout(resolve, 350));
-  let shot: Awaited<ReturnType<typeof captureScreen>>;
-  try {
-    shot = await captureScreen();
-  } finally {
-    for (const win of hidden) if (!win.isDestroyed()) win.showInactive();
-    lastScreenCaptureAt = Date.now();
-    screenJob = null;
+  const result = await screenFlow.request(source);
+  if (result.kind === 'cancelled') return { ok: false, error: 'Screen capture cancelled.', handled: true };
+  if (result.kind === 'skipped') {
+    // The reason is already on the overlay (and spoken there). A busy/cooldown repeat of the name still answers the words.
+    if ((result.reason === 'busy' || result.reason === 'cooldown') && text) return sendChat(text, isVoice);
+    return { ok: false, error: result.notice, handled: true };
   }
-  if (job.cancelled) { setScreenStatus(null); return { ok: false, error: 'Screen capture cancelled.' }; }
-  if (!shot.ok) {
-    setScreenStatus(null);
-    const error = captureErrorMessage(shot.reason);
-    if (source === 'wake') setHappy(error, 4000);
-    return { ok: false, error };
-  }
+  console.info(`[Screen] guard=${result.timings.guardMs}ms capture=${result.timings.captureMs}ms total-before-vision=${result.timings.totalMs}ms cached=${result.cached}`);
   const prompt = text || DEFAULT_SCREEN_PROMPT;
-  const result = sendChat(prompt, isVoice, { dataUri: shot.dataUri, thumbnail: shot.thumbnail, targets, fallbackText: prompt });
-  setScreenStatus(result.ok ? 'sent' : null, 3500);
-  if (result.ok && source === 'wake' && !state.voiceCallActive) openChat();
-  return result;
+  const sent = sendChat(prompt, isVoice, { dataUri: result.shot.dataUri, thumbnail: result.shot.thumbnail, targets, fallbackText: prompt, ageSeconds: result.cached ? result.ageSeconds : 0 });
+  if (sent.ok && !result.cached) setScreenStatus('sent');
+  if (sent.ok && source === 'wake' && !state.voiceCallActive) openChat();
+  return sent;
 }
-function cancelScreenCapture() {
-  if (screenJob) screenJob.cancelled = true;
-  setScreenStatus(null);
+function cancelScreenCapture(keepCache = false) {
+  screenFlow.cancel(keepCache);
+}
+/** A normal turn that clearly refers to the screen she looked at less than two minutes ago re-uses that screenshot. */
+function followUpVision(text: string, targets: VisionTarget[]): StreamOptions['vision'] | undefined {
+  if (aiState.mode !== 'cloud' || !targets.length) return undefined;
+  const hit = screenFlow.followUp(text);
+  if (!hit) return undefined;
+  return { dataUri: hit.shot.dataUri, thumbnail: undefined, targets, fallbackText: text, ageSeconds: hit.ageSeconds };
 }
 async function saveSettings(candidate: unknown) {
   if (!validSettings(candidate)) return { ok: false, error: 'Choose a valid shortcut and companion size.' };
-  if (candidate.screenAssistEnabled && !state.settings.screenAssistEnabled && !store.get('screenAssistConsent') && !(await ensureScreenConsent())) candidate.screenAssistEnabled = false;
+  if (candidate.screenAssistEnabled && !state.settings.screenAssistEnabled && !store.get('screenAssistConsent')) {
+    if (await consentDialog()) store.set('screenAssistConsent', true);
+    else candidate.screenAssistEnabled = false;
+  }
+  // Turning the feature off drops the cached screenshot and any pending capture / consent prompt immediately.
+  if (!candidate.screenAssistEnabled && state.settings.screenAssistEnabled) screenFlow.disable();
   if (candidate.launchAtLogin && !state.loginSupported) return { ok: false, error: 'Install the app before enabling launch at login.' };
   const previous = state.settings;
   const changed = candidate.shortcut !== previous.shortcut;
@@ -620,12 +654,15 @@ function setupIPC() {
       if (typeof v.voice === 'boolean') isVoice = v.voice;
     }
 
-    return sendChat(text, isVoice);
+    // Follow-ups like "aur is error ka fix batao" re-use the screenshot from the last two minutes (in memory only).
+    return sendChat(text, isVoice, followUpVision(text, visionTargets()));
   }, ['chat', 'overlay']);
   handle(CHANNELS.sendScreen, (_e, value) => sendWithScreen(value), ['chat', 'overlay']);
   handle(CHANNELS.cancelScreen, () => cancelScreenCapture(), ['chat', 'overlay']);
+  // Click-only: nothing spoken can reach this handler. It only does anything while a consent panel is pending.
+  handle(CHANNELS.screenConsent, (_e, granted) => answerScreenConsent(granted === true), 'overlay');
   // Overlay may stop too (barge-in / "ruko" from the desktop bot); a stop also cancels a pending screen capture and running tools.
-  handle(CHANNELS.stop, () => { cancelScreenCapture(); conversation.stop(); stopAllTools(); }, ['chat', 'overlay']);
+  handle(CHANNELS.stop, (_e, value) => { cancelScreenCapture((value as { keepScreen?: unknown } | undefined)?.keepScreen === true); conversation.stop(); stopAllTools(); }, ['chat', 'overlay']);
   handle(CHANNELS.toolApprovals, () => toolApprovals.list(), 'chat');
   handle(CHANNELS.toolApprovalReply, (_e, value) => {
     const v = value as { id?: unknown; decision?: unknown } | null;

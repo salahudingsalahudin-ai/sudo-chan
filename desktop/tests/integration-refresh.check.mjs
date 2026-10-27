@@ -41,7 +41,8 @@ test('"Sudo, ruko" is a stop command after the name, so it must not trigger a sc
 
 test('main wiring: stop cancels screen capture and tools and is allowed from the overlay; wake screenshots are voice', () => {
   const main = read('../src/main/index.ts');
-  assert.match(main, /handle\(CHANNELS\.stop, \(\) => \{ cancelScreenCapture\(\); conversation\.stop\(\); stopAllTools\(\); \}, \['chat', 'overlay'\]\)/);
+  // A real stop drops the cached screenshot; a barge-in passes keepScreen so a follow-up can still use it.
+  assert.match(main, /handle\(CHANNELS\.stop, \(_e, value\) => \{ cancelScreenCapture\(\(value as \{ keepScreen\?: unknown \} \| undefined\)\?\.keepScreen === true\); conversation\.stop\(\); stopAllTools\(\); \}, \['chat', 'overlay'\]\)/);
   assert.match(main, /v\.source === 'wake' \|\| Boolean\(state\.voiceCallActive\)/);
 });
 

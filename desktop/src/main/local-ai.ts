@@ -229,7 +229,7 @@ export interface StreamOptions {
   /** Present only when the user enabled "Let Sudo-chan use tools". */
   tools?: ToolRuntimeLike;
   /** One screenshot turn: the image goes only to the vision targets, never into history or logs. */
-  vision?: { dataUri: string; thumbnail?: string; targets: VisionTarget[]; fallbackText: string };
+  vision?: { dataUri: string; thumbnail?: string; targets: VisionTarget[]; fallbackText: string; /** Seconds since a re-used screenshot was taken (undefined/0 = fresh). */ ageSeconds?: number };
 }
 type Fetch = typeof fetch;
 export class LocalAIError extends Error {}
@@ -728,6 +728,8 @@ export class LocalAI {
           history: messages,
           fallbackText: options.vision.fallbackText,
           imageDataUri: options.vision.dataUri,
+          voice: options.voice,
+          ageSeconds: options.vision.ageSeconds,
           signal,
           log: line => console.info(line),
         });
