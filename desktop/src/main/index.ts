@@ -377,6 +377,7 @@ function updateTray() {
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: 'Sudo-chan · Local AI', enabled: false }, { type: 'separator' },
     { label: state.overlayVisible ? 'Hide companion' : 'Show companion', click: () => { if (state.overlayVisible) { overlay.hide(); state.overlayVisible = false; publish(); } else showOverlay(); } },
+    { label: 'Microphone: listen for my name', type: 'checkbox', checked: state.settings.wakeWordEnabled ?? true, click: item => { void saveSettings({ ...state.settings, wakeWordEnabled: item.checked }); } },
     { label: 'Pause companion animation', type: 'checkbox', checked: state.paused, click: item => { state.paused = item.checked; publish(); } },
     { label: 'Open chat', click: openChat }, { label: 'Settings', click: openSettings },
     { type: 'separator' }, { label: 'Quit Sudo-chan', click: () => app.quit() },
