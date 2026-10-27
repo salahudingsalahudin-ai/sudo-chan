@@ -30,7 +30,7 @@ export interface ClipFeatures {
   envCv: number;
   /** Mean zero crossings per second over voiced frames. Voiced speech ~1-4k, hiss/white noise > 9k. */
   zcrPerSec: number;
-  /** Voiced stretches separated by >= 100 ms of quiet. */
+  /** Voiced stretches separated by >= 60 ms of quiet. */
   runs: number;
   /** Length of the first voiced stretch. */
   leadRunMs: number;
@@ -49,32 +49,51 @@ export interface GateContext {
   live: boolean;
 }
 
-export type SendReason = 'live' | 'barge-in' | 'floor' | 'isolated' | 'name-shaped' | 'budget';
-export type SkipReason = 'impulse' | 'hiss' | 'steady-noise' | 'long-talk' | 'cluster' | 'budget';
+export type SendReason = 'live' | 'barge-in' | 'floor' | 'isolated' | 'in-talk' | 'retry';
+export type SkipReason = 'impulse' | 'hiss' | 'steady-noise' | 'long-talk' | 'budget' | 'cluster';
 export type GateReason = SendReason | SkipReason;
+
+export type GateLane = 'shaped' | 'plain' | 'talk';
 
 export interface ClipDecision {
   send: boolean;
   reason: GateReason;
   /** Upload at most this much of the clip (wake mode only needs the name, not a monologue). */
   trimMs?: number;
-  /** Tokens taken from the budget; hand to `refund()` if something downstream refuses the clip. */
+  /** Which budget paid for it; hand the decision to `refund()` if something downstream refuses the clip. */
+  lane?: GateLane;
   spent: number;
 }
 
+/**
+ * Three budgets (token buckets), so room talk cannot starve the clips that look like "Sudo, ...":
+ *  - shaped: after a quiet spell AND shaped like an address (a bare name, or a short word + pause + short request). Burst 3, 1 per 15 s.
+ *  - plain: after a quiet spell, any other short clip. Burst 1, 1 per 60 s (up to 3x slower after a run of misses).
+ *  - talk: right after other speech (chatter, TV, the bot's echo tail). Burst 1, 1 per 90 s (up to 3x slower), closed under quota pressure.
+ */
 export const GATE_BURST = 3;
-export const GATE_REFILL_MS = 20_000;
+export const GATE_REFILL_MS = 15_000;
+export const PLAIN_REFILL_MS = 60_000;
+export const TALK_REFILL_MS = 90_000;
+/** A clip this short with a name-like start can be an address even in a few words. */
+export const SHAPED_MAX_MS = 2500;
+/** This many speech-like clips within BUSY_WINDOW_MS make the room "busy": only strictly address-shaped clips get a token. */
+export const BUSY_CLIPS = 3;
+/** A repeated short attempt within this long after a skipped one gets through (once per floor). */
+export const RETRY_WINDOW_MS = 15_000;
+export const BUSY_WINDOW_MS = 120_000;
+export const NAME_ALONE_MIN_MS = 220;
+export const NAME_ALONE_MAX_MS = 900;
 /** One speech-like clip per minute is always allowed, however stingy the budget or the quota pressure. */
 export const GATE_FLOOR_MS = 60_000;
 /** Wake mode uploads at most this much of a clip (pre-roll included). */
 export const WAKE_TRIM_MS = 3500;
-/** A clip that starts at least this long after the previous clip ended is "isolated": a command, not a conversation. */
-export const ISOLATION_MS = 5000;
+/** A clip that starts at least this long after the previous clip ended is "isolated": the speaker waited for quiet. */
+export const ISOLATION_MS = 4000;
+/** An isolated clip longer than this is a monologue start, not a command, and goes to the talk lane. */
+export const ISOLATED_MAX_MS = 6000;
 /** A clip with this much voiced time or more is the start of a monologue, not "Sudo, ...". */
 export const LONG_CLIP_MS = 8000;
-/** Short enough to be the bare name ("Sudo", "Sid"). */
-export const NAME_ALONE_MAX_MS = 900;
-export const NAME_ALONE_MIN_MS = 220;
 /** Results remembered for the hit-rate back-off. */
 const RESULT_MEMORY = 8;
 
@@ -104,7 +123,7 @@ export function frameStats(samples: ArrayLike<number>, sampleRate: number): Fram
   return { peak, zcrPerSec: (crossings / (n - 1)) * sampleRate };
 }
 
-const RUN_GAP_MS = 100;
+const RUN_GAP_MS = 60;
 
 /** Collects ClipFeatures one frame at a time while the engine records a clip. */
 export class ClipFeatureAccumulator {
@@ -217,7 +236,9 @@ export class ClipGate {
   private burst: number;
   private baseRefillMs: number;
   private floorMs: number;
-  private tokens: number;
+  private tokensShaped: number;
+  private tokensPlain = 1;
+  private tokensTalk = 1;
   private lastRefillAt = Number.NaN;
   private lastSentAt = Number.NaN;
   private lastClipEndAt = Number.NEGATIVE_INFINITY;
@@ -231,7 +252,7 @@ export class ClipGate {
     this.burst = options.burst ?? GATE_BURST;
     this.baseRefillMs = options.refillMs ?? GATE_REFILL_MS;
     this.floorMs = options.floorMs ?? GATE_FLOOR_MS;
-    this.tokens = this.burst;
+    this.tokensShaped = this.burst;
   }
 
   /** 0 = plenty of quota left, 1 = nearly gone. Learned from the main process (Groq's own headers). */
@@ -247,7 +268,7 @@ export class ClipGate {
   noteResult(hit: boolean) {
     this.results.push(hit);
     if (this.results.length > RESULT_MEMORY) this.results.shift();
-    if (hit) this.tokens = Math.min(this.currentBurst(), this.tokens + 1);
+    if (hit) this.tokensShaped = Math.min(this.shapedBurst(), this.tokensShaped + 1);
   }
 
   /** Consecutive clips at the end of the memory that had no wake word. */
@@ -262,28 +283,57 @@ export class ClipGate {
     return this.results.length ? this.results.filter(Boolean).length / this.results.length : 0;
   }
 
-  private currentBurst(): number {
-    if (this.pressure >= 0.75) return 1;
-    if (this.pressure >= 0.4) return Math.min(2, this.burst);
-    return this.burst;
+  private shapedBurst(): number {
+    return this.pressure >= 0.75 ? 1 : this.burst;
   }
 
-  /** Milliseconds per token: slower after a run of misses and under quota pressure, never slower than the floor. */
+  /** How much to slow down: 1 normally, 2 when about 60%+ of the last results had no wake word, 3 at 85%+. */
+  private missFactor(cap: number): number {
+    const n = this.results.length;
+    if (n < 3) return 1;
+    const missRatio = 1 - this.hitRate;
+    return Math.min(cap, missRatio >= 0.85 ? 3 : missRatio >= 0.6 ? 2 : 1);
+  }
+
+  /**
+   * Milliseconds per token in the shaped lane: up to twice as slow after a run of misses (a short name-like clip after a quiet
+   * spell is the most likely wake attempt, so this lane is protected from chatter), slower under quota pressure, never slower than the floor.
+   */
   currentRefillMs(): number {
-    const misses = this.missStreak;
-    const missFactor = misses >= 6 ? 3 : misses >= 3 ? 2 : 1;
-    return Math.min(this.floorMs, this.baseRefillMs * missFactor * (1 + 2 * this.pressure));
+    return Math.min(this.floorMs, this.baseRefillMs * this.missFactor(2) * (1 + 2 * this.pressure));
+  }
+
+  currentPlainRefillMs(): number {
+    return PLAIN_REFILL_MS * this.missFactor(3) * (1 + 2 * this.pressure);
+  }
+
+  /** The talk lane: 3x slower after many misses, closed above pressure 0.5. */
+  currentTalkRefillMs(): number {
+    return TALK_REFILL_MS * this.missFactor(3) * (1 + 2 * this.pressure);
+  }
+
+  /**
+   * The safety net: after this long without any request, the next speech-like clip goes whatever the budgets say.
+   * One minute normally and whenever quota is short (never silent); stretched to 2-3 minutes while the quota is healthy
+   * and nothing but misses has been heard, because then a speculative send is the cheapest thing to give up.
+   */
+  currentFloorMs(): number {
+    return this.pressure >= 0.4 ? this.floorMs : this.floorMs * this.missFactor(3);
   }
 
   private refill(now: number) {
     if (Number.isNaN(this.lastRefillAt)) this.lastRefillAt = now;
     const elapsed = Math.max(0, now - this.lastRefillAt);
     this.lastRefillAt = now;
-    this.tokens = Math.min(this.currentBurst(), this.tokens + elapsed / this.currentRefillMs());
+    this.tokensShaped = Math.min(this.shapedBurst(), this.tokensShaped + elapsed / this.currentRefillMs());
+    this.tokensPlain = Math.min(1, this.tokensPlain + elapsed / this.currentPlainRefillMs());
+    this.tokensTalk = Math.min(1, this.tokensTalk + elapsed / this.currentTalkRefillMs());
   }
 
-  refund(spent: number) {
-    this.tokens = Math.min(this.currentBurst(), this.tokens + spent);
+  refund(decision: ClipDecision) {
+    if (decision.lane === 'shaped') this.tokensShaped = Math.min(this.shapedBurst(), this.tokensShaped + decision.spent);
+    else if (decision.lane === 'plain') this.tokensPlain = Math.min(1, this.tokensPlain + decision.spent);
+    else if (decision.lane === 'talk') this.tokensTalk = Math.min(1, this.tokensTalk + decision.spent);
   }
 
   decide(f: ClipFeatures, ctx: GateContext): ClipDecision {
@@ -298,44 +348,64 @@ export class ClipGate {
     const junk = junkReason(f);
     if (junk) return this.record({ send: false, reason: junk, spent: 0 }, ctx.now);
 
-    const overdue = Number.isNaN(this.lastSentAt) || ctx.now - this.lastSentAt >= this.floorMs;
-    const isolated = gapBefore >= ISOLATION_MS;
-    const nameAlone = f.voicedMs >= NAME_ALONE_MIN_MS && f.voicedMs <= NAME_ALONE_MAX_MS && f.runs <= 2;
-    const leadsLikeAddress = f.leadRunMs <= 800 && f.leadGapMs >= 120;
+    const overdue = Number.isNaN(this.lastSentAt) || ctx.now - this.lastSentAt >= this.currentFloorMs();
+    const isolated = gapBefore >= ISOLATION_MS && !f.overlappedPlayback;
+    const leadsLikeAddress = f.leadRunMs <= 800 && f.leadGapMs >= 60;
 
-    let cost: number;
-    let sendReason: SendReason;
-    let skipReason: SkipReason;
+    const busy = this.recentClips(ctx.now) >= BUSY_CLIPS;
+    this.noteClip(ctx.now);
+
+    // A monologue with no "name, pause" at its start is room talk or TV: only the minute floor can let it through.
     if (f.voicedMs >= LONG_CLIP_MS && !leadsLikeAddress) {
-      // A monologue with no "name, pause" at its start: room talk or TV. Only the minute floor can let it through.
       return overdue ? this.send('floor', ctx.now, 0) : this.record({ send: false, reason: 'long-talk', spent: 0 }, ctx.now);
     }
-    if (f.voicedMs >= LONG_CLIP_MS) {
-      cost = 2; sendReason = 'budget'; skipReason = 'cluster';
-    } else if (f.overlappedPlayback) {
-      // The bot's own tail is still in the room: a weak candidate.
-      cost = 2; sendReason = 'budget'; skipReason = 'cluster';
-    } else if (isolated && f.voicedMs <= LONG_CLIP_MS / 2) {
-      cost = 1; sendReason = 'isolated'; skipReason = 'budget';
-    } else if (nameAlone) {
-      cost = 1; sendReason = 'name-shaped'; skipReason = 'budget';
-    } else {
-      // Mid-conversation talk: costs a full pair of tokens, so it only passes when the bucket is nearly full.
-      cost = 2; sendReason = 'budget'; skipReason = 'cluster';
+
+    const nameAlone = f.voicedMs >= NAME_ALONE_MIN_MS && f.voicedMs <= NAME_ALONE_MAX_MS && f.runs <= 2;
+    // Strict shape: a bare name, or a short word + pause + short request ("Sudo, kaise ho?").
+    const shaped = f.voicedMs <= SHAPED_MAX_MS && (nameAlone || leadsLikeAddress);
+    // A busy room (several clips in the last two minutes) only gets the strict shapes; a quiet one gets any short isolated clip.
+
+    if (isolated && f.voicedMs <= ISOLATED_MAX_MS) {
+      if (shaped && this.tokensShaped >= 1) {
+        this.tokensShaped -= 1;
+        return this.send('isolated', ctx.now, 1, 'shaped');
+      }
+      if (!busy && this.tokensPlain >= 1) {
+        this.tokensPlain -= 1;
+        return this.send('isolated', ctx.now, 1, 'plain');
+      }
+      // People repeat themselves: a short isolated clip soon after a skipped one is let through, once a minute at most.
+      if (f.voicedMs <= SHAPED_MAX_MS && ctx.now - this.lastSkippedShortAt <= RETRY_WINDOW_MS && ctx.now - this.lastRetryAt >= this.floorMs && this.pressure < 0.9) {
+        this.lastRetryAt = ctx.now;
+        return this.send('retry', ctx.now, 0);
+      }
+      if (f.voicedMs <= SHAPED_MAX_MS) this.lastSkippedShortAt = ctx.now;
+      return overdue ? this.send('floor', ctx.now, 0) : this.record({ send: false, reason: 'budget', spent: 0 }, ctx.now);
     }
-    // Under quota pressure the expensive (conversation-like) class is closed completely; the floor still applies.
-    const closed = cost === 2 && this.pressure >= 0.5;
-    if (!closed && this.tokens >= cost) {
-      this.tokens -= cost;
-      return this.send(sendReason, ctx.now, cost);
+    // Right after other speech (chatter, TV, the bot's echo tail): only the strict shapes, one token, closed under quota pressure.
+    if (shaped && !f.overlappedPlayback && this.pressure < 0.5 && this.tokensTalk >= 1) {
+      this.tokensTalk -= 1;
+      return this.send('in-talk', ctx.now, 1, 'talk');
     }
-    if (overdue) return this.send('floor', ctx.now, 0);
-    return this.record({ send: false, reason: skipReason, spent: 0 }, ctx.now);
+    return overdue ? this.send('floor', ctx.now, 0) : this.record({ send: false, reason: 'cluster', spent: 0 }, ctx.now);
   }
 
-  private send(reason: SendReason, now: number, spent: number): ClipDecision {
+  private clipTimes: number[] = [];
+  private lastSkippedShortAt = Number.NEGATIVE_INFINITY;
+  private lastRetryAt = Number.NEGATIVE_INFINITY;
+
+  private recentClips(now: number): number {
+    while (this.clipTimes.length && now - this.clipTimes[0] > BUSY_WINDOW_MS) this.clipTimes.shift();
+    return this.clipTimes.length;
+  }
+
+  private noteClip(now: number) {
+    this.clipTimes.push(now);
+  }
+
+  private send(reason: SendReason, now: number, spent: number, lane?: GateLane): ClipDecision {
     this.lastSentAt = now;
-    return this.record({ send: true, reason, trimMs: WAKE_TRIM_MS, spent }, now);
+    return this.record({ send: true, reason, trimMs: WAKE_TRIM_MS, lane, spent }, now);
   }
 
   private record(decision: ClipDecision, now: number): ClipDecision {
