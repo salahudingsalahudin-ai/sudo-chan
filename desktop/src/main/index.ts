@@ -4,8 +4,8 @@ import Store from 'electron-store';
 import { setLaunchAtLogin } from './autostart.js';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { mkdtempSync, promises as fsp } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { appendFileSync, mkdtempSync, promises as fsp } from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
 import { CHANNELS } from '../shared/types.js';
 import type { AIMode, AIState, AppState, CloudConfigInput, CloudProviderId, Settings, WindowKind } from '../shared/types.js';
 import { BOT_DIMENSIONS, clampPosition, CLOUD_PRESETS, DEFAULT_SETTINGS, maskApiKey, validCloudConfig, validPosition, validSettings } from '../shared/validation.js';
@@ -22,6 +22,11 @@ import type { SpeechEvent, StopReason } from '../shared/speech-events.js';
 import { overlayShape } from '../shared/overlay-shape.js';
 import { LocalAI, normalizeCloudModel } from './local-ai.js';
 import { ChatSession } from './chat-session.js';
+import { ApprovalManager } from './tools/approval.js';
+import { AuditLog, redact } from './tools/audit.js';
+import * as toolPolicy from './tools/policy.js';
+import { createRegistry, nodeOpenDetached, nodeRunProgram, toDefinitions } from './tools/registry.js';
+import { ToolRuntime } from './tools/runtime.js';
 import { PomodoroTimer } from './pomodoro.js';
 import { SystemHealthMonitor } from './system-health.js';
 
@@ -178,6 +183,40 @@ function publishAI() {
 const conversation = new ChatSession(localAI, next => {
   if (chat && !chat.isDestroyed()) chat.webContents.send(CHANNELS.chatState, next);
 });
+// ---- Tools (files, commands, links) with a click-to-approve card for every risky action ----
+const toolApprovals = new ApprovalManager({
+  emit: request => {
+    openChat();
+    if (!chat || chat.isDestroyed()) return false;
+    // A freshly created window pulls pending cards itself once it has loaded.
+    if (!chat.webContents.isLoading()) chat.webContents.send(CHANNELS.toolApproval, { type: 'request', request });
+    return true;
+  },
+  onClose: id => { if (chat && !chat.isDestroyed()) chat.webContents.send(CHANNELS.toolApproval, { type: 'close', id }); },
+});
+let toolRuntime: ToolRuntime | undefined;
+function tools(): ToolRuntime {
+  if (!toolRuntime) {
+    const specs = createRegistry(toolPolicy, { home: homedir(), runProgram: nodeRunProgram, openDetached: nodeOpenDetached });
+    const audit = new AuditLog({
+      append: line => appendFileSync(join(app.getPath('userData'), 'tool-audit.jsonl'), line, { encoding: 'utf8', mode: 0o600 }),
+    });
+    toolRuntime = new ToolRuntime({
+      specs,
+      definitions: toDefinitions(specs),
+      approval: toolApprovals,
+      audit,
+      isEnabled: () => state.settings.toolsEnabled === true,
+      redact,
+    });
+  }
+  return toolRuntime;
+}
+function stopAllTools() {
+  toolRuntime?.stopAll();
+  toolApprovals.stopAll();
+}
+
 let connectionCheck: Promise<AIState> | undefined;
 async function checkAI(): Promise<AIState> {
   if (connectionCheck) return connectionCheck;
@@ -401,6 +440,8 @@ async function saveSettings(candidate: unknown) {
   }
   if (changed && state.shortcutAvailable) globalShortcut.unregister(previous.shortcut);
   state.settings = candidate; state.shortcutAvailable = true;
+  // Turning tools off cancels anything waiting for approval or still running.
+  if (previous.toolsEnabled === true && candidate.toolsEnabled !== true) stopAllTools();
   if (candidate.pomodoroEnabled !== undefined) {
     pomodoroTimer?.setEnabled(candidate.pomodoroEnabled);
   }
@@ -430,6 +471,7 @@ function setupIPC() {
     const kind = windowKinds.get(BrowserWindow.fromWebContents(event.sender)!);
     if (kind !== 'chat' && kind !== 'settings') throw new Error('Operation unavailable in this window.');
     conversation.clear();
+    toolApprovals.resetChat();
   });
   handle(CHANNELS.send, (_e, value) => {
     let text = '';
@@ -453,11 +495,19 @@ function setupIPC() {
       heavy: aiState.modelSizes[aiState.model]?.heavy,
       cloud: effectiveCloud,
       voice: isVoice,
+      tools: state.settings.toolsEnabled === true && effectiveCloud ? tools() : undefined,
     });
     if (result.ok && !state.voiceCallActive) setHappy('Thinking with you.');
     return result;
   }, ['chat', 'overlay']);
-  handle(CHANNELS.stop, () => conversation.stop(), 'chat');
+  handle(CHANNELS.stop, () => { conversation.stop(); stopAllTools(); }, 'chat');
+  handle(CHANNELS.toolApprovals, () => toolApprovals.list(), 'chat');
+  handle(CHANNELS.toolApprovalReply, (_e, value) => {
+    const v = value as { id?: unknown; decision?: unknown } | null;
+    if (!v || typeof v.id !== 'string' || (v.decision !== 'allow' && v.decision !== 'allow-chat' && v.decision !== 'deny')) return { ok: false, error: 'Invalid answer.' };
+    return toolApprovals.respond(v.id, v.decision) ? { ok: true } : { ok: false, error: 'That request already ended.' };
+  }, 'chat');
+  handle(CHANNELS.toolsStopAll, () => { conversation.stop(); stopAllTools(); }, ['chat', 'overlay', 'settings']);
   handle(CHANNELS.ai, () => structuredClone(aiState));
   handle(CHANNELS.checkAI, () => checkAI());
   handle(CHANNELS.model, async (_e, value) => {

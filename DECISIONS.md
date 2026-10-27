@@ -73,3 +73,13 @@
 - Roman Urdu route is a setting (default Hindi voice). Assumption: Hindi neural voices cope better with Latin-script text than ur-PK voices. Unmeasured (no key at build time).
 - The cache key includes the resolved Azure voice, so changing the voice never replays an old clip. A cached Azure clip is served even during back-off.
 - 401/403 backs off 10 minutes (bad key/region should not be hammered); a successful "Test Azure voice" or saving the key resets all back-offs.
+## Tools decisions (branch `tools`)
+- Scope: files (read/write/append/list/search), one-program commands, open link/app, system info. No network tools. Cloud chat path only.
+- **Approval is click-only.** `ApprovalManager` has no voice input; the only way to approve is the `companion:tool-approval-reply` IPC, accepted from the chat window. A spoken "haan/yes" is never approval (stated in the card text and the system prompt). Everything that is not an explicit click (60 s timeout, Stop all, no window, unknown id) is a denial.
+- Default OFF (`toolsEnabled`). Disabling cancels pending/running actions.
+- Path policy resolves symlinks and checks both the typed and the real path against a secrets list; reads outside home need a red card, writes outside home are refused.
+- Commands: no shell. Command strings are tokenized without shell semantics and pipes/redirects/chaining are rejected rather than passed through as literals. Child env strips key/token/secret/password variables. `sudo` is allowed only as an "elevated" card.
+- Agent loop: OpenAI function calling, non-streamed requests, max 6 tool steps, 4 calls per step, then a final call without tools. If the first request is rejected because of `tools` (400/404/422 mentioning tool/function) the cloud path falls back to plain streaming with the plain prompt. Per-request 60 s timeout; waiting for approval is not counted.
+- Modules under `src/main/tools/` avoid runtime relative imports between each other (dependencies are injected) so node's strip-only TypeScript can import them in `tests/tools.check.mjs`; `runtime.ts` is wired to the real policy in `index.ts`.
+- Chat window hides on blur (existing behaviour); a new card re-opens and focuses it, and a newly created window pulls pending cards (`companion:tool-approvals`).
+- Merge note: touches `local-ai.ts` (prompt + `StreamOptions.tools` + loop hook), `index.ts` (wiring), `preload`, `shared/types.ts`, `shared/validation.ts`, `App.tsx`, `styles.css`. Voice/TTS files are untouched.
