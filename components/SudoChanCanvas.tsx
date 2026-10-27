@@ -7,7 +7,7 @@ import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import type { KeyboardEvent as ReactKeyboardEvent, MutableRefObject, ReactNode } from 'react';
 import * as THREE from 'three';
 import type { BotMood } from '@/content';
-import { isLowPower, sampleJourneyPose, sampleStoryWeights, sampleVoiceDemo, smoothstep, stageDepth } from '@/lib/heroScene';
+import { fitCardOrbit, isLowPower, sampleJourneyPose, sampleStoryWeights, sampleVoiceDemo, smoothstep, stageDepth } from '@/lib/heroScene';
 import type { StoryWeights, VoiceDemo } from '@/lib/heroScene';
 import CompanionBot from './three/CompanionBot';
 import FloatingCards from './three/FloatingCards';
@@ -87,6 +87,13 @@ function Rig({ progress, pointer, interactions, quietDayActive, quietDayMoment, 
     let rotY = pose.rotY;
     let rotX = pose.rotX;
     let camZ = pose.camZ;
+    if (!quietDayActive && !mobile) {
+      // While the UI cards orbit her, keep her and the cards clear of the headline column and the scene counter.
+      const fit = fitCardOrbit(state.size.width, state.size.height, state.viewport.height, pose.side);
+      const wc = weights.current.cards;
+      x = THREE.MathUtils.lerp(x, fit.side * viewW, wc);
+      scale *= THREE.MathUtils.lerp(1, fit.scale, wc);
+    }
     if (quietDayActive) {
       x = mobile ? 0.32 : viewW * 0.2;
       y = mobile ? -0.25 : 0;

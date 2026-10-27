@@ -84,3 +84,12 @@ main.journey :is(a,button,input,[role="button"]):focus-visible,.privacy-page a:f
 .journey.is-dark-world .stage-vignette{background:radial-gradient(ellipse at center,transparent 55%,#020a1259 110%)}
 /* The status label is a span inside .demo-status; the dot rule must not squeeze it. */
 .demo-status .demo-status-label{width:auto;height:auto;border-radius:0;background:none;box-shadow:none}
+
+/* Scene illustrations: phones only. Scenes sit in the middle of their block (not the bottom) so no empty band shows above the text. */
+.scene-art{display:none}
+@media(max-width:767px){
+  .scene-art{display:block;width:150px;height:auto;margin:0 0 18px;color:inherit}
+  main.journey .journey-scene:not(.scene-arrival):not(.scene-join){align-items:center;padding-bottom:0}
+  /* The demo-line bubble and nap/welcome bubbles belong to the companion, which is only on screen in the hero on phones. */
+  main.journey:not(.is-hero-active) .bot-speech{display:none}
+}

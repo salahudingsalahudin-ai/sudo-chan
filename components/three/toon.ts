@@ -20,7 +20,7 @@ let gradient: THREE.DataTexture | null = null;
 // Three flat tones give the cel-shaded anime look without any texture download.
 export function getToonGradient() {
   if (gradient) return gradient;
-  const data = new Uint8Array([120, 120, 120, 255, 205, 205, 205, 255, 255, 255, 255, 255]);
+  const data = new Uint8Array([165, 165, 165, 255, 228, 228, 228, 255, 255, 255, 255, 255]);
   gradient = new THREE.DataTexture(data, 3, 1, THREE.RGBAFormat);
   gradient.minFilter = THREE.NearestFilter;
   gradient.magFilter = THREE.NearestFilter;

@@ -29,6 +29,23 @@ export const SCENE_KEYFRAMES: readonly SceneKeyframe[] = [
 
 export type JourneyPose = SceneKeyframe & { arc: number };
 
+// Orbit of the four UI cards, in world units: path radius and half the card width (before the per-card scale).
+export const CARD_ORBIT = { radius: 1.2, halfCard: 0.38 } as const;
+
+// Fits her, her ring and the orbiting cards between the headline column and the right-hand scene counter.
+// side is the wanted position (fraction of the viewport width), the result is the side to use plus a scale (<= 1)
+// that shrinks her on small desktop windows. Sizes are CSS pixels; unitsPerPx is world units per pixel at her depth.
+export function fitCardOrbit(pxW: number, pxH: number, viewH: number, side: number) {
+  const ppu = pxH / viewH;
+  const left = Math.min(0.505 * pxW, 740) + 28;
+  const right = pxW - 64;
+  let need = (CARD_ORBIT.radius + CARD_ORBIT.halfCard) * 1.04 * ppu;
+  const k = Math.min(1, (right - left) / 2 / need);
+  need *= k;
+  const centre = clamp(pxW * (0.5 + side), left + need, right - need);
+  return { side: (centre - pxW / 2) / pxW, scale: k };
+}
+
 export function sampleJourneyPose(p: number): JourneyPose {
   const last = SCENE_CENTERS.length - 1;
   if (p <= SCENE_CENTERS[0]) return { ...SCENE_KEYFRAMES[0], arc: 0 };

@@ -84,7 +84,8 @@ export default function CompanionBot({ pointer, interactions, voice, progress }:
         face: new THREE.SphereGeometry(0.7, 48, 36),
         hairBack: new THREE.SphereGeometry(0.8, 40, 28, Math.PI - 0.34, Math.PI + 0.68, 0, 2.35),
         hairCap: new THREE.SphereGeometry(0.79, 40, 20, 0, Math.PI * 2, 0, 1.08),
-        bang: new THREE.ConeGeometry(0.125, 0.4, 10, 1),
+        // A rounded, tapered lock of hair (apex up, flipped by the fringe rotation) instead of a sharp cone.
+        bang: new THREE.LatheGeometry([[0, -0.2], [0.125, -0.2], [0.125, -0.05], [0.1, 0.06], [0.065, 0.14], [0.03, 0.19], [0, 0.205]].map(([r, y]) => new THREE.Vector2(r, y)), 12),
         lock: new THREE.CapsuleGeometry(0.1, 0.5, 6, 10),
         cup: new THREE.CylinderGeometry(0.2, 0.2, 0.14, 24),
         torso: new THREE.CapsuleGeometry(0.42, 0.34, 8, 24),

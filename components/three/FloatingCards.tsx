@@ -1,10 +1,10 @@
 'use client';
 
-import { useFrame, useThree } from '@react-three/fiber';
+import { useFrame } from '@react-three/fiber';
 import { useEffect, useMemo, useRef } from 'react';
 import type { MutableRefObject } from 'react';
 import * as THREE from 'three';
-import { clamp, smoothstep } from '@/lib/heroScene';
+import { CARD_ORBIT, clamp, smoothstep } from '@/lib/heroScene';
 import type { StoryWeights } from '@/lib/heroScene';
 import { CARD_FONT, drawGlassCard, drawIcon, makeCanvasTexture } from './cardTextures';
 import type { CardIcon } from './cardTextures';
@@ -43,7 +43,6 @@ function drawCard(def: CardDef) {
 // Four UI cards orbiting her. Each has a sharp and a blurred texture: the further a card is from her (the focus plane),
 // the more of the blurred one shows. A cheap, GPU-friendly depth-of-field that also works on low-power machines.
 export default function FloatingCards({ weights, reduced, mobile }: { weights: MutableRefObject<StoryWeights>; reduced: boolean; mobile: MutableRefObject<boolean> }) {
-  const viewport = useThree(state => state.viewport);
   const root = useRef<THREE.Group>(null);
   const items = useRef<Array<{ group: THREE.Group | null; sharp: THREE.MeshBasicMaterial | null; soft: THREE.MeshBasicMaterial | null }>>(
     CARDS.map(() => ({ group: null, sharp: null, soft: null })),
@@ -66,13 +65,13 @@ export default function FloatingCards({ weights, reduced, mobile }: { weights: M
       if (!item.group || !item.sharp || !item.soft) return;
       const a = t * 0.2 + (i * Math.PI) / 2;
       const s = Math.sin(a);
-      const x = Math.cos(a) * clamp(viewport.width * 0.145, 0.85, 1.2);
+      const x = Math.cos(a) * CARD_ORBIT.radius;
       const z = s * 1.0 - 0.05;
       // Tilted orbit: cards pass low in front of her body, high behind her head, so they never cover her face.
       const y = 0.12 - s * 0.8 + Math.sin(t * 0.7 + i * 1.9) * 0.05;
       item.group.position.set(x, y, z);
       item.group.rotation.set(0, -Math.cos(a) * 0.38, Math.cos(a) * 0.03);
-      const grow = 0.72 + 0.28 * smoothstep(0, 0.8, w);
+      const grow = (0.72 + 0.28 * smoothstep(0, 0.8, w)) * (CARD_ORBIT.halfCard / (W / 2));
       item.group.scale.setScalar(grow * (0.92 + 0.12 * (s * 0.5 + 0.5)));
       const blur = clamp((Math.abs(z - 0.1) - 0.35) / 1.0) * 0.8;
       const fade = w * (0.72 + 0.28 * (s * 0.5 + 0.5));
