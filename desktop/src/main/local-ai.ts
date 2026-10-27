@@ -561,8 +561,12 @@ export class LocalAI {
           onText,
           maxTokens: cloud.provider === 'groq' ? 950 : 1500,
           onToolCall: name => console.log(`[Tools] model called ${name}`),
+          // Groq limits input tokens per minute per model and tool turns re-send the tool list every step,
+          // so a second model keeps the turn alive when the main one answers 429.
+          fallbackModel: cloud.provider === 'groq' && model !== 'openai/gpt-oss-20b' ? 'openai/gpt-oss-20b' : undefined,
+          onStep: info => console.log(`[Tools] step=${info.step} model=${info.model} ms=${info.ms} status=${info.status} calls=${info.calls.join(',') || '-'}`),
         });
-        console.log(`[Tools] finished after ${outcome.steps} step(s), ${outcome.toolCalls} tool call(s)`);
+        console.log(`[Tools] finished after ${outcome.steps} step(s), ${outcome.toolCalls} tool call(s), ${Date.now() - streamT0} ms total`);
         return;
       } catch (error) {
         if (signal.aborted) throw error;
