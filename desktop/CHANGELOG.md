@@ -1,5 +1,26 @@
 # Changelog (desktop)
 
+## key-security (on top of integrate3)
+
+- **Honest key storage text.** Settings no longer says keys are "encrypted via safeStorage". The wording now comes from one
+  function, `describeKeyStorage()` in `src/main/key-storage.ts` (shown through the settings-only IPC `getKeyStorageInfo()`),
+  so UI and docs cannot drift. On Linux it says plainly: kept in a private file, **not encrypted** (base64 only).
+  Windows / macOS name DPAPI / Keychain and admit the plain fallback.
+- **Permissions.** `config.json` is written with mode 600 (`configFileMode`), `~/.config/Sudo-chan` is 700, and an older
+  world-readable file is tightened at start (`src/main/key-files.ts`, best effort, never throws, synchronous fs only).
+  `safeStorage` is still never called at startup; no `secret-tool` / libsecret route was added (cannot be proven non-blocking
+  here; noted in `KEY-ROTATION.md` as a future option).
+- **Remove saved keys** (Settings, Your privacy): click + confirm; clears the key of every provider (chat, Gemini, Groq, Azure)
+  from `config.json` and from memory (`stripAllKeys`, IPC `clearSavedKeys()`, settings window only). Provider, model and
+  region are kept. Voice can never trigger it.
+- **`KEY-ROTATION.md`**: step-by-step key rotation for Groq and Gemini (and Azure), with "never paste keys in chat".
+- **Chat window voice uses the same intent routing as the overlay** (`src/shared/chat-voice-turn.ts`): a screen phrase starts
+  the normal screen flow (consent, countdown, sensitive-window guard, cooldown) only when screen assist is ON; chat, task and
+  unsure utterances stay plain messages. No new capture path.
+- Tests: `tests/key-security.check.mjs` (14 tests) and 5 in `tests/intent.check.mjs`. `npm run verify` got one wiring check
+  (config 600 / folder 700 / Remove saved keys wired, IPC kinds) and three smoke checks (chat/overlay refused, 600/700 modes,
+  Remove saved keys clears memory and disk).
+
 ## usage-meter (on top of integrate2)
 
 - **Realistic voice for every reply.** New setting `ttsQuality` (default `best`): Gemini voice is tried for every reply,
