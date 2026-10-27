@@ -45,11 +45,13 @@ test('main wiring: stop cancels screen capture and tools and is allowed from the
   assert.match(main, /v\.source === 'wake' \|\| Boolean\(state\.voiceCallActive\)/);
 });
 
-test('main wiring: approvals only reach the chat window, the overlay gets chat text without screenshots, startup avoids safeStorage', () => {
+test('main wiring: approvals go through the shared router (overlay first, chat too), the overlay gets chat text without screenshots, startup avoids safeStorage', () => {
   const main = read('../src/main/index.ts');
+  // Cards are routed by routeApprovalRequest/routeApprovalClose (tested in approval-ui.check.mjs), never sent ad hoc.
   assert.doesNotMatch(main, /overlay\.webContents\.send\(CHANNELS\.toolApproval/);
+  assert.match(main, /routeApprovalRequest\(request, approvalPorts\(\)\)/);
   assert.match(main, /overlay\.webContents\.send\(CHANNELS\.chatState, withoutAttachments\(next\)\)/);
-  assert.match(main, /handle\(CHANNELS\.toolApprovalReply[\s\S]*?'chat'\);/);
+  assert.match(main, /handle\(CHANNELS\.toolApprovalReply[\s\S]*?\['chat', 'overlay'\]\);/);
   assert.match(main, /migrateProviders\(store\.get\('cloud'\)[^;]*keyCodec, false\)/);
 });
 

@@ -63,6 +63,10 @@ export interface AppState {
   screenStatus?: 'capturing' | 'sent' | null;
   /** True while the desktop bot shows a Live Talk caption, so the native window shape leaves room for it. */
   captionVisible?: boolean;
+  /** True while a tool approval card is shown on the desktop bot (the native window shape then leaves room for it). */
+  approvalVisible?: boolean;
+  /** 'working' while a tool is running, so the desktop bot can say "kaam kar rahi hoon...". */
+  toolStatus?: 'working' | null;
 }
 export interface ModelMeta {
   sizeMB: number;
