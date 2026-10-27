@@ -137,7 +137,7 @@ test('no retry on rate limit or errors', async () => {
   assert.equal(a.calls.length, 3); // whisper + both Gemini models, 429 each (existing behaviour); no extra retry
   const b = make(() => fail(500), { keys: { groq: 'W' } });
   await b.r.transcribe(clipReq());
-  assert.equal(b.calls.length, 1);
+  assert.equal(b.calls.length, 2); // large-v3 then turbo on a server error (existing behaviour); no retry
 });
 
 // ---------- one-word commands and prompt leak through the router ----------
