@@ -1141,11 +1141,15 @@ body[data-window=overlay]{overflow:hidden}.overlay-room{position:relative;width:
 .message-shot figcaption{font-size:10.5px;opacity:.75;margin-top:3px}
 
 /* Caption on the desktop bot during Live Talk: what you said and what she answers */
-/* Compact caption that always stays inside the small overlay window: reply clamped to 3 lines, what you said to 1 line */
-.overlay-caption{top:3px;left:6px;width:calc(100% - 12px);max-height:35%;padding:6px 9px;overflow:hidden;text-align:left;border-radius:12px;background:#ffffffee;backdrop-filter:blur(4px);font-size:10px;line-height:1.35}
-.overlay-caption::after{display:none}
-.overlay-caption .caption-you{color:#7d98a0;font-size:8.5px;margin-bottom:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.overlay-caption .caption-bot{color:#2e5560;font-weight:550;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+/* Live Talk caption on the desktop bot: dark glass that matches the bot's visor, always inside the window shape */
+.overlay-caption{position:absolute;top:2%;left:5%;width:90%;max-height:26%;padding:7px 10px;overflow:hidden;z-index:3;box-sizing:border-box;
+  border-radius:14px;background:linear-gradient(160deg,rgba(18,36,48,.88),rgba(10,22,32,.9));border:1px solid rgba(120,220,235,.35);
+  box-shadow:0 6px 18px rgba(9,40,56,.28),0 0 14px rgba(98,217,190,.18);color:#e8fbff;text-align:center;font-size:10.5px;line-height:1.35;font-weight:500;
+  letter-spacing:.01em;animation:captionIn .22s ease-out}
+.overlay-caption .caption-bot,.overlay-caption .caption-you{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere}
+.overlay-caption .caption-you{color:#9fc3cc;font-style:italic}
+@keyframes captionIn{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion:reduce){.overlay-caption{animation:none}}
 
 /* Mic status dot in the overlay pill: green pulse = listening for the name, blue = Live Talk, grey = mic off */
 .presence-dot.is-listening{animation:micPulse 2.4s ease-in-out infinite}

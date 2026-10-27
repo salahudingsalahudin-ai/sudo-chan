@@ -146,6 +146,9 @@ function Overlay({ state }: { state: AppState }) {
   const lip = useLipSync(state.voiceActiveTarget === 'overlay');
   const lastSpokenOverlayId = useRef<string | null>(null);
   const [caption, setCaption] = useState<{ you: string; bot: string }>({ you: '', bot: '' });
+  const isOverlayVoiceActiveForCaption = state.voiceActiveTarget === 'overlay';
+  const captionShown = isOverlayVoiceActiveForCaption && Boolean(caption.bot || caption.you);
+  useEffect(() => { api?.setCaptionVisible(captionShown); }, [captionShown]);
   const isOverlayVoiceActive = state.voiceActiveTarget === 'overlay';
   const overlaySessionRef = useRef<VoiceSession | null>(null);
 
@@ -317,7 +320,7 @@ function Overlay({ state }: { state: AppState }) {
         {state.screenStatus === 'capturing' ? '👀 Dekh rahi hoon... ✕' : '📸 Screen bheji gayi'}
       </button>
     )}
-    {isOverlayVoiceActive && (caption.bot || caption.you) && <div className="overlay-speech overlay-caption" role="status" data-interactive>{caption.you && <div className="caption-you">🗣️ {caption.you}</div>}{caption.bot && <div className="caption-bot">{caption.bot}</div>}</div>}
+    {captionShown && <div className="overlay-caption" role="status" aria-live="polite" data-interactive><span className={caption.bot ? 'caption-bot' : 'caption-you'}>{caption.bot || caption.you}</span></div>}
     {state.speech && !isOverlayVoiceActive && <div className="overlay-speech" role="status" data-interactive>{state.speech}</div>}
 
     <div className="overlay-grip" data-interactive title="Drag to make yourself at home" aria-label="Drag companion"><span/><span/><span/></div>
