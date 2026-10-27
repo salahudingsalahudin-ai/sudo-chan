@@ -22,7 +22,7 @@ export const SCENE_KEYFRAMES: readonly SceneKeyframe[] = [
   { side: -0.255, y: 0.02, scale: 1.04, rotY: 0.24, rotX: -0.02, camZ: 6.8 }, // 02 voice: text right, her left
   { side: 0.255, y: 0.1, scale: 0.94, rotY: -0.22, rotX: 0.02, camZ: 7.0 }, // 03 what she does
   { side: -0.275, y: 0.06, scale: 0.96, rotY: 0.2, rotX: 0.0, camZ: 7.0 }, // 04 tools: approval card
-  { side: 0.105, y: 0.1, scale: 0.94, rotY: 0.32, rotX: 0.02, camZ: 7.0 }, // 05 screen help: her left, the screen on the right
+  { side: 0.125, y: 0.1, scale: 0.9, rotY: 0.32, rotX: 0.02, camZ: 7.0 }, // 05 screen help: her left, the screen on the right
   { side: -0.265, y: 0.04, scale: 0.96, rotY: 0.2, rotX: 0.0, camZ: 7.0 }, // 06 privacy
   { side: 0.255, y: 0.0, scale: 0.98, rotY: -0.2, rotX: 0.0, camZ: 7.0 }, // 07 coming soon
 ];
