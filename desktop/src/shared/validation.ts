@@ -31,6 +31,7 @@ export const DEFAULT_SETTINGS: Settings = {
   screenAssistEnabled: false,
   screenAssistCountdown: true,
   bargeInSensitivity: 0.5,
+  updateCheckEnabled: true,
 };
 export const BOT_DIMENSIONS = { small: [190, 230], medium: [220, 260], large: [264, 312] } as const;
 export const MAX_MESSAGE_LENGTH = 2000;
@@ -97,6 +98,7 @@ export function validSettings(value: unknown): value is Settings {
   if (s.toolsEnabled !== undefined && typeof s.toolsEnabled !== 'boolean') return false;
   if (s.screenAssistEnabled !== undefined && typeof s.screenAssistEnabled !== 'boolean') return false;
   if (s.screenAssistCountdown !== undefined && typeof s.screenAssistCountdown !== 'boolean') return false;
+  if (s.updateCheckEnabled !== undefined && typeof s.updateCheckEnabled !== 'boolean') return false;
   if (s.bargeInSensitivity !== undefined && (typeof s.bargeInSensitivity !== 'number' || !Number.isFinite(s.bargeInSensitivity) || s.bargeInSensitivity < 0 || s.bargeInSensitivity > 1)) return false;
   return true;
 }

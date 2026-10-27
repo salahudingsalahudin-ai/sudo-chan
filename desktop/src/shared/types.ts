@@ -50,6 +50,8 @@ export interface Settings {
   screenAssistCountdown?: boolean;
   /** 0..1, how easily the user can interrupt the bot while it speaks. */
   bargeInSensitivity?: number;
+  /** Once a day, ask GitHub (from the main process only) whether a newer release exists. Default ON; never downloads anything. */
+  updateCheckEnabled?: boolean;
 }
 export interface AppState {
   settings: Settings;
@@ -115,6 +117,8 @@ export interface AIState {
 }
 export interface ActionResult { ok: boolean; error?: string; notice?: string; /** The reason was already shown/spoken on the overlay; do not send the words as a plain chat message. */ handled?: boolean }
 /** How API keys are stored on this platform. Produced by `describeKeyStorage()` in the main process (the single source of the wording). */
+/** What Settings shows about updates: a calm line, never a popup. `version` is set only when a newer release exists. */
+export interface UpdateNotice { enabled: boolean; available: boolean; version?: string; checkedAt?: number }
 export interface KeyStorageInfo { encrypted: boolean; hint: string; detail: string; fact: string }
 export interface AzureStatus { keySet: boolean; maskedKey: string; region: string; charsUsed: number; lastError: string; backoffSeconds: number }
 export type ToolRisk = 'read' | 'write' | 'command' | 'open';
@@ -173,6 +177,8 @@ export interface DesktopAPI {
   playAudio(dataUri: string): Promise<{ ok: boolean; error?: string }>;
   /** Free-quota meter for Settings and Chat. Counters and reset times only, never keys. */
   getUsage(): Promise<UsageSummary>;
+  /** Newer-release notice for the Settings line. Answers from the main process; the page itself never touches the network. */
+  getUpdateNotice(): Promise<UpdateNotice>;
   /** Plain-words description of how keys are stored on this platform (Settings window only). */
   getKeyStorageInfo(): Promise<KeyStorageInfo>;
   /** Deletes every saved provider key from disk and memory (Settings window only; the UI asks for confirmation first). */
@@ -214,6 +220,7 @@ export const CHANNELS = {
   caption: 'companion:caption',
   reminderDue: 'companion:reminder-due',
   usage: 'companion:usage',
+  updateNotice: 'companion:update-notice',
   keyStorageInfo: 'companion:key-storage-info',
   clearKeys: 'companion:clear-keys',
   azureGet: 'companion:azure-get',

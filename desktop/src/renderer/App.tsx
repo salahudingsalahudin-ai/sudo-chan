@@ -16,6 +16,7 @@ import { clearInterruptedSpeech, getLastBotSpeech, getMutedPreference, hasInterr
 import { isStopCommand, unclearAction } from '../shared/stop-intent.ts';
 import { routeSpeech } from '../shared/intent.ts';
 import { RemoveKeysRow, useKeyStorageInfo } from './KeyStorage';
+import { UpdateSettings } from './UpdateSettings';
 import { runChatVoiceTurn } from '../shared/chat-voice-turn.ts';
 import { DEFAULT_BARGE_IN_SENSITIVITY } from '../shared/barge-in.ts';
 import { formatResetLabel } from '../shared/usage.ts';
@@ -1248,6 +1249,7 @@ function SettingsView({ state }: { state: AppState }) {
     settings.glassesEnabled !== state.settings.glassesEnabled ||
     settings.toolsEnabled !== state.settings.toolsEnabled ||
     settings.bargeInSensitivity !== state.settings.bargeInSensitivity ||
+    settings.updateCheckEnabled !== state.settings.updateCheckEnabled ||
     settings.ttsProvider !== state.settings.ttsProvider ||
     settings.ttsQuality !== state.settings.ttsQuality ||
     settings.ttsGeminiVoice !== state.settings.ttsGeminiVoice ||
@@ -1273,6 +1275,7 @@ function SettingsView({ state }: { state: AppState }) {
     state.settings.glassesEnabled,
     state.settings.toolsEnabled,
     state.settings.bargeInSensitivity,
+    state.settings.updateCheckEnabled,
     state.settings.ttsProvider,
     state.settings.ttsQuality,
     state.settings.ttsGeminiVoice,
@@ -1552,6 +1555,7 @@ function SettingsView({ state }: { state: AppState }) {
             <span><i/>{keyStorage.fact}</span>
             <span><i/>Chat kept in memory until Quit</span>
           </div>
+          <UpdateSettings settings={settings} setSettings={setSettings}/>
           <RemoveKeysRow/>
           <div className="privacy-bottom"><span>Want a fresh start?</span><button className="text-button" type="button" onClick={() => void clear()}>{confirmClear ? 'Confirm clear conversation' : 'Clear conversation'}</button></div>
         </section>

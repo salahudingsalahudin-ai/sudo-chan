@@ -76,6 +76,15 @@ export function compareVersions(a: string, b: string): number {
   return 0;
 }
 
+/** What the Settings window may see: the version number only, never a URL or anything fetched. */
+export function toNotice(info: UpdateInfo | undefined, enabled: boolean): { enabled: boolean; available: boolean; version?: string; checkedAt?: number } {
+  if (!enabled) return { enabled: false, available: false };
+  if (!info) return { enabled: true, available: false };
+  return info.available
+    ? { enabled: true, available: true, version: info.version, checkedAt: info.checkedAt }
+    : { enabled: true, available: false, checkedAt: info.checkedAt };
+}
+
 function isGithubUrl(value: string): boolean {
   try {
     const url = new URL(value);
