@@ -1,4 +1,5 @@
 import type { SpeechEvent } from './speech-events.js';
+import type { UsageSummary } from './usage.ts';
 export type Mood = 'calm' | 'worried' | 'happy';
 export type WindowKind = 'overlay' | 'chat' | 'settings';
 export type BotSize = 'small' | 'medium' | 'large';
@@ -6,6 +7,8 @@ export type AIMode = 'local' | 'cloud';
 export type CloudProviderId = 'gemini' | 'groq' | 'openai' | 'openrouter' | 'custom';
 export type SttProviderId = 'auto' | 'browser' | 'whisper' | 'gemini';
 export type TtsProviderId = 'auto' | 'google' | 'gemini' | 'azure' | 'elevenlabs';
+/** 'best' = Gemini for every reply while free quota lasts; 'save' = only longer replies use Gemini. */
+export type TtsQuality = 'best' | 'save';
 export type VoiceLanguage = 'auto' | 'ur-PK' | 'en' | 'ur';
 export type SttLanguage = 'auto' | 'ur' | 'en' | 'ur-PK';
 export type VadSensitivity = 'low' | 'medium' | 'high';
@@ -24,6 +27,8 @@ export interface Settings {
   sttProvider?: SttProviderId;
   sttLanguage?: SttLanguage;
   ttsProvider?: TtsProviderId;
+  /** Voice policy for Gemini's small free quota: 'best' (default) or 'save'. */
+  ttsQuality?: TtsQuality;
   /** Speech recognition: 'accurate' = Gemini first (better Urdu, ~2-3 s), 'fast' = Groq Whisper first (~0.5 s). */
   sttSpeed?: 'accurate' | 'fast';
   ttsVoice?: string;
@@ -160,6 +165,8 @@ export interface DesktopAPI {
   onSpeechEvent(callback: (event: SpeechEvent) => void): () => void;
   transcribeAudio(base64Audio: string, mimeType?: string, language?: string, hint?: string): Promise<{ ok: boolean; text?: string; error?: string; fallbackToBrowser?: boolean; rateLimited?: boolean; scriptWarning?: boolean }>;
   playAudio(dataUri: string): Promise<{ ok: boolean; error?: string }>;
+  /** Free-quota meter for Settings and Chat. Counters and reset times only, never keys. */
+  getUsage(): Promise<UsageSummary>;
   getAzure(): Promise<AzureStatus>;
   saveAzure(config: { apiKey?: string; region: string }): Promise<ActionResult>;
   testAzure(sample: 'en' | 'roman'): Promise<{ ok: boolean; error?: string; dataUri?: string; voice?: string }>;
@@ -196,6 +203,7 @@ export const CHANNELS = {
   speechBroadcast: 'companion:speech-broadcast',
   caption: 'companion:caption',
   reminderDue: 'companion:reminder-due',
+  usage: 'companion:usage',
   azureGet: 'companion:azure-get',
   azureSave: 'companion:azure-save',
   azureTest: 'companion:azure-test',

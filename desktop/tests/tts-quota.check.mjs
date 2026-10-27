@@ -35,9 +35,9 @@ test('worthGemini skips 1-2 word replies', () => {
   assert.equal(worthGemini('Haan theek hai'), true);
 });
 
-test('router does not spend a Gemini call on 1-2 word replies, and says so in stats', async () => {
+test("router does not spend a Gemini call on 1-2 word replies when quality is 'save', and says so in stats", async () => {
   const f = fakeFetch({ gemini: geminiOk, google: googleOk });
-  const router = new TtsRouter({ getKey: () => 'k', getPreferred: () => 'gemini', fetchFn: f });
+  const router = new TtsRouter({ getKey: () => 'k', getPreferred: () => 'gemini', getQuality: () => 'save', fetchFn: f });
   const r = await router.synthesize({ text: 'Theek hai', lang: 'hi' });
   assert.equal(r.provider, 'google');
   assert.equal(f.gemini(), 0);

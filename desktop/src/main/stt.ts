@@ -2,6 +2,8 @@
  * Speech-to-text with a Gemini-first route (much better on Urdu / Roman Urdu than Whisper),
  * Groq Whisper next, OpenAI Whisper last. Network and keys are injected so this is unit tested.
  */
+import { estimateAudioSeconds } from '../shared/usage.ts';
+import type { HeaderLike, SttUsageSink } from '../shared/usage.ts';
 export type SttLang = 'en' | 'ur' | undefined;
 export interface SttRequest {
   base64: string;
@@ -22,6 +24,8 @@ export interface FetchResponseLike {
   ok: boolean;
   status: number;
   json(): Promise<unknown>;
+  /** Present on real fetch responses; the usage meter reads Groq's x-ratelimit-* values from it. */
+  headers?: HeaderLike;
 }
 export type FetchLike = (url: string, init: Record<string, unknown>) => Promise<FetchResponseLike>;
 export interface SttDeps {
@@ -30,6 +34,8 @@ export interface SttDeps {
   now(): number;
   /** 'fast' tries Groq Whisper first (about 0.5 s) before Gemini; 'accurate' (default) tries Gemini first. */
   getMode?(): string | undefined;
+  /** Usage meter (counts calls, remembers Groq's remaining quota). Optional. */
+  usage?: SttUsageSink;
 }
 
 // '-latest' aliases: the dated 2.5 names returned 404 for the user's key. Lite first: it answered a clip in ~1.8 s, while gemini-flash-latest exceeded the 9 s timeout in a sanity check.
@@ -122,7 +128,7 @@ export async function geminiTranscribe(fetchFn: FetchLike, key: string, model: s
 
 export const WHISPER_DEFAULT_PROMPT = 'Pakistani conversation in Roman Urdu and English. Sudo-chan, Sid, suno, ji, kya haal hai, kaise ho, theek hai, mujhe batao, kaam, baat, computer.';
 
-async function whisperTranscribe(fetchFn: FetchLike, url: string, key: string, models: string[], req: SttRequest, extraHeaders: Record<string, string>): Promise<{ status: number; text: string }> {
+async function whisperTranscribe(fetchFn: FetchLike, url: string, key: string, models: string[], req: SttRequest, extraHeaders: Record<string, string>, onResponse?: (res: FetchResponseLike) => void): Promise<{ status: number; text: string }> {
   const lang = normalizeSttLang(req.language);
   const ext = req.mimeType.includes('webm') ? 'webm' : 'wav';
   const bytes = Buffer.from(req.base64, 'base64');
@@ -137,6 +143,7 @@ async function whisperTranscribe(fetchFn: FetchLike, url: string, key: string, m
     try {
       const res = await fetchFn(url, { method: 'POST', headers: { Authorization: `Bearer ${key}`, ...extraHeaders }, body: form, signal: AbortSignal.timeout(9000) });
       status = res.status;
+      onResponse?.(res);
       if (res.ok) {
         const data = (await res.json()) as { text?: string };
         return { status: 200, text: (data.text ?? '').trim() };
@@ -169,7 +176,7 @@ export class SttRouter {
     const f = deps.fetch;
     this.routes = [
       ...GEMINI_STT_MODELS.map((model): Route => ({ id: `gemini:${model}`, provider: 'gemini', key: 'gemini', run: (req, key) => geminiTranscribe(f, key, model, req) })),
-      { id: 'groq', provider: 'whisper', key: 'groq', run: (req, key) => whisperTranscribe(f, 'https://api.groq.com/openai/v1/audio/transcriptions', key, ['whisper-large-v3', 'whisper-large-v3-turbo'], req, { 'User-Agent': 'Sudo-chan-Companion/1.0' }) },
+      { id: 'groq', provider: 'whisper', key: 'groq', run: (req, key) => whisperTranscribe(f, 'https://api.groq.com/openai/v1/audio/transcriptions', key, ['whisper-large-v3', 'whisper-large-v3-turbo'], req, { 'User-Agent': 'Sudo-chan-Companion/1.0' }, res => this.deps.usage?.groqStt(estimateAudioSeconds(req.base64, req.mimeType), res.headers, res.ok)) },
       { id: 'openai', provider: 'openai', key: 'openai', run: (req, key) => whisperTranscribe(f, 'https://api.openai.com/v1/audio/transcriptions', key, ['whisper-1'], req, {}) },
     ];
   }
@@ -190,7 +197,9 @@ export class SttRouter {
       const routeStarted = this.deps.now();
       const result = await route.run(req, key);
       console.info(`[STT] route=${route.id} status=${result.status} chars=${result.text.length} ms=${this.deps.now() - routeStarted}`);
+      if (result.status === 200 && route.provider === 'gemini') this.deps.usage?.geminiStt();
       if (result.status === 429) {
+        if (route.provider === 'gemini') this.deps.usage?.geminiSttLimit(this.deps.now() + 60_000);
         this.blockedUntil[route.id] = this.deps.now() + 60_000;
         this.blockedByRateLimit[route.id] = true;
         sawRateLimit = true;

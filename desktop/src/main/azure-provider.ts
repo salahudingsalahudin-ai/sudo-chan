@@ -13,6 +13,8 @@ export interface AzureTtsOptions {
   /** 'auto' or an AZURE_VOICES id. */
   getVoice: () => string | undefined;
   getRomanRoute: () => AzureRomanUrduRoute | undefined;
+  /** Usage meter hook: characters billed by one successful request. */
+  onChars?: (chars: number) => void;
   fetchFn?: FetchFn;
 }
 
@@ -75,6 +77,7 @@ export class AzureTtsProvider implements TtsProvider {
         return { ok: false, error: 'azure returned no audio', retryAfterMs: azureBackoffMs(undefined) };
       }
       this.charsUsed += text.length;
+      this.options.onChars?.(text.length);
       this.lastError = '';
       return { ok: true, dataUri: `data:audio/mp3;base64,${audio.toString('base64')}`, provider: 'azure', voice };
     } catch (error) {
