@@ -178,7 +178,7 @@ export default function SudoChanJourney(){
       const HeadingTag = i === 0 ? 'h1' : 'h2';
       return <Fragment key={item.id}><section id={item.id==='join'?'join':item.id} className={`journey-scene scene-${item.id} ${sceneIndex===i?'is-current':''}`} aria-label={item.label}>
         <div className={`scene-copy ${i%2===0?'align-left':'align-right'}`}>
-          {i>=1&&i<=5&&<SceneArt kind={item.id}/>}
+          {(i>=1&&i<=5||i===6&&!RELEASE_PUBLISHED)&&<SceneArt kind={item.id}/>}
           <span className="scene-index"><i/>{item.number}</span>
           <HeadingTag>{item.title.split('\n').map((line,j)=><span key={j}>{line}</span>)}</HeadingTag>
           <p>{item.body}</p>

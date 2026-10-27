@@ -1,6 +1,6 @@
 // Tiny decorative illustrations shown above the copy of scenes 02-06 on phones only (the 3D / CSS companion is hidden there).
 // Pure SVG, no state. They use the scene's text colour plus the accent, so they work on both themes. Illustration only.
-type Kind = 'inside' | 'intelligence' | 'anatomy' | 'demo' | 'privacy';
+type Kind = 'inside' | 'intelligence' | 'anatomy' | 'demo' | 'privacy' | 'join';
 
 const ACCENT = 'var(--color-bot-rim)';
 
@@ -38,6 +38,12 @@ function Art({ kind }: { kind: Kind }) {
         <rect x="62" y="26" width="48" height="30" rx="4" strokeDasharray="4 4" {...accent} strokeWidth={1.8} />
         <path d="M112 44l14 6-6 2-2 6z" fill={ACCENT} stroke="none" />
       </>;
+    case 'join':
+      return <>
+        <rect x="56" y="20" width="88" height="56" rx="10" {...line} />
+        <path d="M60 26l40 28 40-28" {...accent} />
+        <circle cx="146" cy="22" r="6" fill={ACCENT} />
+      </>;
     default:
       return <>
         <rect x="76" y="38" width="48" height="38" rx="8" {...accent} />
@@ -49,6 +55,6 @@ function Art({ kind }: { kind: Kind }) {
 }
 
 export default function SceneArt({ kind }: { kind: string }) {
-  if (kind !== 'inside' && kind !== 'intelligence' && kind !== 'anatomy' && kind !== 'demo' && kind !== 'privacy') return null;
+  if (kind !== 'inside' && kind !== 'intelligence' && kind !== 'anatomy' && kind !== 'demo' && kind !== 'privacy' && kind !== 'join') return null;
   return <svg className="scene-art" viewBox="0 0 200 96" width="200" height="96" aria-hidden="true" focusable="false"><Art kind={kind} /></svg>;
 }
