@@ -3,7 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "description": "A quiet, friendly desktop companion. Phase 1 local preview.",
-  "author": "Sid",
+  "author": {
+    "name": "Sid",
+    "email": "noreply@sudo-chan.vercel.app"
+  },
   "type": "module",
   "main": "dist/main/bootstrap.js",
   "scripts": {
@@ -12,49 +15,98 @@
     "build": "npm run typecheck && node scripts/build.mjs",
     "start": "electron .",
     "package": "npm run build && electron-builder --dir",
-    "package:linux": "npm run build && electron-builder --linux AppImage",
+    "package:linux": "npm run build && electron-builder --linux AppImage deb",
     "package:win": "npm run build && electron-builder --win nsis",
     "package:mac": "npm run build && electron-builder --mac dmg",
     "test": "node --test tests/*.check.mjs",
     "postinstall": "install-electron",
-    "verify": "node scripts/verify-integrated.mjs"
+    "verify": "node scripts/verify-integrated.mjs",
+    "dist": "npm run build && electron-builder --publish never"
   },
   "build": {
     "appId": "app.sudochan.desktop",
     "productName": "Sudo-chan",
+    "copyright": "Copyright (c) Sid",
+    "artifactName": "Sudo-chan-${version}-${os}-${arch}.${ext}",
+    "publish": null,
     "directories": {
       "output": "release",
-      "buildResources": "build"
+      "buildResources": "assets"
     },
     "files": [
       "dist/**/*",
       "package.json",
-      "build/icon.png"
+      "!**/*.map",
+      "!**/*.test.*",
+      "!**/*.check.mjs",
+      "!**/.env*",
+      "!**/config.json"
     ],
     "asar": true,
+    "electronLanguages": [
+      "en-US"
+    ],
     "linux": {
       "target": [
-        "AppImage"
+        "AppImage",
+        "deb"
       ],
       "category": "Utility",
-      "icon": "build/icon.png"
+      "icon": "assets/icon.png",
+      "executableName": "sudo-chan",
+      "maintainer": "Sid <noreply@sudo-chan.vercel.app>",
+      "synopsis": "Desktop AI companion",
+      "desktop": {
+        "entry": {
+          "Name": "Sudo-chan",
+          "Comment": "A quiet, friendly desktop AI companion",
+          "StartupWMClass": "Sudo-chan"
+        }
+      }
+    },
+    "deb": {
+      "depends": [
+        "libgtk-3-0",
+        "libnotify4",
+        "libnss3",
+        "libxss1",
+        "libxtst6",
+        "xdg-utils",
+        "libatspi2.0-0",
+        "libuuid1",
+        "libsecret-1-0"
+      ]
     },
     "win": {
       "target": [
-        "nsis"
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
       ],
-      "icon": "build/icon.ico"
+      "icon": "assets/icon.ico"
     },
     "mac": {
       "target": [
-        "dmg"
+        {
+          "target": "dmg",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
       ],
       "category": "public.app-category.productivity",
-      "icon": "build/icon.icns"
+      "icon": "assets/icon.icns",
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false
     },
     "nsis": {
       "oneClick": false,
-      "allowToChangeInstallationDirectory": true
+      "allowToChangeInstallationDirectory": true,
+      "perMachine": false
     }
   },
   "dependencies": {
@@ -71,5 +123,7 @@
     "esbuild": "0.28.2",
     "typescript": "7.0.2",
     "vite": "8.3.5"
-  }
+  },
+  "homepage": "https://sudo-chan.vercel.app",
+  "license": "UNLICENSED"
 }
