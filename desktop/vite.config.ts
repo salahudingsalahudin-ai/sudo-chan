@@ -4,6 +4,10 @@ import { fileURLToPath } from 'node:url';
 export default defineConfig({
   root: fileURLToPath(new URL('./src/renderer', import.meta.url)),
   base: './',
+  css: {
+    // Isolate desktop styles from root PostCSS/Tailwind config
+    postcss: {},
+  },
   plugins: [{
     name: 'desktop-development-csp',
     apply: 'serve',
