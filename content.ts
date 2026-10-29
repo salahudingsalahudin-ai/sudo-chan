@@ -221,7 +221,7 @@ export const content = {
     verifyCommand: 'sha256sum -c SHA256SUMS --ignore-missing',
     verifyNote: 'It should print OK for your file. If it does not, delete the file and download again.',
     unsignedNote: 'The files are not code-signed, so your system may warn you.',
-    moreLink: 'More details and install steps',
+    moreLink: 'Step-by-step install guide',
     waitlistLink: 'Want news about Windows and macOS? Join the waitlist',
   },
   downloadPage: {
