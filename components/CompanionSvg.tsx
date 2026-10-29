@@ -94,6 +94,96 @@ export default function CompanionSvg({ eyeNodes, pupils, redness, sleeping, redu
       <ellipse cx="82" cy="150" rx="9" ry="5" fill="#ff8fb0" opacity={happy ? 0.7 : 0.4} />
       <ellipse cx="168" cy="150" rx="9" ry="5" fill="#ff8fb0" opacity={happy ? 0.7 : 0.4} />
       <path className="cs-mouth" d={mouth} fill={happy ? '#7a2646' : 'none'} stroke={OUTLINE} strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" />
+
+      {/* Sudo-chan Signature Cute Round Smart Glasses (matching desktop companion) */}
+      <g className="cs-glasses" pointerEvents="none" aria-hidden="true">
+        <defs>
+          <filter id="cs-glasses-glow" x="-20%" y="-20%" width="140%" height="140%">
+            <feDropShadow dx="0" dy="0.8" stdDeviation="1.5" floodColor="#38e8ff" floodOpacity="0.5" />
+          </filter>
+          <linearGradient id="cs-glasses-lens" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stopColor="#ffffff" stopOpacity="0.22" />
+            <stop offset="45%" stopColor="#c7f9ff" stopOpacity="0.08" />
+            <stop offset="100%" stopColor="#38e8ff" stopOpacity="0.03" />
+          </linearGradient>
+        </defs>
+
+        {/* Left Lens (over left eye cx=98, cy=128) */}
+        <rect
+          x="78"
+          y="108"
+          width="40"
+          height="42"
+          rx="15"
+          fill="url(#cs-glasses-lens)"
+          stroke="#ffffff"
+          strokeWidth="2.2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          filter="url(#cs-glasses-glow)"
+        />
+        <path
+          d="M84 119 C 85 113, 91 111, 97 111"
+          stroke="#ffffff"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+          fill="none"
+          opacity="0.85"
+        />
+        <circle cx="105" cy="114" r="1.1" fill="#ffffff" opacity="0.9" />
+
+        {/* Right Lens (over right eye cx=152, cy=128) */}
+        <rect
+          x="132"
+          y="108"
+          width="40"
+          height="42"
+          rx="15"
+          fill="url(#cs-glasses-lens)"
+          stroke="#ffffff"
+          strokeWidth="2.2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          filter="url(#cs-glasses-glow)"
+        />
+        <path
+          d="M138 119 C 139 113, 145 111, 151 111"
+          stroke="#ffffff"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+          fill="none"
+          opacity="0.85"
+        />
+        <circle cx="159" cy="114" r="1.1" fill="#ffffff" opacity="0.9" />
+
+        {/* Cute Arched Nose Bridge */}
+        <path
+          d="M118 127 C 121 122, 129 122, 132 127"
+          stroke="#ffffff"
+          strokeWidth="2.4"
+          strokeLinecap="round"
+          fill="none"
+          filter="url(#cs-glasses-glow)"
+        />
+
+        {/* Temples connecting to headphones */}
+        <path
+          d="M78 127 C 68 125, 59 123, 52 121"
+          stroke="#ffffff"
+          strokeWidth="2"
+          strokeLinecap="round"
+          fill="none"
+          opacity="0.9"
+        />
+        <path
+          d="M172 127 C 182 125, 191 123, 198 121"
+          stroke="#ffffff"
+          strokeWidth="2"
+          strokeLinecap="round"
+          fill="none"
+          opacity="0.9"
+        />
+      </g>
     </svg>
   );
 }

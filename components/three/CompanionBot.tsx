@@ -317,6 +317,47 @@ export default function CompanionBot({ pointer, interactions, voice, progress }:
             <meshBasicMaterial color="#7a2646" toneMapped={false} />
           </mesh>
         </group>
+
+        {/* Sudo-chan Signature Cute Round Smart Glasses (matching desktop companion) */}
+        <group position={[0, -0.035, 0.645]}>
+          {/* Left Frame */}
+          <mesh position={[-0.25, 0, 0.015]}>
+            <torusGeometry args={[0.165, 0.015, 16, 48]} />
+            <meshStandardMaterial color="#ffffff" roughness={0.15} metalness={0.08} emissive="#c7f9ff" emissiveIntensity={0.25} />
+          </mesh>
+          {/* Left Lens with subtle specular sheen */}
+          <mesh position={[-0.25, 0, 0.012]}>
+            <circleGeometry args={[0.16, 32]} />
+            <meshPhysicalMaterial color="#ffffff" transparent opacity={0.15} transmission={0.92} roughness={0.08} clearcoat={1} clearcoatRoughness={0.1} />
+          </mesh>
+
+          {/* Right Frame */}
+          <mesh position={[0.25, 0, 0.015]}>
+            <torusGeometry args={[0.165, 0.015, 16, 48]} />
+            <meshStandardMaterial color="#ffffff" roughness={0.15} metalness={0.08} emissive="#c7f9ff" emissiveIntensity={0.25} />
+          </mesh>
+          {/* Right Lens with subtle specular sheen */}
+          <mesh position={[0.25, 0, 0.012]}>
+            <circleGeometry args={[0.16, 32]} />
+            <meshPhysicalMaterial color="#ffffff" transparent opacity={0.15} transmission={0.92} roughness={0.08} clearcoat={1} clearcoatRoughness={0.1} />
+          </mesh>
+
+          {/* Arched Nose Bridge */}
+          <mesh position={[0, 0.02, 0.015]} rotation={[0, 0, Math.PI / 2]}>
+            <cylinderGeometry args={[0.012, 0.012, 0.17, 16]} />
+            <meshStandardMaterial color="#ffffff" roughness={0.15} metalness={0.08} emissive="#c7f9ff" emissiveIntensity={0.25} />
+          </mesh>
+
+          {/* Side Temples stretching back toward headphones */}
+          <mesh position={[-0.43, 0.005, -0.18]} rotation={[0, 0.32, 0]}>
+            <cylinderGeometry args={[0.01, 0.01, 0.42, 16]} />
+            <meshStandardMaterial color="#ffffff" roughness={0.15} metalness={0.08} />
+          </mesh>
+          <mesh position={[0.43, 0.005, -0.18]} rotation={[0, -0.32, 0]}>
+            <cylinderGeometry args={[0.01, 0.01, 0.42, 16]} />
+            <meshStandardMaterial color="#ffffff" roughness={0.15} metalness={0.08} />
+          </mesh>
+        </group>
       </group>
     </group>
   );

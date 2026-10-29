@@ -26,6 +26,14 @@ function Mascot() {
         <path d="M54 96c6-26 24-40 46-40s40 14 46 40c-12-12-26-18-46-18s-34 6-46 18Z" fill="url(#im-hair)" />
         <g className={styles.mEye}><ellipse cx="80" cy="112" rx="9" ry="12" fill="#fff" /><ellipse cx="80" cy="114" rx="6.5" ry="9.5" fill="url(#im-iris)" /><circle cx="78" cy="110" r="2.2" fill="#fff" /></g>
         <g className={styles.mEye}><ellipse cx="120" cy="112" rx="9" ry="12" fill="#fff" /><ellipse cx="120" cy="114" rx="6.5" ry="9.5" fill="url(#im-iris)" /><circle cx="118" cy="110" r="2.2" fill="#fff" /></g>
+        {/* Sudo-chan Signature Cute Round Smart Glasses */}
+        <g pointerEvents="none">
+          <rect x="66" y="98" width="28" height="28" rx="10" fill="none" stroke="#ffffff" strokeWidth="1.8" />
+          <rect x="106" y="98" width="28" height="28" rx="10" fill="none" stroke="#ffffff" strokeWidth="1.8" />
+          <path d="M94 111 C 97 107, 103 107, 106 111" stroke="#ffffff" strokeWidth="2" strokeLinecap="round" fill="none" />
+          <path d="M66 111 H 52" stroke="#ffffff" strokeWidth="1.6" strokeLinecap="round" />
+          <path d="M134 111 H 148" stroke="#ffffff" strokeWidth="1.6" strokeLinecap="round" />
+        </g>
         <path d="M91 134q9 7 18 0" fill="none" stroke="#b9575f" strokeWidth="2.2" strokeLinecap="round" />
         <circle cx="68" cy="128" r="5" fill="#ff9aa8" opacity=".35" /><circle cx="132" cy="128" r="5" fill="#ff9aa8" opacity=".35" />
         <path d="M42 108a8 8 0 0 1 8 8v14a8 8 0 0 1-8-8zM158 108a8 8 0 0 0-8 8v14a8 8 0 0 0 8-8z" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
