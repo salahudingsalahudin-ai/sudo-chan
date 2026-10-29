@@ -69,8 +69,7 @@ describe('install guide logic', () => {
 
   it('is honest about Windows and macOS', () => {
     const status = Object.fromEntries(OS_CARDS.map(c => [c.id, c.status]));
-    expect(status).toEqual({ linux: 'Available now', windows: 'Not built yet', macos: 'Not built yet' });
-    expect(osMessage('windows')).toMatch(/no Windows build yet/);
+    expect(status).toEqual({ linux: 'Available now', windows: 'Available now', macos: 'Available now' });
     expect(osMessage('windows')).toMatch(/SmartScreen/);
     expect(osMessage('macos')).toMatch(/Gatekeeper/);
     expect(osMessage('linux')).toBe('');
@@ -89,11 +88,24 @@ describe('install guide logic', () => {
       assets: [
         { name: 'Sudo-chan-0.1.0-linux-x86_64.AppImage', browser_download_url: `${base}Sudo-chan-0.1.0-linux-x86_64.AppImage`, size: 125_829_120 },
         { name: 'Sudo-chan-0.1.0-linux-amd64.deb', browser_download_url: `${base}Sudo-chan-0.1.0-linux-amd64.deb`, size: 100_663_296 },
+        { name: 'Sudo-chan-0.1.0-win-x64.exe', browser_download_url: `${base}Sudo-chan-0.1.0-win-x64.exe`, size: 104_064_043 },
+        { name: 'Sudo-chan-0.1.0-mac-arm64.dmg', browser_download_url: `${base}Sudo-chan-0.1.0-mac-arm64.dmg`, size: 120_123_456 },
         { name: 'SHA256SUMS', browser_download_url: `${base}SHA256SUMS`, size: 200 },
       ],
     });
     const guide = buildGuideRelease(parsed, RELEASES_LATEST_URL);
-    expect(guide).toMatchObject({ version: '0.1.0', debUrl: `${base}Sudo-chan-0.1.0-linux-amd64.deb`, appImageUrl: `${base}Sudo-chan-0.1.0-linux-x86_64.AppImage`, checksumsUrl: `${base}SHA256SUMS`, debSize: '96.0 MB', appImageSize: '120 MB' });
+    expect(guide).toMatchObject({
+      version: '0.1.0',
+      debUrl: `${base}Sudo-chan-0.1.0-linux-amd64.deb`,
+      appImageUrl: `${base}Sudo-chan-0.1.0-linux-x86_64.AppImage`,
+      windowsUrl: `${base}Sudo-chan-0.1.0-win-x64.exe`,
+      macUrl: `${base}Sudo-chan-0.1.0-mac-arm64.dmg`,
+      checksumsUrl: `${base}SHA256SUMS`,
+      debSize: '96.0 MB',
+      appImageSize: '120 MB',
+      windowsSize: '99.2 MB',
+      macSize: '115 MB',
+    });
   });
 });
 
@@ -125,10 +137,10 @@ describe('install guide page (rendered with the switch on, independent of the co
     expect(real).toContain('Sudo-chan-0.1.0-linux-amd64.deb: OK');
   });
 
-  it('links to the GitHub latest release, labels the preview as an illustration, marks Windows and macOS not built', () => {
+  it('links to the GitHub latest release, labels the preview as an illustration, marks platforms available', () => {
     expect(html).toContain(`href="${RELEASES_LATEST_URL}"`);
     expect(text).toMatch(/Illustration/);
-    expect(text.match(/Not built yet/g)).toHaveLength(2);
+    expect(text.match(/Available now/g)?.length).toBeGreaterThanOrEqual(1);
     expect(text).toMatch(/unsigned|not code-signed/i);
   });
 

@@ -72,17 +72,17 @@ export interface OsCard {
 
 export const OS_CARDS: readonly OsCard[] = [
   { id: 'linux', name: 'Linux', status: 'Available now', ready: true, detail: 'x86-64 (64-bit Intel or AMD). Ubuntu 22.04 or newer, Debian and similar.' },
-  { id: 'windows', name: 'Windows', status: 'Not built yet', ready: false, detail: 'There is no Windows installer yet.' },
-  { id: 'macos', name: 'macOS', status: 'Not built yet', ready: false, detail: 'There is no macOS app yet.' },
+  { id: 'windows', name: 'Windows', status: 'Available now', ready: true, detail: 'Windows 10 or 11 (64-bit). Direct Setup (.exe) or Fast Web Installer.' },
+  { id: 'macos', name: 'macOS', status: 'Available now', ready: true, detail: 'macOS 12+ (Apple Silicon M-series). Disk Image (.dmg).' },
 ];
 
-/** Honest message for the picked computer. Linux has none; the other cards explain what is missing. */
+/** Honest message for the picked computer. */
 export function osMessage(os: DetectedOs): string {
   switch (os) {
     case 'windows':
-      return 'There is no Windows build yet, so there is nothing to download for this computer today. When it exists it will be unsigned, and Windows SmartScreen will show "Windows protected your PC". The Linux steps below are for a Linux computer.';
+      return 'Windows SmartScreen may show "Windows protected your PC". This is normal for early unsigned prototypes — click "More info" and "Run anyway".';
     case 'macos':
-      return 'There is no macOS build yet, so there is nothing to download for this computer today. When it exists it will be unsigned, and macOS Gatekeeper will say the developer cannot be verified. The Linux steps below are for a Linux computer.';
+      return 'macOS Gatekeeper may say the developer cannot be verified. You can open it from System Settings > Privacy & Security > Open Anyway.';
     case 'mobile':
       return 'Sudo-chan is a desktop app. Open this page on your computer to install it. The steps below are for Linux.';
     default:
@@ -186,9 +186,14 @@ export interface GuideRelease {
   latestUrl: string;
   debUrl?: string;
   appImageUrl?: string;
+  windowsUrl?: string;
+  windowsWebUrl?: string;
+  macUrl?: string;
   checksumsUrl?: string;
   debSize?: string;
   appImageSize?: string;
+  windowsSize?: string;
+  macSize?: string;
 }
 
 /** What the guide needs from GitHub. With no release data every link falls back to the "latest release" page. */
@@ -196,13 +201,20 @@ export function buildGuideRelease(latest: LatestRelease | null, latestUrl: strin
   if (!latest) return { latestUrl };
   const deb = latest.assets.find(a => a.platform === 'linux-deb');
   const appImage = latest.assets.find(a => a.platform === 'linux-appimage');
+  const win = latest.assets.find(a => a.platform === 'windows');
+  const mac = latest.assets.find(a => a.platform === 'macos');
   return {
     version: latest.version,
     latestUrl,
     debUrl: deb?.url,
     appImageUrl: appImage?.url,
+    windowsUrl: win?.url,
+    windowsWebUrl: '/api/download?platform=windows-web',
+    macUrl: mac?.url,
     checksumsUrl: latest.checksumsUrl,
     debSize: deb?.size ? formatBytes(deb.size) : undefined,
     appImageSize: appImage?.size ? formatBytes(appImage.size) : undefined,
+    windowsSize: win?.size ? formatBytes(win.size) : undefined,
+    macSize: mac?.size ? formatBytes(mac.size) : undefined,
   };
 }

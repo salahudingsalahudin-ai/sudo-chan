@@ -32,15 +32,15 @@ describe('RELEASE_PUBLISHED switch', () => {
     expect(JSON.stringify(off.content)).toMatch(/no download link/i);
   });
 
-  it('when ON: an honest Download section, Windows and macOS marked not built, no leftover "not released" claims', async () => {
+  it('when ON: an honest Download section, Windows and macOS marked available, no leftover "not released" claims', async () => {
     const on = await loadWithFlag(true);
     expect(on.RELEASE_PUBLISHED).toBe(true);
     expect(on.content.comingSoon.cta).toBe('Download');
     expect(on.content.scenes[6].label).toBe('DOWNLOAD');
     const statuses = Object.fromEntries(on.content.download.platforms.map(p => [p.name, p.status]));
     expect(statuses['Linux (x86-64)']).toBe('Available');
-    expect(statuses.Windows).toBe('Not built yet');
-    expect(statuses.macOS).toBe('Not built yet');
+    expect(statuses.Windows).toBe('Available');
+    expect(statuses.macOS).toBe('Available');
     expect(on.content.download.verifyCommand).toContain('sha256sum -c SHA256SUMS');
     expect(on.content.download.earlyNote).toMatch(/early version/i);
     expect(on.RELEASES_LATEST_URL).toBe('https://github.com/salahudingsalahudin-ai/sudo-chan/releases/latest');

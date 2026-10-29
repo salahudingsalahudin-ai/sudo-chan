@@ -53,7 +53,7 @@ export const content = {
   },
   intro: { eyebrow: live ? 'A desktop companion, early version' : 'A desktop companion, coming soon', title: `Meet ${SUDO_CHAN}`, line: 'Bas naam lo. Main yahin hoon.' },
   comingSoon: live
-    ? { badge: 'Early version', note: 'An early version for Linux is available to download. Windows and macOS are not built yet.', cta: 'Download' }
+    ? { badge: 'Early version', note: 'Early builds for Windows, macOS and Linux are available to download.', cta: 'Download' }
     : { badge: 'Coming soon', note: 'The desktop app is not released yet. There is no download. Join the waitlist and we will tell you when there is real news.', cta: 'Join the waitlist' },
   scenes: [
     { id: 'arrival', number: '01 — HELLO', title: 'Say her name.\nShe answers.', body: 'Sudo-chan is an AI companion that lives on your desktop. Speak Urdu or English, and she talks back.', label: 'AN INTRODUCTION' },
@@ -63,7 +63,7 @@ export const content = {
     { id: 'demo', number: '05 — SCREEN HELP', title: 'She looks only\nwhen you click.', body: 'Turn on screen help, then click to allow one look. The image goes to the cloud AI model to answer you, and it is never saved on disk.', label: 'SCREEN HELP' },
     { id: 'privacy', number: '06 — PRIVACY', title: 'Your computer,\nyour keys.', body: 'Your API keys stay on your own computer. Here is exactly what she can and cannot touch.', label: 'PRIVACY FIRST' },
     live
-      ? { id: 'join', number: '07 — DOWNLOAD', title: 'Early version.\nTry her on Linux.', body: 'A first build for Linux is ready. It is rough in places, and Windows and macOS are not built yet.', label: 'DOWNLOAD' }
+      ? { id: 'join', number: '07 — DOWNLOAD', title: 'Early version.\nTry her now.', body: 'First builds for Windows, macOS and Linux are ready. Urdu and English speech, screen help with approval, and your keys stay on your machine.', label: 'DOWNLOAD' }
       : { id: 'join', number: '07 — COMING SOON', title: 'Not out yet.\nBe first to know.', body: 'The desktop app is not released and there is no download. Leave an email and we will write when she is ready.', label: 'WAITLIST' },
   ],
   core: [
@@ -166,12 +166,12 @@ export const content = {
       title: 'Questions people ask',
       description: 'Short, honest answers.',
       items: [
-        { question: 'Can I download her?', answer: live ? 'Yes, an early version for Linux (AppImage or .deb) is on the Download section, with checksums so you can verify it. Windows and macOS builds are not made yet.' : 'Not yet. The desktop app is not released, so there is no download link. Join the waitlist and we will write when there is real news.' },
+        { question: 'Can I download her?', answer: live ? 'Yes, early builds for Windows (Setup & Web installer), macOS (Apple Silicon .dmg), and Linux (AppImage & .deb) are available directly in the Download section, with SHA-256 checksums.' : 'Not yet. The desktop app is not released, so there is no download link. Join the waitlist and we will write when there is real news.' },
         { question: 'When is the microphone on?', answer: 'Only while listening is on. You can switch it on or off at any time. She wakes when you say “Sudo” or “Sid”, and you can interrupt her whenever you like.' },
         { question: 'What does she see on my screen?', answer: 'Nothing, until you turn on screen help and click to allow a look. The image goes to the cloud AI model to answer you and is never saved on disk.' },
         { question: 'Can she change my files?', answer: 'Only when tools are on. Risky actions need a click from you, and your voice can never approve them.' },
         { question: 'Where are my API keys kept?', answer: 'On your own computer. On Linux they are not encrypted: they are kept in a file that only your user can read.' },
-        { question: 'Which computers will she work on?', answer: live ? 'Linux (x86-64) for now. Windows and macOS builds do not exist yet; we will say so here when they do.' : 'We have not finalized supported platforms. We will say so here when it is confirmed.' },
+        { question: 'Which computers will she work on?', answer: live ? 'Windows 10/11 (64-bit), macOS 12+ (Apple Silicon), and Linux (x86-64 Debian/Ubuntu/Fedora).' : 'We have not finalized supported platforms. We will say so here when it is confirmed.' },
       ],
     },
     delights: {
@@ -207,14 +207,14 @@ export const content = {
   downloadLink: 'Download',
   /** The home-page Download section (shown instead of the waitlist when RELEASE_PUBLISHED is true). */
   download: {
-    button: 'Download from GitHub Releases',
-    buttonNote: 'Opens the latest release page. Pick the file that matches your system.',
+    button: 'Download Sudo-chan',
+    buttonNote: 'Direct 1-click download for your system. No account required.',
     earlyNote: 'This is an early version. Expect rough edges: Urdu and Roman Urdu recognition is still improving, and the default voice is a simple synthetic one. You bring your own API key.',
     platformsLabel: 'Builds',
     platforms: [
       { name: 'Linux (x86-64)', files: 'AppImage or .deb', status: 'Available', ready: true },
-      { name: 'Windows', files: '', status: 'Not built yet', ready: false },
-      { name: 'macOS', files: '', status: 'Not built yet', ready: false },
+      { name: 'Windows', files: 'Setup (.exe) · Fast Web Installer', status: 'Available', ready: true },
+      { name: 'macOS', files: 'Apple Silicon (.dmg)', status: 'Available', ready: true },
     ],
     verifyTitle: 'Check your download',
     verifyBody: 'Download SHA256SUMS from the same release, put it next to your file, and run:',
@@ -222,13 +222,13 @@ export const content = {
     verifyNote: 'It should print OK for your file. If it does not, delete the file and download again.',
     unsignedNote: 'The files are not code-signed, so your system may warn you.',
     moreLink: 'Step-by-step install guide',
-    waitlistLink: 'Want news about Windows and macOS? Join the waitlist',
+    waitlistLink: 'Want updates on upcoming features? Join the newsletter',
   },
   downloadPage: {
     title: 'Download Sudo-chan',
-    metadataDescription: 'Early prototype builds of the Sudo-chan desktop companion. Linux first; Windows and macOS are not built yet.',
+    metadataDescription: 'Early prototype builds of the Sudo-chan desktop companion for Windows, macOS and Linux.',
     backLink: 'Back to Sudo-chan',
-    intro: 'Sudo-chan is an early prototype. The first build is for Linux. Windows and macOS are not ready yet: join the waitlist and we will tell you.',
+    intro: 'Sudo-chan is an early prototype. Builds are available for Windows, macOS, and Linux.',
     statusNotice: 'Expect rough edges. Urdu and Roman Urdu recognition is still improving, and the default voice is a simple synthetic one.',
     waitlistCta: 'Join the waitlist',
     latestTitle: 'Latest build',
@@ -240,9 +240,9 @@ export const content = {
     checksumsLink: 'SHA256SUMS',
     platformsTitle: 'Platforms',
     platforms: {
-      linux: { name: 'Linux (x86-64)', status: 'First build' },
-      windows: { name: 'Windows', status: 'Not built yet' },
-      macos: { name: 'macOS', status: 'Not built yet' },
+      linux: { name: 'Linux (x86-64)', status: 'Available' },
+      windows: { name: 'Windows', status: 'Available' },
+      macos: { name: 'macOS', status: 'Available' },
     },
     linuxInstallTitle: 'Installing on Linux',
     linuxInstall: [
@@ -251,8 +251,8 @@ export const content = {
     ],
     unsignedTitle: 'Why your computer may warn you',
     unsignedBody: 'These builds are not code-signed yet. Signing costs money and is planned for later. That is why you will see warnings. Only continue if you got the file from this page or the project releases on GitHub, and its checksum matches.',
-    windowsWarning: 'Windows SmartScreen may show "Windows protected your PC". This is normal for unsigned apps. The Windows build is not available yet.',
-    macWarning: 'macOS Gatekeeper may say the developer cannot be verified. You would open it from System Settings, Privacy and Security, Open Anyway. The macOS build is not available yet.',
+    windowsWarning: 'Windows SmartScreen may show "Windows protected your PC". This is normal for unsigned apps — click "More info" and "Run anyway".',
+    macWarning: 'macOS Gatekeeper may say the developer cannot be verified. You would open it from System Settings, Privacy and Security, Open Anyway.',
     verifyTitle: 'Check your download',
     verifyBody: 'Each release includes a SHA256SUMS file. Compare it with your download:',
     verifyCommands: [
