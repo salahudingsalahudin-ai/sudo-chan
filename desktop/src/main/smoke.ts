@@ -96,7 +96,7 @@ export async function runSmoke(): Promise<void> {
     if (!overlay) throw new Error('overlay missing');
     report.apiKeys.overlay = await evalIn<string[]>(overlay, 'return Object.keys(window.companion || {}).sort();');
 
-    const state0 = await evalIn<{ settings: Record<string, unknown> }>(overlay, 'return await window.companion.getState();');
+    const state0 = await evalIn<{ settings: Record<string, unknown>; setupActive?: boolean }>(overlay, 'return await window.companion.getState();');
     check('tools default OFF', state0.settings.toolsEnabled !== true);
     check('screen assist default OFF', state0.settings.screenAssistEnabled !== true);
 
@@ -113,6 +113,19 @@ export async function runSmoke(): Promise<void> {
     lap('settings');
     if (!settings) throw new Error('settings missing');
     report.apiKeys.settings = await evalIn<string[]>(settings, 'return Object.keys(window.companion || {}).sort();');
+
+    // First-run setup wizard: never open in a smoke run; it is a mode of the Settings window that only the Settings window may switch.
+    check('setup wizard is not shown in a smoke run', state0.setupActive !== true);
+    const modeChat = await evalIn<string>(chat, `try { await window.companion.setSetupMode(true); return 'allowed'; } catch (e) { return String(e && e.message || e); }`);
+    const modeOverlay = await evalIn<string>(overlay, `try { await window.companion.setupLive(true); return 'allowed'; } catch (e) { return String(e && e.message || e); }`);
+    check('chat/overlay cannot switch the setup wizard on or start its live demo (authorize)', /unavailable in this window/i.test(modeChat) && /unavailable in this window/i.test(modeOverlay), `${modeChat.slice(0, 50)} / ${modeOverlay.slice(0, 50)}`);
+    const liveClosed = await evalIn<{ ok: boolean }>(settings, 'return await window.companion.setupLive(true);');
+    check('the wizard live demo is refused while the wizard is closed', liveClosed.ok === false);
+    const modeOn = await evalIn<{ ok: boolean }>(settings, 'return await window.companion.setSetupMode(true);');
+    const stateOn = await evalIn<{ setupActive?: boolean }>(settings, 'return await window.companion.getState();');
+    const modeOff = await evalIn<{ ok: boolean }>(settings, 'return await window.companion.setSetupMode(false);');
+    const stateOff = await evalIn<{ setupActive?: boolean }>(settings, 'return await window.companion.getState();');
+    check('Settings window can enter and leave the setup wizard mode', modeOn.ok && stateOn.setupActive === true && modeOff.ok && stateOff.setupActive === false, `${stateOn.setupActive} -> ${stateOff.setupActive}`);
 
     // Window-kind authorisation: the chat window must NOT be allowed to change cloud settings.
     const denied = await evalIn<string>(chat, `try { await window.companion.saveCloudConfig({ provider: 'custom', endpoint: 'http://127.0.0.1:1/v1/chat/completions', model: 'x', apiKey: 'k' }); return 'allowed'; } catch (e) { return String(e && e.message || e); }`);

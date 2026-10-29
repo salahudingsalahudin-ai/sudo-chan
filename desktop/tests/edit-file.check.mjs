@@ -23,7 +23,7 @@ const outside = realpathSync(mkdtempSync(join(tmpdir(), 'sudo-edit-out-')));
 writeFileSync(join(outside, 'x.txt'), 'one two');
 
 const live = new AbortController().signal;
-const tick = () => new Promise(r => setTimeout(r, 25));
+const tick = () => new Promise(r => setTimeout(r, 120));
 function makeRuntime() {
   const cards = [];
   const audit = [];

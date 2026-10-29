@@ -98,9 +98,9 @@ export interface MicDotView { mode: MicDotMode; title: string }
 
 /** Visual mode and tooltip (also the aria-label) for the dot. Simple English, no jargon. */
 export function micDotView(input: { wakeEnabled: boolean; liveActive: boolean; paused: boolean; armed: boolean }): MicDotView {
-  if (input.liveActive) return { mode: 'live', title: 'Live Talk is on. Click to end it.' };
-  if (!input.wakeEnabled) return { mode: 'off', title: 'Mic is OFF. She cannot hear her name. Click to turn it on.' };
+  if (input.liveActive) return { mode: 'live', title: 'Live Talk is on. Click to end it (the bot does the same).' };
+  if (!input.wakeEnabled) return { mode: 'off', title: 'Name standby is OFF. Click to turn it on. Live Talk = the bot.' };
   if (input.armed) return { mode: 'armed', title: 'Click again to turn the mic off.' };
   if (input.paused) return { mode: 'paused', title: 'Resting. The mic is on. To turn it off, click twice.' };
-  return { mode: 'listening', title: 'Mic is ON, listening for her name. To turn it off, click twice.' };
+  return { mode: 'listening', title: 'Name standby is ON. Click twice to turn off. Live Talk = the bot.' };
 }

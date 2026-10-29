@@ -24,6 +24,8 @@ Artifact names are `Sudo-chan-<version>-<os>-<arch>.<ext>`; the checksum file is
 4. **Local checks** (from `desktop/`): `npm run typecheck`, `npm run build`, `npm test`.
 5. **Local package** (Linux): `npm run package:linux`, then run the AppImage or `release/linux-unpacked/sudo-chan`. For a headless check: `release/linux-unpacked/sudo-chan --no-sandbox --smoke-test` should print `SUDO_CHAN_READY` (the app uses its own throw-away userData in smoke mode). Quit any running Sudo-chan first (single-instance lock).
    - Smoke-run the packaged build the same way `npm run verify` does: `npm run verify -- --packaged=release/linux-unpacked/sudo-chan` (37 checks, own throw-away userData).
+   - **First-run journey of the packaged build:** `node scripts/packaged-first-run.mjs release/linux-unpacked/sudo-chan` (fresh userData: wizard open, mic/tools/screen off, file modes 700/600, window class equals the `.desktop` StartupWMClass, second launch has no wizard, exit 0). `--smoke-test` cannot show this, it never opens the wizard. Full journey and results: `INSTALLER-E2E.md`.
+   - **Inspect without installing:** `dpkg-deb -I`, `dpkg-deb -c`, `dpkg -x <deb> <tmp>`, `desktop-file-validate`; for the AppImage `./Sudo-chan-*.AppImage --appimage-extract` (works without FUSE). Package `desktopName`, `StartupWMClass`, the icon folder `assets/linux-icons/` and the deb `depends` are guarded by `tests/installer-config.check.mjs`.
    - **Package from a real `npm ci` checkout.** `desktop/node_modules` must be a real folder, not a symlink to another checkout: electron-builder then silently leaves out runtime dependencies (`electron-store`'s `conf`, `type-fest`, ...) and the app crashes on start. After packaging, `npx asar list release/linux-unpacked/resources/app.asar | grep -c "^/node_modules/conf"` must print 1.
 6. **Tag and push** (this is the step that starts the release build):
    ```
@@ -56,7 +58,7 @@ Nothing below happens by itself; every step is yours. The website keeps saying "
 7. **Publish the release.**
 8. **Flip the website switch:** in `content.ts` change `export const RELEASE_PUBLISHED: boolean = false;` to `true`, run `npm test` and `npm run build`, commit, push to `main`.
 9. **Deploy** the website (your usual Vercel flow). The "Coming soon" text, the waitlist block and the "not released" lines then become the Download section; `/download` goes live and appears in the sitemap.
-10. **Smoke test as a stranger:** open the site, click Download, install the AppImage or `.deb` on a clean machine, run `sha256sum -c SHA256SUMS --ignore-missing`.
+10. **Smoke test as a stranger:** (the website's Linux guide should also say that the AppImage needs `sudo apt install libfuse2` on Ubuntu 22.04+; it does not yet) open the site, click Download, install the AppImage or `.deb` on a clean machine, run `sha256sum -c SHA256SUMS --ignore-missing`.
 
 To take the download down again, set `RELEASE_PUBLISHED` back to `false` and redeploy.
 
@@ -68,6 +70,7 @@ To take the download down again, set `RELEASE_PUBLISHED` back to `false` and red
 - The default voice is robotic. Natural voices need a Gemini or Azure key; Gemini's free quota is tiny.
 - Users must bring their own API key. Keys are stored on the user's computer but not strongly encrypted yet.
 - Tools that act on the computer (files, commands) and screen help are on separate branches and are **not** in a release built from `main` unless you merge them. They are off by default and ask first.
+- The `.deb` is not published or installed by anyone yet: `INSTALLER-E2E.md` lists what only a human on a real desktop can confirm (real `sudo apt install`, Ubuntu 24.04 AppArmor, a real AppImage double-click, app-menu icon, tray, native Wayland).
 - The packaged app was only tested on one Linux machine. The AppImage needs FUSE 2 (`sudo apt install libfuse2` on Ubuntu 22.04+; this laptop does not have it, so the AppImage itself was only run after `--appimage-extract`). On systems that restrict unprivileged user namespaces (Ubuntu 24.04) the AppImage starts itself with `--no-sandbox`; the `.deb` instead installs an AppArmor profile. Neither was tested on 24.04.
 
 ## Code signing (optional, recommended before wider release)

@@ -1,5 +1,52 @@
 # Changelog (desktop)
 
+## installer-e2e (on top of first-run-wizard): the Linux installers built and tested end to end
+
+Full journey table, evidence and the list of things only a human can check in `INSTALLER-E2E.md`. Version stays 0.1.0; the files are release candidates, not published.
+
+- **Window class fixed.** Packaged windows were named `sudo-chan-desktop` (the npm package name) while the menu entry said `StartupWMClass=Sudo-chan`, so a desktop could not link the running window to its menu entry / icon.
+  `package.json` now has `desktopName: "sudo-chan.desktop"` and `StartupWMClass=sudo-chan` (measured on the running packaged app with `xprop`).
+- **Icons at eight sizes** (`assets/linux-icons/16x16.png` ... `512x512.png`) instead of one 1024 px file in the deb and the AppImage.
+- **.deb dependencies:** added `libgbm1` and `libasound2 | libasound2t64` (Electron links them), `Section: utils`.
+- **Tests / tools:** `tests/installer-config.check.mjs` (5), `scripts/packaged-first-run.mjs` (first launch of a packaged binary with a fresh userData: wizard on, mic / tools / screen off, modes 700/600, second launch without wizard, exit 0),
+  `scripts/onboarding-shots.mjs --app=<app.asar>` (wizard screenshots from the packaged code). The flaky `edit_file` and `write_file` unit tests (a 25 ms wait for the approval card) now wait 120 ms.
+
+## first-run-wizard (on top of live-talk-flow): a calm seven-screen setup for a fresh install
+
+Details, copy, states and how to look at it in `ONBOARDING.md`.
+
+- **Setup wizard** as a *mode of the Settings window* (`AppState.setupActive`; no new window kind): Welcome (English / Roman Urdu), Microphone (click-to-allow, live level meter,
+  friendly fixes for denied / no device / busy with Linux PipeWire and PulseAudio tips), Her name (optional teaching through the existing local-wake panel, `localWake` stays off unless the
+  self-test heard her and the person chooses it), Her brain (disabled "Sign in, coming soon", own Groq / Gemini key tested and stored through the main process, Ollama check, an honest
+  line about what works without a brain), Your choices (tools, screen help, window name: all OFF, plus "What she never does"), Say hello (one-click Live Talk demo with a listening glow
+  and a 3-item cheat sheet), All set (summary, tray icon, "Run setup again").
+- **Fresh install only.** Detected in `start()` before the store creates `config.json` (`shouldShowOnboarding` in `src/shared/onboarding.ts`). Owners and everybody with a config, settings or keys
+  never see it; smoke runs never show it. A fresh install starts with the microphone closed until the wizard asks. Progress is saved on every move and resumes on the same screen.
+- **Never blocks the app.** `Esc`, **Skip setup**, or closing the window records `onboardingDone` and returns to normal. Settings gets a **Run setup again** row.
+- **New settings** `onboardingDone`, `onboardingLanguage`, `onboardingStep` (types, defaults, `validSettings`, the Settings "unsaved changes" test and re-sync list). **New IPC** `setSetupMode`, `setupLive`
+  (Settings window only, `authorize`); preload / `DesktopAPI` parity kept; `LocalWakeSettings` gained optional `compact`, `onSelfTest`, `onProfileChange` props (Settings behaviour unchanged).
+- **Tests / verify:** `tests/onboarding.check.mjs` (28), one new `npm run verify` wiring check, two IPC entries in the authorize table and four smoke checks for the setup mode.
+  `scripts/onboarding-shots.mjs` (test-only) screenshots every screen in an isolated temp userData folder.
+
+## live-talk-flow (on top of main 3f87daa): one Live Talk button, one state machine, instant stop, window-name awareness
+
+Details, the full transition table and 8 things to try in `LIVE-TALK-FLOW.md`.
+
+- **The bot is the Live Talk button** (body, orb or antenna, one click to start, one click to stop). The round dot stays the name-standby switch (tooltips now say so);
+  the double-click on the bot that opened the chat is gone (it would have toggled twice). Chat window: the old header icon is removed, the composer has one
+  **Voice** button ("Live Talk here"), typing never opens the mic, the stage button is **End Live Talk**, the chat stays up while Live Talk is on in it.
+- **One state machine** (`src/shared/live-talk.ts`): OFF / STANDBY / LIVE-OVERLAY / LIVE-CHAT + SPEAKING, only one live target at a time, wake word and the 30 s
+  window only for a Live Talk her name opened, stop words cut her when busy and end Live Talk when she is idle, `wakeWordEnabled` is never changed by Live Talk.
+- **Instant stop** (`runLiveStop`, both windows): audio cut synchronously (`stop-button`, `speech:stop` once), no resume replay, `VoiceSession.cancelPending()` drops
+  the half-recorded clip and ignores a speech-to-text answer still in flight, mic closed unless standby is wanted, cloud reply/tools/screenshot aborted, state published.
+  Main has one `setLiveTarget()` that logs `[live] start target=...` / `[live] stop reason=click|stopword|window|quit|error|timeout|switch`.
+- **Awareness layer 1** (`src/shared/live-awareness.ts`, new setting `liveAwareness` 'off'|'window', default off, click-only consent through a new overlay panel or the Settings
+  switch): the focused window's app name and title (AT-SPI, no pixels) go into the system prompt of Live Talk turns only; sensitive windows skipped silently; at most one
+  window list per 5 s; never in history, never logged. The Cloud payload log no longer prints the system prompt. Layer 3 is plumbing only (`liveKeepAnEye`, inert).
+- **Speed:** spoken replies capped at 450 tokens. New IPC `liveAwarenessConsent` (overlay only); `setVoiceActive` is limited to the overlay and chat windows and takes an optional reason.
+- **Tests / verify:** `tests/live-talk.check.mjs` (30), `tests/live-talk-session.check.mjs` (4), `tests/live-awareness.check.mjs` (20); two new `npm run verify` wiring checks;
+  panel priority test and dot tooltip lengths updated.
+
 ## integrate6 review (planner + local-wake + installer-release merged onto main 3c689fb)
 
 Details in `INTEGRATE6.md`. The three branches were merged with hand-resolved conflicts and then reviewed together.

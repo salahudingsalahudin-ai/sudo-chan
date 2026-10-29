@@ -25,7 +25,16 @@ type Phase = { kind: 'idle' } | { kind: 'enroll'; label: WordLabel } | { kind: '
  * Settings > Voice > "On-device name check". Optional and quiet: nothing here runs unless a button is pressed, nothing is shown on the overlay.
  * Recordings are turned into numbers (a few hundred per take) in memory; only those numbers are stored, in a 0600 file in the app's data folder.
  */
-export function LocalWakeSettings({ settings, setSettings }: { settings: Settings; setSettings: (next: Settings) => void }) {
+export function LocalWakeSettings({ settings, setSettings, compact = false, onSelfTest, onProfileChange }: {
+  settings: Settings;
+  setSettings: (next: Settings) => void;
+  /** The setup wizard reuses this panel without the mode and sensitivity rows (it offers its own plain choice after the self-test). */
+  compact?: boolean;
+  /** Called with how many of the 3 self-test attempts were heard. */
+  onSelfTest?: (heard: number, total: number) => void;
+  /** Called whenever the saved profile is (re)loaded: true when at least one word is taught. */
+  onProfileChange?: (taught: boolean) => void;
+}) {
   const api = window.companion;
   const [profile, setProfile] = useState<LocalWakeProfile | undefined>(undefined);
   const [phase, setPhase] = useState<Phase>({ kind: 'idle' });
@@ -42,11 +51,14 @@ export function LocalWakeSettings({ settings, setSettings }: { settings: Setting
   const reload = useCallback(async () => {
     try {
       const info = await api?.getLocalWakeProfile();
-      setProfile(info ? parseProfile(info.profile) : undefined);
+      const parsed = info ? parseProfile(info.profile) : undefined;
+      setProfile(parsed);
+      onProfileChange?.(profileLabels(parsed).length > 0);
     } catch {
       setProfile(undefined);
+      onProfileChange?.(false);
     }
-  }, [api]);
+  }, [api, onProfileChange]);
   useEffect(() => { void reload(); return () => { cancel.current = true; }; }, [reload]);
 
   const labels = profileLabels(profile);
@@ -120,6 +132,7 @@ export function LocalWakeSettings({ settings, setSettings }: { settings: Setting
       }
       const summary = summariseSelfTest(verdicts);
       say(summary.message, summary.heard === 0);
+      onSelfTest?.(summary.heard, summary.total);
     } catch {
       say('The microphone is not available right now.', true);
     } finally {
@@ -141,14 +154,14 @@ export function LocalWakeSettings({ settings, setSettings }: { settings: Setting
   const sensitivity = settings.localWakeSensitivity ?? DEFAULT_LOCAL_WAKE_SENSITIVITY;
   const wordName = (label: string) => (label === 'sudo' ? 'Sudo' : label === 'sid' ? 'Sid' : label);
   return <>
-    <Row title="On-device name check" description={`${MODE_TEXT[mode]} Off by default. ${taught || mode === 'off' ? '' : 'Teach her your voice below first, or this does nothing.'}`}>
+    {!compact && <Row title="On-device name check" description={`${MODE_TEXT[mode]} Off by default. ${taught || mode === 'off' ? '' : 'Teach her your voice below first, or this does nothing.'}`}>
       <select className="wake-word-input" aria-label="On-device name check" value={mode} onChange={event => setSettings({ ...settings, localWake: event.target.value as LocalWakeMode })}>
         <option value="off">Off</option>
         <option value="assist">Assist (recommended to try)</option>
         <option value="strict">Strict (fewest cloud requests)</option>
       </select>
-    </Row>
-    {mode !== 'off' && <Row title="Name check sensitivity" description={`How readily she decides it was your "Sudo" (${Math.round(sensitivity * 100)}%). Raise it if she misses you, lower it if she wakes for other words.`}>
+    </Row>}
+    {!compact && mode !== 'off' && <Row title="Name check sensitivity" description={`How readily she decides it was your "Sudo" (${Math.round(sensitivity * 100)}%). Raise it if she misses you, lower it if she wakes for other words.`}>
       <label className="shortcut-label"><span className="sr-only">Name check sensitivity</span><input type="range" min={0} max={100} step={5} value={Math.round(sensitivity * 100)} onChange={event => setSettings({ ...settings, localWakeSensitivity: Number(event.target.value) / 100 })}/></label>
     </Row>}
     <Row title="Teach her your voice" description={taught ? `Taught: ${labels.map(l => `${wordName(l.label)} (${l.samples} samples)`).join(', ')}. Only numbers that describe your voice are stored on this computer, never a recording.` : 'Optional. Record your own "Sudo" a few times so she can recognise it on this computer without asking the cloud first. Only numbers that describe your voice are stored, never a recording.'}>

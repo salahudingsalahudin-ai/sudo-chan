@@ -48,7 +48,7 @@ const api: DesktopAPI = {
   testCloud: config => ipcRenderer.invoke(CHANNELS.testCloud, config),
   testFeature: feature => ipcRenderer.invoke(CHANNELS.testFeature, feature),
   playSpeech: payload => ipcRenderer.invoke(CHANNELS.playSpeech, payload),
-  setVoiceActive: (active, target) => ipcRenderer.invoke(CHANNELS.setVoiceActive, { active, target }),
+  setVoiceActive: (active, target, reason) => ipcRenderer.invoke(CHANNELS.setVoiceActive, { active, target, reason }),
   setIsSpeaking: speaking => ipcRenderer.invoke(CHANNELS.setIsSpeaking, speaking),
   emitSpeechEvent: event => ipcRenderer.send(CHANNELS.speechEvent, event),
   onSpeechEvent: callback => {
@@ -68,6 +68,7 @@ const api: DesktopAPI = {
   sendScreen: payload => ipcRenderer.invoke(CHANNELS.sendScreen, payload),
   cancelScreen: () => ipcRenderer.invoke(CHANNELS.cancelScreen),
   screenConsent: granted => ipcRenderer.invoke(CHANNELS.screenConsent, granted === true),
+  liveAwarenessConsent: granted => ipcRenderer.invoke(CHANNELS.liveAwarenessConsent, granted === true),
   clearMessages: () => ipcRenderer.invoke(CHANNELS.clear),
   quit: () => ipcRenderer.invoke(CHANNELS.quit),
   onToolApproval: callback => {
@@ -89,5 +90,7 @@ const api: DesktopAPI = {
   getLocalWakeProfile: () => ipcRenderer.invoke(CHANNELS.localWakeGet),
   saveLocalWakeProfile: profile => ipcRenderer.invoke(CHANNELS.localWakeSave, profile),
   deleteLocalWakeProfile: () => ipcRenderer.invoke(CHANNELS.localWakeDelete),
+  setSetupMode: active => ipcRenderer.invoke(CHANNELS.setupMode, active === true),
+  setupLive: active => ipcRenderer.invoke(CHANNELS.setupLive, active === true),
 };
 contextBridge.exposeInMainWorld('companion', api);

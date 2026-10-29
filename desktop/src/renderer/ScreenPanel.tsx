@@ -62,3 +62,19 @@ export function ScreenPanel({ state, speakAloud }: Props) {
     title={cancellable ? 'Click to cancel' : status === 'cached' ? 'Re-using the screenshot from the last two minutes' : 'Screenshot was sent to your AI provider'}
   >{label}</button>;
 }
+
+/**
+ * The one-time question during Live Talk: may she know the NAME and TITLE of the window in front of you (no screenshot)?
+ * Click-only: only these two buttons call the main process, nothing spoken can answer it. It never blocks Live Talk (she is
+ * already listening), it is not spoken aloud, and it goes away by itself. Same box as the screen consent panel.
+ */
+export function AwarenessPanel() {
+  const api = window.companion;
+  return <div className="screen-panel is-consent" role="alertdialog" aria-label="Let Sudo-chan know your window name?" data-interactive>
+    <p className="screen-panel-text">Live Talk mein main sirf aap ki window ka naam jaan loon? Sirf app aur title, screenshot nahi. Password ya bank wali window skip hoti hai.</p>
+    <div className="screen-panel-actions">
+      <button type="button" className="screen-btn is-allow" onClick={() => void api?.liveAwarenessConsent(true)}>Allow</button>
+      <button type="button" className="screen-btn" onClick={() => void api?.liveAwarenessConsent(false)}>Not now</button>
+    </div>
+  </div>;
+}

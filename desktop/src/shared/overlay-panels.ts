@@ -4,12 +4,14 @@
  * greeting bubble. This pure function decides which single panel is visible; the renderer draws exactly that one and the
  * native window shape (main process) opens exactly that panel's region, so a prompt is never hidden or clipped.
  *
- * Priority (highest first): approval > consent > countdown > notice > capturing > caption > hint > speech.
+ * Priority (highest first): approval > consent > countdown > notice > capturing > awareness > caption > hint > speech.
+ * `awareness` is the one-time, click-only "may she know my window name?" question during Live Talk (desktop/LIVE-TALK-FLOW.md).
+ * It sits above the caption so it can be seen, below every screen-assist prompt; it never blocks Live Talk and ends by itself.
  * Anything that is not first is "queued": it is still in the app state and appears as soon as the panel above it is
  * gone. A caption never hides an approval or a consent prompt. The "sent" / "old screen" screen hints are folded into
  * the caption as a small chip so they never hide her answer.
  */
-export type OverlayPanel = 'approval' | 'consent' | 'countdown' | 'notice' | 'capturing' | 'caption' | 'hint' | 'speech';
+export type OverlayPanel = 'approval' | 'consent' | 'countdown' | 'notice' | 'capturing' | 'awareness' | 'caption' | 'hint' | 'speech';
 
 export type ScreenStatus = 'consent' | 'countdown' | 'capturing' | 'sent' | 'cached' | 'notice' | null | undefined;
 
@@ -17,13 +19,15 @@ export interface OverlayPanelInput {
   /** A tool approval card is waiting on the desktop bot. */
   approvalPending: boolean;
   screenStatus: ScreenStatus;
+  /** The one-time window-name question is showing. */
+  awarenessPending?: boolean;
   /** There is something to caption: Live Talk text on the desktop bot, or "kaam kar rahi hoon..." while tools run. */
   captionWanted: boolean;
   /** The old greeting/pomodoro bubble has text and Live Talk is not on the desktop bot. */
   speechWanted: boolean;
 }
 
-export const PANEL_PRIORITY: readonly OverlayPanel[] = ['approval', 'consent', 'countdown', 'notice', 'capturing', 'caption', 'hint', 'speech'];
+export const PANEL_PRIORITY: readonly OverlayPanel[] = ['approval', 'consent', 'countdown', 'notice', 'capturing', 'awareness', 'caption', 'hint', 'speech'];
 
 /** Share of the window height each panel needs (the native shape opens this much at the top). */
 export const PANEL_HEIGHT: Record<OverlayPanel, number> = {
@@ -32,6 +36,7 @@ export const PANEL_HEIGHT: Record<OverlayPanel, number> = {
   countdown: 0.29,
   notice: 0.45,
   capturing: 0.29,
+  awareness: 0.52,
   caption: 0.29,
   hint: 0.29,
   speech: 0.29,
@@ -53,6 +58,7 @@ export function wantedPanels(input: OverlayPanelInput): OverlayPanel[] {
   else if (s === 'notice') wanted.add('notice');
   else if (s === 'capturing') wanted.add('capturing');
   else if (s === 'sent' || s === 'cached') wanted.add('hint');
+  if (input.awarenessPending) wanted.add('awareness');
   if (input.captionWanted) wanted.add('caption');
   if (input.speechWanted) wanted.add('speech');
   return PANEL_PRIORITY.filter(panel => wanted.has(panel));
@@ -68,6 +74,7 @@ export function panelPlan(input: OverlayPanelInput): OverlayPanelPlan {
 /** Main-process view: derive the same plan from the published app state flags. */
 export interface PanelStateFlags {
   approvalVisible?: boolean;
+  awarenessPrompt?: boolean;
   screenStatus?: ScreenStatus;
   captionVisible?: boolean;
   toolStatus?: 'working' | null;
@@ -77,6 +84,7 @@ export interface PanelStateFlags {
 export function activePanelForState(state: PanelStateFlags): OverlayPanel | null {
   return panelPlan({
     approvalPending: Boolean(state.approvalVisible),
+    awarenessPending: Boolean(state.awarenessPrompt),
     screenStatus: state.screenStatus,
     captionWanted: Boolean(state.captionVisible || state.toolStatus),
     speechWanted: Boolean(state.speech),
@@ -84,9 +92,10 @@ export function activePanelForState(state: PanelStateFlags): OverlayPanel | null
 }
 
 /** What Esc means for the visible panel (a prompt is never confirmed by Esc, only refused or cancelled). */
-export function escapeAction(panel: OverlayPanel | null): 'deny-approval' | 'decline-consent' | 'cancel-screen' | null {
+export function escapeAction(panel: OverlayPanel | null): 'deny-approval' | 'decline-consent' | 'cancel-screen' | 'dismiss-awareness' | null {
   if (panel === 'approval') return 'deny-approval';
   if (panel === 'consent') return 'decline-consent';
   if (panel === 'countdown' || panel === 'capturing') return 'cancel-screen';
+  if (panel === 'awareness') return 'dismiss-awareness';
   return null;
 }

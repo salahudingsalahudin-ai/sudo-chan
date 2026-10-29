@@ -64,3 +64,8 @@ The native X11 shape has an explicit region for the mic switch (`overlay-shape.t
 
 `tests/mic-control.check.mjs` (gesture state machine, merge keeps `wakeWordEnabled`, stale form, source allow-list, log format,
 wiring: the switch is not inside the pill) and a new case in `tests/overlay-shape.check.mjs`.
+
+## Update (live-talk-flow)
+
+The dot is only the **name-standby** switch. The bot itself is the Live Talk button (see `LIVE-TALK-FLOW.md`). During Live Talk one click on the dot still ends Live
+Talk, now through the same instant stop as the bot. Tooltips: "Name standby is ON. Click twice to turn off. Live Talk = the bot."

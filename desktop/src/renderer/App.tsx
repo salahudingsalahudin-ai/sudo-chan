@@ -14,6 +14,8 @@ import { ClipGate, WAKE_TRIM_MS, formatGateLine } from '../shared/clip-gate.ts';
 import { LocalWakeController, decideWakeClip } from '../shared/local-wake/runtime.ts';
 import { parseProfile } from '../shared/local-wake/enrollment.ts';
 import { LocalWakeSettings } from './LocalWakeSettings';
+import { SetupWizard } from './SetupWizard';
+import { restartPatch } from '../shared/onboarding.ts';
 import { approvalHeadline, approvalSecondsLeft, approvalSpokenLine, mergeApprovals, reduceApprovals } from '../shared/approval-ui.ts';
 import { clearInterruptedSpeech, getLastBotSpeech, getMutedPreference, hasInterruptedSpeech, resumeInterruptedSpeech, setMutedPreference, speak, stopSpeech } from './speech';
 import { isStopCommand, unclearAction } from '../shared/stop-intent.ts';
@@ -27,7 +29,9 @@ import { TasksPanel } from './TasksPanel.tsx';
 import { MIC_CONFIRM_MS, changedSettings, micDotPress, micDotView } from '../shared/mic-control.ts';
 import { getLastStop, isSpeakingNow, stopSpeaking } from './tts-player';
 import { isPhantomTranscript, isSelfEchoTranscript } from '../shared/stt-hallucination.ts';
-import { ScreenPanel } from './ScreenPanel';
+import { AwarenessPanel, ScreenPanel } from './ScreenPanel';
+import { runLiveStop, runLiveTeardown, stopWordAction } from '../shared/live-talk.ts';
+import type { LiveStopReason } from '../shared/live-talk.ts';
 import { VoiceSession, type BargeInInfo, getVoiceProfile, isSpeakerMatch, recordVoiceSample } from './voice-engine';
 import type { VoiceProfile } from './voice-engine';
 
@@ -79,14 +83,15 @@ function ThinkingIndicator() {
 function useCompanion() {
   const [state, setState] = useState(initialState);
   const [error, setError] = useState('');
+  const [ready, setReady] = useState(false);
   useEffect(() => {
     if (!api) { setError('Open this preview in the Sudo-chan desktop app.'); return; }
     let subscribed = true;
-    const unsubscribe = api.onState(next => { if (subscribed) setState(next); });
-    void api.getState().then(next => { if (subscribed) setState(next); }).catch(() => { if (subscribed) setError('Could not connect to your companion. Please restart the app.'); });
+    const unsubscribe = api.onState(next => { if (subscribed) { setState(next); setReady(true); } });
+    void api.getState().then(next => { if (subscribed) { setState(next); setReady(true); } }).catch(() => { if (subscribed) setError('Could not connect to your companion. Please restart the app.'); });
     return () => { subscribed = false; unsubscribe(); };
   }, []);
-  return { state, error };
+  return { state, error, ready };
 }
 function WindowHeader({ subtitle, settings = false }: { subtitle: string; settings?: boolean }) {
   return <header className="window-header"><div className="brand-mark">s<span/></div><div className="header-brand"><b>Sudo-chan</b><span>{subtitle}</span></div><div className="header-actions">{!settings && <button className="icon-button" aria-label="Open settings" onClick={() => void api?.openSettings()}><Icon name="settings"/></button>}<button className="icon-button" aria-label="Hide window" onClick={() => void api?.hideWindow()}><Icon name="close"/></button></div></header>;
@@ -229,7 +234,7 @@ function Overlay({ state }: { state: AppState }) {
   const captionWanted = (isOverlayVoiceActiveForCaption && Boolean(caption.bot || caption.you)) || toolsWorking;
   // Main resolves the same priority from the published flags (captionVisible etc.), so the native window shape matches this plan.
   useEffect(() => { api?.setCaptionVisible(captionWanted); }, [captionWanted]);
-  const plan = panelPlan({ approvalPending: Boolean(approval), screenStatus: state.screenStatus, captionWanted, speechWanted: Boolean(state.speech) && !isOverlayVoiceActiveForCaption });
+  const plan = panelPlan({ approvalPending: Boolean(approval), awarenessPending: Boolean(state.awarenessPrompt), screenStatus: state.screenStatus, captionWanted, speechWanted: Boolean(state.speech) && !isOverlayVoiceActiveForCaption });
   // Esc only refuses or cancels the visible prompt: deny the approval, decline the consent, cancel a pending capture.
   useEffect(() => {
     const action = escapeAction(plan.active);
@@ -239,6 +244,7 @@ function Overlay({ state }: { state: AppState }) {
       if (action === 'deny-approval' && approval) void api?.respondToolApproval(approval.id, 'deny');
       else if (action === 'decline-consent') void api?.screenConsent(false);
       else if (action === 'cancel-screen') void api?.cancelScreen();
+      else if (action === 'dismiss-awareness') void api?.liveAwarenessConsent(false);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -277,6 +283,8 @@ function Overlay({ state }: { state: AppState }) {
   }, [localWakeMode, state.localWakeRevision]);
   const wakeWindow = useRef(new ConversationWindow());
   const wakeOpened = useRef(false);
+  // Is a cloud reply in flight? (only known while Live Talk is on the desktop bot; used to tell "cut her" from "we are done" on a stop word)
+  const replyBusyRef = useRef(false);
   // One log line per decision class a minute, counts only: `[gate] skipped=N sent=M reason=...`.
   useEffect(() => {
     const timer = setInterval(() => {
@@ -296,10 +304,36 @@ function Overlay({ state }: { state: AppState }) {
   }, [micArmedAt]);
   useEffect(() => setMicArmedAt(null), [wakeEnabled, isOverlayVoiceActive]);
   const micView = micDotView({ wakeEnabled, liveActive: isOverlayVoiceActive, paused: state.paused, armed: micArmedAt !== null });
+  // Click-to-stop is instant: audio first (synchronously), then the pending clip, the mic (unless standby needs it), the reply, then the state.
+  const endOverlayLive = (reason: LiveStopReason) => {
+    runLiveStop({
+      cutSpeech: () => stopSpeaking('stop-button'),
+      forgetInterrupted: clearInterruptedSpeech,
+      discardPendingStt: () => overlaySessionRef.current?.cancelPending(),
+      closeMic: () => { overlaySessionRef.current?.stop(); overlaySessionRef.current = null; },
+      abortReply: () => { void api?.stopReply(); },
+      setLiveOff: r => { void api?.setVoiceActive(false, 'overlay', r); },
+    }, reason, { standbyWanted: stateRef.current.settings.wakeWordEnabled ?? true });
+  };
+  // The bot's main talk button: one click starts Live Talk right now (no name, no dialog), the next click stops it right now.
+  const toggleOverlayLive = () => {
+    if (isOverlayVoiceActiveRef.current) { endOverlayLive('click'); return; }
+    wakeOpened.current = false; // started by hand: the 30 s conversation window does not apply
+    void api?.setVoiceActive(true, 'overlay');
+    void api?.welcome(); // a little wave (visual only: no spoken greeting, no extra voice quota)
+  };
+  // Live Talk ended from outside (the other window took over, quit...): cut whatever this window was saying or hearing, no replay.
+  const wasOverlayLive = useRef(false);
+  useEffect(() => {
+    if (wasOverlayLive.current && !isOverlayVoiceActive) {
+      runLiveTeardown({ cutSpeech: () => stopSpeaking('stop-button'), forgetInterrupted: clearInterruptedSpeech, discardPendingStt: () => overlaySessionRef.current?.cancelPending() });
+    }
+    wasOverlayLive.current = isOverlayVoiceActive;
+  }, [isOverlayVoiceActive]);
   const pressMicDot = () => {
     const result = micDotPress({ wakeEnabled, liveActive: isOverlayVoiceActive, armedAt: micArmedAt, now: Date.now() });
     setMicArmedAt(result.armedAt);
-    if (result.action === 'end-live') void api?.setVoiceActive(false);
+    if (result.action === 'end-live') endOverlayLive('click');
     else if (result.action === 'enable' || result.action === 'disable') void api?.saveSettings({ wakeWordEnabled: result.action === 'enable' }, 'dot');
   };
 
@@ -337,6 +371,10 @@ function Overlay({ state }: { state: AppState }) {
       },
       getBargeInSensitivity: () => stateRef.current.settings.bargeInSensitivity ?? DEFAULT_BARGE_IN_SENSITIVITY,
       onBargeIn: handleBargeIn,
+      onError: message => {
+        console.warn(`[voice] overlay mic error: ${message}`);
+        if (isOverlayVoiceActiveRef.current) endOverlayLive('error');
+      },
       onUnclear: info => {
         if (!isOverlayVoiceActiveRef.current) { clipGate.current.noteResult(false); localWake.current.noteOutcome(false); }
         handleUnclear(info);
@@ -383,7 +421,13 @@ function Overlay({ state }: { state: AppState }) {
         } else {
           // In Live Talk: respond to whatever is spoken, and keep the wake window alive.
           wakeWindow.current.touch(performance.now());
-          if (handleStopCommand(text)) return;
+          // Stop word: busy -> cut her voice and the reply, Live Talk carries on; idle -> "we are done", Live Talk ends.
+          if (isStopCommand(text)) {
+            const busy = isSpeakingNow() || replyBusyRef.current || hasInterruptedSpeech();
+            if (stopWordAction({ mode: 'live-overlay', busy }) === 'end-live') { clearInterruptedSpeech(); console.info(`[barge-in] stop command "${text.trim()}" while idle -> ending Live Talk`); endOverlayLive('stopword'); }
+            else handleStopCommand(text);
+            return;
+          }
           // "meri screen dekho" inside the 30 s window uses the same consent / countdown / guard flow as the wake word; everything else is chat.
           if (routeSpeech(text, { screenAssist: Boolean(currentSettings.screenAssistEnabled), afterWake: false }) === 'screen') {
             void api?.sendScreen({ text: text.trim(), source: 'wake' }).then(result => { if (!result.ok && !result.handled) void api?.sendMessage(text.trim(), true); });
@@ -413,7 +457,7 @@ function Overlay({ state }: { state: AppState }) {
       if (stateRef.current.isSpeaking) wakeWindow.current.touch(now);
       else if (!wakeWindow.current.isOpen(now)) {
         wakeOpened.current = false;
-        void api?.setVoiceActive(false);
+        endOverlayLive('timeout');
       }
     }, 1000);
     return () => clearInterval(timer);
@@ -425,6 +469,7 @@ function Overlay({ state }: { state: AppState }) {
     console.info(`[voice] overlay target=${state.voiceActiveTarget ?? 'none'}`);
     if (!api || state.voiceActiveTarget !== 'overlay') return;
     const unsub = api.onChat(chatState => {
+      replyBusyRef.current = chatState.busy;
       const last = chatState.messages[chatState.messages.length - 1];
       // Show what was said and what she answers right on the desktop bot, so the chat window is never needed.
       const lastUser = [...chatState.messages].reverse().find(m => m.role === 'user');
@@ -438,7 +483,7 @@ function Overlay({ state }: { state: AppState }) {
         }
       }
     });
-    return () => { unsub(); setCaption({ you: '', bot: '' }); };
+    return () => { unsub(); replyBusyRef.current = false; setCaption({ you: '', bot: '' }); };
   }, [state.voiceActiveTarget]);
 
   useEffect(() => {
@@ -461,6 +506,7 @@ function Overlay({ state }: { state: AppState }) {
   return <main className="overlay-room" aria-label="Sudo-chan desktop companion">
     {/* One panel slot: approval > consent > countdown > notice > looking > caption > hint > greeting. See shared/overlay-panels.ts. */}
     {plan.active === 'approval' && approval && <OverlayApproval request={approval} />}
+    {plan.active === 'awareness' && <AwarenessPanel />}
     {(plan.active === 'consent' || plan.active === 'countdown' || plan.active === 'notice' || plan.active === 'capturing' || plan.active === 'hint') && <ScreenPanel state={state} speakAloud={isOverlayVoiceActive} />}
     {plan.active === 'caption' && <div className="overlay-caption" role="status" aria-live="polite" data-interactive>{plan.chip && <span className="caption-chip">{plan.chip === 'cached' ? '📎 Purani screen par based' : '📸 Screen bheji gayi'}</span>}<span className={toolsWorking || caption.bot ? 'caption-bot' : 'caption-you'}>{captionText}</span></div>}
     {plan.active === 'speech' && <div className="overlay-speech" role="status" data-interactive>{state.speech}</div>}
@@ -476,16 +522,16 @@ function Overlay({ state }: { state: AppState }) {
     <div
       className={`overlay-bot ${arriving ? 'bot-arriving' : ''} ${micView.mode === 'off' ? 'is-mic-off' : ''}`}
       data-interactive
-      aria-label="Say hello to Sudo-chan"
-      onClick={() => void api?.welcome()}
-      onDoubleClick={() => void api?.openChat()}
+      role="button"
+      aria-label={isOverlayVoiceActive ? 'Stop Live Talk' : 'Start Live Talk'}
+      title={isOverlayVoiceActive ? 'Live Talk is on. Click me to stop.' : 'Click me to start Live Talk.'}
+      onClick={toggleOverlayLive}
     >
       {(state.settings.voiceVisualizerMode ?? 'bot') === 'orb' ? (
         <SonicOrb
           isSpeaking={lip.speaking}
           audioLevel={lip.speaking ? lip.level : overlayAudioLevel}
           size={140}
-          onClick={() => void api?.setVoiceActive(!isOverlayVoiceActive, 'overlay')}
         />
       ) : (
         <Bot
@@ -496,7 +542,7 @@ function Overlay({ state }: { state: AppState }) {
           isSpeaking={lip.speaking}
           audioLevel={lip.speaking ? lip.level : overlayAudioLevel}
           glasses={state.settings.glassesEnabled ?? true}
-          onToggleVoice={() => void api?.setVoiceActive(!isOverlayVoiceActive, 'overlay')}
+          onToggleVoice={toggleOverlayLive}
           onOpenSettings={() => void api?.openSettings()}
         />
       )}
@@ -574,14 +620,48 @@ function Chat({ state }: { state: AppState }) {
     }
   }, [state.settings.voiceVisualizerMode]);
 
+  const isSpeakingRef = useRef(state.isSpeaking);
+  isSpeakingRef.current = state.isSpeaking;
+  const settingsRef = useRef(state.settings);
+  settingsRef.current = state.settings;
+  const conversationBusyRef = useRef(conversation.busy);
+  conversationBusyRef.current = conversation.busy;
+
+  // Typing is the default: the mic stays closed until the user clicks the Voice button (or Ctrl+M). That click starts Live Talk HERE.
+  const startChatLive = () => {
+    setMicMuted(false);
+    void api?.setVoiceActive(true, 'chat');
+  };
+  // Same instant stop as the desktop bot: audio cut now, pending clip dropped, mic closed, reply aborted, then the state.
+  const endChatLive = (reason: LiveStopReason) => {
+    runLiveStop({
+      cutSpeech: () => stopSpeaking('stop-button'),
+      forgetInterrupted: clearInterruptedSpeech,
+      discardPendingStt: () => voiceSessionRef.current?.cancelPending(),
+      closeMic: () => { voiceSessionRef.current?.stop(); voiceSessionRef.current = null; },
+      abortReply: () => { void api?.stopReply(); },
+      setLiveOff: r => { void api?.setVoiceActive(false, 'chat', r); },
+    }, reason, { standbyWanted: false });
+  };
+  // Live Talk here ended from outside (the desktop bot took over, the window was closed, quit): cut what this window was saying or hearing.
+  const wasVoiceMode = useRef(false);
+  useEffect(() => {
+    if (wasVoiceMode.current && !isVoiceMode) {
+      runLiveTeardown({ cutSpeech: () => stopSpeaking('stop-button'), forgetInterrupted: clearInterruptedSpeech, discardPendingStt: () => voiceSessionRef.current?.cancelPending() });
+      setMicMuted(false);
+      setUserSubtitle('');
+      setLiveTranscript('');
+    }
+    wasVoiceMode.current = isVoiceMode;
+  }, [isVoiceMode]);
+
   // Global Ctrl+M shortcut to toggle mic / voice talk
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && (e.key === 'm' || e.key === 'M')) {
         e.preventDefault();
         if (!isVoiceMode) {
-          void api?.setVoiceActive(true, 'chat');
-          setMicMuted(false);
+          startChatLive();
         } else {
           setMicMuted(prev => !prev);
         }
@@ -590,13 +670,6 @@ function Chat({ state }: { state: AppState }) {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isVoiceMode]);
-
-  const isSpeakingRef = useRef(state.isSpeaking);
-  isSpeakingRef.current = state.isSpeaking;
-  const settingsRef = useRef(state.settings);
-  settingsRef.current = state.settings;
-  const conversationBusyRef = useRef(conversation.busy);
-  conversationBusyRef.current = conversation.busy;
 
   useEffect(() => {
     if (!isVoiceMode) {
@@ -625,7 +698,12 @@ function Chat({ state }: { state: AppState }) {
           if (text.trim() && isPhantomOrSelfEcho(text, settingsRef.current)) { setLiveTranscript(''); return; }
           setUserSubtitle(text);
           setLiveTranscript('');
-          if (text.trim() && handleStopCommand(text)) return;
+          if (text.trim() && isStopCommand(text)) {
+            const busy = isSpeakingNow() || conversationBusyRef.current || hasInterruptedSpeech();
+            if (stopWordAction({ mode: 'live-chat', busy }) === 'end-live') { clearInterruptedSpeech(); console.info(`[barge-in] stop command "${text.trim()}" while idle -> ending Live Talk`); endChatLive('stopword'); }
+            else handleStopCommand(text);
+            return;
+          }
           if (text.trim() && !conversationBusyRef.current) {
             setBotSubtitle('');
             // Same routing as the overlay: only a clear screen request (and only with screen assist ON) starts the screenshot flow.
@@ -638,6 +716,11 @@ function Chat({ state }: { state: AppState }) {
         getBargeInSensitivity: () => settingsRef.current.bargeInSensitivity ?? DEFAULT_BARGE_IN_SENSITIVITY,
         onBargeIn: handleBargeIn,
         onUnclear: handleUnclear,
+        onError: message => {
+          console.warn(`[voice] chat mic error: ${message}`);
+          setError('The microphone could not start. Check the microphone permission and try again.');
+          endChatLive('error');
+        },
       });
     } else {
       session.stop();
@@ -819,16 +902,6 @@ function Chat({ state }: { state: AppState }) {
         </span>
       )}
 
-      <button
-        type="button"
-        className={`icon-button chat-voice-btn ${isVoiceMode ? 'active' : ''}`}
-        aria-label={isVoiceMode ? 'Close Live Talk' : 'Start Sudo Live Talk'}
-        onClick={() => void api?.setVoiceActive(!isVoiceMode, 'chat')}
-        title={isVoiceMode ? 'Switch to text chat' : '✨ Start Sudo Live Talk'}
-      >
-        <Icon name="spark" size={15} />
-      </button>
-
       {state.settings.screenAssistEnabled && (
         <button
           type="button"
@@ -985,12 +1058,11 @@ function Chat({ state }: { state: AppState }) {
           <button
             type="button"
             className="voice-ctrl-btn end-call"
-            onClick={() => {
-              void api?.setVoiceActive(false, 'chat');
-            }}
+            onClick={() => endChatLive('click')}
+            title="End Live Talk now and go back to typing"
           >
             <Icon name="phone-off" size={15} />
-            Text Chat Pe Wapis
+            End Live Talk
           </button>
         </div>
       </div>
@@ -1082,12 +1154,13 @@ function Chat({ state }: { state: AppState }) {
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <button
                   type="button"
-                  className="composer-call-btn"
-                  onClick={() => void api?.setVoiceActive(true, 'chat')}
-                  title="Direct Live Talk with Sudo-chan"
+                  className="composer-call-btn composer-voice-btn"
+                  onClick={startChatLive}
+                  aria-label="Live Talk here"
+                  title="Live Talk here: talk to her by voice in this window. Typing stays the default; the mic opens only when you click this."
                 >
-                  <Icon name="spark" size={14} />
-                  Live Talk
+                  <Icon name="mic" size={14} />
+                  Voice
                 </button>
                 {conversation.busy ? (
                   <button className="stop-button" type="button" onClick={() => void api?.stopReply().catch(() => setError('Could not stop the reply. Try again.'))}>
@@ -1159,29 +1232,10 @@ function Chat({ state }: { state: AppState }) {
                   </button>
                 </div>
               </>
-            ) : (
-              <>
-                <span className="voice-state-badge">
-                  <span style={{ opacity: 0.6 }}>🎙️</span>
-                  {micMuted ? 'Mic muted' : 'Mic idle'}
-                </span>
-                <div className="voice-state-actions">
-                  <button
-                    type="button"
-                    className="voice-pill-btn"
-                    onClick={() => {
-                      if (!isVoiceMode) void api?.setVoiceActive(true, 'chat');
-                      setMicMuted(false);
-                    }}
-                  >
-                    {isVoiceMode ? 'Unmute (Ctrl+M)' : 'Start Voice (Ctrl+M)'}
-                  </button>
-                </div>
-              </>
-            )}
+            ) : null}
           </div>
 
-          <p className="composer-note">AI can make mistakes. Microphone is used for voice calls on this device.</p>
+          <p className="composer-note">AI can make mistakes. The microphone stays closed while you type; it opens only when you click Voice.</p>
         </div>
       </>
     )}
@@ -1254,6 +1308,8 @@ function SettingsView({ state }: { state: AppState }) {
     settings.voiceLanguage !== state.settings.voiceLanguage ||
     settings.screenAssistEnabled !== state.settings.screenAssistEnabled ||
     settings.screenAssistCountdown !== state.settings.screenAssistCountdown ||
+    settings.liveAwareness !== state.settings.liveAwareness ||
+    settings.liveKeepAnEye !== state.settings.liveKeepAnEye ||
     settings.sttSpeed !== state.settings.sttSpeed ||
     JSON.stringify(settings.wakeAliases) !== JSON.stringify(state.settings.wakeAliases) ||
     settings.voiceVisualizerMode !== state.settings.voiceVisualizerMode ||
@@ -1263,6 +1319,9 @@ function SettingsView({ state }: { state: AppState }) {
     settings.localWake !== state.settings.localWake ||
     settings.localWakeSensitivity !== state.settings.localWakeSensitivity ||
     settings.updateCheckEnabled !== state.settings.updateCheckEnabled ||
+    settings.onboardingDone !== state.settings.onboardingDone ||
+    settings.onboardingLanguage !== state.settings.onboardingLanguage ||
+    settings.onboardingStep !== state.settings.onboardingStep ||
     settings.ttsProvider !== state.settings.ttsProvider ||
     settings.ttsQuality !== state.settings.ttsQuality ||
     settings.ttsGeminiVoice !== state.settings.ttsGeminiVoice ||
@@ -1282,6 +1341,8 @@ function SettingsView({ state }: { state: AppState }) {
     state.settings.voiceLanguage,
     state.settings.screenAssistEnabled,
     state.settings.screenAssistCountdown,
+    state.settings.liveAwareness,
+    state.settings.liveKeepAnEye,
     state.settings.sttSpeed,
     JSON.stringify(state.settings.wakeAliases),
     state.settings.voiceVisualizerMode,
@@ -1291,6 +1352,9 @@ function SettingsView({ state }: { state: AppState }) {
     state.settings.localWake,
     state.settings.localWakeSensitivity,
     state.settings.updateCheckEnabled,
+    state.settings.onboardingDone,
+    state.settings.onboardingLanguage,
+    state.settings.onboardingStep,
     state.settings.ttsProvider,
     state.settings.ttsQuality,
     state.settings.ttsGeminiVoice,
@@ -1316,6 +1380,13 @@ function SettingsView({ state }: { state: AppState }) {
     try { const result = await api.saveSettings(changedSettings(state.settings, settings), 'settings'); setIsError(!result.ok); setNotice(result.ok ? 'All settled. Your space, your way.' : result.error ?? 'Could not save settings.'); }
     catch { setIsError(true); setNotice('Could not save. Please try again.'); }
     finally { setSaving(false); }
+  };
+  const runSetupAgain = async () => {
+    if (!api) return;
+    try {
+      await api.saveSettings(restartPatch(state.settings.onboardingLanguage), 'settings');
+      await api.setSetupMode(true);
+    } catch { setIsError(true); setNotice('Could not open the setup. Please try again.'); }
   };
   const clear = async () => {
     if (!confirmClear) { setConfirmClear(true); return; }
@@ -1345,6 +1416,7 @@ function SettingsView({ state }: { state: AppState }) {
             </div>
           </SettingRow>
           <SettingRow title="Back to a familiar place" description="Move her to the bottom-right of your main screen."><button className="soft-button" type="button" onClick={() => void api?.resetPosition()}><Icon name="reset" size={15}/>Reset position</button></SettingRow>
+          <SettingRow title="Run setup again" description="Walk through the welcome steps once more: microphone, her name, her brain and your privacy choices. Nothing changes until you press Next on a step."><button className="soft-button" type="button" onClick={() => void runSetupAgain()}>Run setup again</button></SettingRow>
           <div className="gentle-note"><Icon name="chat" size={16}/><p>Drag the three little dots above her head. Click her to say hello; double-click to chat.</p></div>
         </section>
         <section id="rhythm" className="settings-card scroll-reveal"><div className="card-heading"><span className="section-icon lilac"><Icon name="pause"/></span><div><span className="eyebrow">02 / AT YOUR OWN PACE</span><h2>Your rhythm</h2></div></div>
@@ -1469,6 +1541,9 @@ function SettingsView({ state }: { state: AppState }) {
           <SettingRow title="Countdown before the first screenshot" description="Shows 'Screenshot in 3...' with a cancel button before the first capture of a session, so you can close a sensitive window. She also refuses to capture when a password manager, bank, login or private window is visible (only windows that expose accessibility information can be seen).">
             <div className="switch-control"><span>{(settings.screenAssistCountdown ?? true) ? 'On' : 'Off'}</span><button className="switch" type="button" role="switch" aria-label="Countdown before the first screenshot" aria-checked={settings.screenAssistCountdown ?? true} onClick={() => setSettings({ ...settings, screenAssistCountdown: !(settings.screenAssistCountdown ?? true) })}><span/></button></div>
           </SettingRow>
+          <SettingRow title="Let her know which window I am using (Live Talk)" description="Off by default. When on, during Live Talk she is told only the app name and window title in front of you (no screenshot, no screen contents), so she can help like someone sitting next to you. Windows that look like a password manager, bank or login are skipped. Never saved, never on a timer outside Live Talk.">
+            <div className="switch-control"><span>{settings.liveAwareness === 'window' ? 'On' : 'Off'}</span><button className="switch" type="button" role="switch" aria-label="Let her know which window I am using during Live Talk" aria-checked={settings.liveAwareness === 'window'} onClick={() => setSettings({ ...settings, liveAwareness: settings.liveAwareness === 'window' ? 'off' : 'window' })}><span/></button></div>
+          </SettingRow>
           <SettingRow
             title="Assistant name"
             description="The name you call her by. Spoken names are matched loosely (small mishearings are fine)."
@@ -1582,7 +1657,7 @@ function SettingsView({ state }: { state: AppState }) {
   </main>;
 }
 export default function App() {
-  const { state, error } = useCompanion();
+  const { state, error, ready } = useCompanion();
   const [kind] = useState(() => location.hash.slice(1));
   useEffect(() => {
     document.body.dataset.window = kind;
@@ -1599,5 +1674,8 @@ export default function App() {
   if (error) return <main className="bridge-error"><Bot/><h1>A little connection trouble.</h1><p role="alert">{error}</p></main>;
   if (kind === 'overlay') return <Overlay state={state}/>;
   if (kind === 'chat') return <Chat state={state}/>;
+  // Wait for the first real state, so a fresh install never flashes the Settings page before the setup wizard.
+  if (!ready) return <main className="app-window settings-window" aria-busy="true"/>;
+  if (state.setupActive) return <SetupWizard state={state}/>;
   return <SettingsView state={state}/>;
 }
