@@ -5,7 +5,7 @@ export const SUDO_CHAN = 'Sudo-chan';
  * false: the site says "Coming soon", shows the waitlist, the /download page returns 404 and no Download link is shown.
  * true:  the final section becomes an honest Download section and /download is live.
  */
-export const RELEASE_PUBLISHED: boolean = false;
+export const RELEASE_PUBLISHED: boolean = true;
 export const RELEASES_LATEST_URL = 'https://github.com/salahudingsalahudin-ai/sudo-chan/releases/latest';
 const live = RELEASE_PUBLISHED;
 

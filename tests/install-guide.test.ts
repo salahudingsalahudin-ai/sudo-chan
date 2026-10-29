@@ -145,27 +145,28 @@ describe('install guide page (rendered with the switch on, independent of the co
   });
 });
 
-describe('with the switch off (the committed state)', () => {
-  it('ships RELEASE_PUBLISHED = false', () => {
-    expect(RELEASE_PUBLISHED).toBe(false);
-    expect(readFileSync(join(__dirname, '..', 'content.ts'), 'utf8')).toMatch(/RELEASE_PUBLISHED: boolean = false;/);
+describe('with the switch on (the published state)', () => {
+  it('ships RELEASE_PUBLISHED = true', () => {
+    expect(RELEASE_PUBLISHED).toBe(true);
+    expect(readFileSync(join(__dirname, '..', 'content.ts'), 'utf8')).toMatch(/RELEASE_PUBLISHED: boolean = true;/);
   });
 
-  it('/download calls notFound() and never fetches GitHub', async () => {
+  it('/download renders the page and fetches GitHub', async () => {
     const { default: DownloadPage } = await import('../app/download/page');
     const realFetch = globalThis.fetch;
     let fetched = false;
     globalThis.fetch = (async () => { fetched = true; return new Response('[]'); }) as typeof fetch;
     try {
-      await expect(DownloadPage()).rejects.toMatchObject({ digest: expect.stringContaining('NEXT_NOT_FOUND') });
-      expect(fetched).toBe(false);
+      const page = await DownloadPage();
+      expect(page).toBeDefined();
+      expect(fetched).toBe(true);
     } finally {
       globalThis.fetch = realFetch;
     }
   });
 
-  it('the sitemap does not list /download', async () => {
+  it('the sitemap lists /download', async () => {
     const { default: sitemap } = await import('../app/sitemap');
-    expect(sitemap().map(e => e.url).some(u => u.endsWith('/download'))).toBe(false);
+    expect(sitemap().map(e => e.url).some(u => u.endsWith('/download'))).toBe(true);
   });
 });
